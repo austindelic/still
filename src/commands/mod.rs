@@ -1,8 +1,21 @@
 mod add;
+mod convert;
+mod doctor;
 mod install;
+mod init;
 mod remove;
+mod run;
 mod translate;
-pub use add::*;
-pub use install::install;
-pub use remove::remove;
-pub use translate::translslte;
+mod uninstall;
+mod use_cmd;
+
+pub use add::{AddArgs, AddCommand};
+pub use convert::{ConvertArgs, ConvertCommand};
+pub use doctor::{DoctorArgs, DoctorCommand};
+pub use install::{InstallArgs, InstallCommand};
+pub use init::{InitArgs, InitCommand};
+pub use remove::{RemoveArgs, RemoveCommand};
+pub use run::{RunArgs, RunCommand};
+pub use translate::{TranslateArgs, TranslateCommand};
+pub use uninstall::{UninstallArgs, UninstallCommand};
+pub use use_cmd::{UseArgs, UseCommand};

@@ -1,4 +1,8 @@
-use crate::commands::{self, AddArgs, AddCommand};
+use crate::commands::{
+    AddArgs, AddCommand, ConvertArgs, ConvertCommand, DoctorArgs, DoctorCommand, InitArgs,
+    InitCommand, InstallArgs, InstallCommand, RemoveArgs, RemoveCommand, RunArgs, RunCommand,
+    TranslateArgs, TranslateCommand, UninstallArgs, UninstallCommand, UseArgs, UseCommand,
+};
 use crate::tui;
 use clap::{Parser, Subcommand};
 
@@ -11,53 +15,30 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Install {
-        tool_name: String,
-    },
-    Uninstall {
-        tool_name: String,
-    },
-    Use {
-        #[arg(short, long)]
-        tool_name: String,
-    },
+    Install(InstallArgs),
+    Uninstall(UninstallArgs),
+    Use(UseArgs),
     Add(AddArgs),
-    Remove {
-        tool_name_with_version_number: String,
-    },
-    Doctor,
-    Run {
-        task_name: String,
-    },
-    Translate,
-    Init,
-    Convert,
+    Remove(RemoveArgs),
+    Doctor(DoctorArgs),
+    Run(RunArgs),
+    Translate(TranslateArgs),
+    Init(InitArgs),
+    Convert(ConvertArgs),
 }
 
 fn run_cli(cmd: &Commands) {
     match cmd {
-        Commands::Install { tool_name } => {
-            commands::install(tool_name);
-        }
-        Commands::Uninstall { tool_name: _ } => {}
-        Commands::Use { tool_name: _ } => {}
+        Commands::Install(args) => InstallCommand::from(args.clone()).run(),
+        Commands::Uninstall(args) => UninstallCommand::from(args.clone()).run(),
+        Commands::Use(args) => UseCommand::from(args.clone()).run(),
         Commands::Add(args) => AddCommand::from(args.clone()).run(),
-        Commands::Remove {
-            tool_name_with_version_number,
-        } => commands::remove(tool_name_with_version_number),
-        Commands::Run { task_name: _ } => {}
-        Commands::Translate => {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime should build");
-            if let Err(err) = runtime.block_on(commands::translslte()) {
-                eprintln!("translate failed: {err}");
-            }
-        }
-        Commands::Doctor => {}
-        Commands::Init => {}
-        Commands::Convert => {}
+        Commands::Remove(args) => RemoveCommand::from(args.clone()).run(),
+        Commands::Run(args) => RunCommand::from(args.clone()).run(),
+        Commands::Translate(args) => TranslateCommand::from(args.clone()).run(),
+        Commands::Doctor(args) => DoctorCommand::from(args.clone()).run(),
+        Commands::Init(args) => InitCommand::from(args.clone()).run(),
+        Commands::Convert(args) => ConvertCommand::from(args.clone()).run(),
     }
 }
 
