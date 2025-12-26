@@ -1,0 +1,23 @@
+[package]
+name = "bun"
+version = "1.3.5"
+description = "Fast all-in-one JavaScript runtime"
+homepage = "https://bun.sh"
+license = "MIT"
+
+[dependencies]
+runtime = ["llvm"]
+
+[sources.macos.aarch64]
+url = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.5/bun-darwin-aarch64.zip"
+sha256 = "abc123..."
+
+[sources.macos.x86_64]
+url = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.5/bun-darwin-x64.zip"
+sha256 = "def456..."
+
+[install]
+bin = ["bun"]
+
+[test]
+command = ["bun", "--version"]
