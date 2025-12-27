@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use clap::Args;
+use std::collections::HashMap;
 
 #[derive(Args, Debug, Clone)]
 pub struct TranslateArgs {}
@@ -18,13 +18,13 @@ impl TranslateCommand {
             .enable_all()
             .build()
             .expect("tokio runtime should build");
-        if let Err(err) = runtime.block_on(translslte()) {
+        if let Err(err) = runtime.block_on(translate()) {
             eprintln!("translate failed: {err}");
         }
     }
 }
 
-pub async fn translslte() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn translate() -> Result<(), Box<dyn std::error::Error>> {
     let resp = reqwest::get("https://httpbin.org/ip")
         .await?
         .json::<HashMap<String, String>>()

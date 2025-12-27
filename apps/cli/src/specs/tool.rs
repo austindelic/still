@@ -1,13 +1,13 @@
 use std::{fmt, str::FromStr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolWithVersionSpec {
-    pub tool: String,
+pub struct ToolSpec {
+    pub name: String,
     pub version: String,
 }
 
 #[derive(Debug, Clone)]
-enum ParseToolWithVersionSpecError {
+enum ParseToolSpecError {
     EmptyInput,
     TooManyAts {
         input: String,
@@ -16,17 +16,17 @@ enum ParseToolWithVersionSpecError {
         input: String,
     },
     InvalidToolFormat {
-        tool: String,
+        name: String,
         reason: String,
     },
     InvalidVersion {
-        tool: String,
+        name: String,
         version: String,
         reason: String,
     },
 }
 
-impl fmt::Display for ParseToolWithVersionSpecError {
+impl fmt::Display for ParseToolSpecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let examples =
             "Examples: bun@1.3.5, bun@latest, bun (defaults to latest), bun@ (defaults to latest)";
@@ -42,26 +42,26 @@ impl fmt::Display for ParseToolWithVersionSpecError {
                 "Invalid tool spec \"{}\": tool name cannot be empty (before '@'). {}",
                 input, examples
             ),
-            Self::InvalidToolFormat { tool, reason } => write!(
+            Self::InvalidToolFormat { name, reason } => write!(
                 f,
                 "Invalid tool name \"{}\": {}. Tool names must match: [a-zA-Z][a-zA-Z0-9_-]*",
-                tool, reason
+                name, reason
             ),
             Self::InvalidVersion {
-                tool,
+                name,
                 version,
                 reason,
             } => write!(
                 f,
                 "Invalid version \"{}\" for tool \"{}\": {}. Version must be SemVer (e.g. 1.2.3) or \"latest\". {}",
-                version, tool, reason, examples
+                version, name, reason, examples
             ),
         }
     }
 }
 
-impl From<ParseToolWithVersionSpecError> for String {
-    fn from(e: ParseToolWithVersionSpecError) -> Self {
+impl From<ParseToolSpecError> for String {
+    fn from(e: ParseToolSpecError) -> Self {
         e.to_string()
     }
 }
@@ -86,33 +86,33 @@ fn is_valid_tool_format(tool: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_version(tool: &str, version: &str) -> Result<(), ParseToolWithVersionSpecError> {
+fn validate_version(tool: &str, version: &str) -> Result<(), ParseToolSpecError> {
     if version.eq_ignore_ascii_case("latest") {
         return Ok(());
     }
 
     match semver::Version::parse(version) {
         Ok(_) => Ok(()),
-        Err(e) => Err(ParseToolWithVersionSpecError::InvalidVersion {
-            tool: tool.to_string(),
+        Err(e) => Err(ParseToolSpecError::InvalidVersion {
+            name: tool.to_string(),
             version: version.to_string(),
             reason: e.to_string(),
         }),
     }
 }
 
-impl FromStr for ToolWithVersionSpec {
+impl FromStr for ToolSpec {
     type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let s = input.trim();
         if s.is_empty() {
-            return Err(ParseToolWithVersionSpecError::EmptyInput.into());
+            return Err(ParseToolSpecError::EmptyInput.into());
         }
 
         // At most one '@'
         if s.matches('@').count() > 1 {
-            return Err(ParseToolWithVersionSpecError::TooManyAts {
+            return Err(ParseToolSpecError::TooManyAts {
                 input: s.to_string(),
             }
             .into());
@@ -128,7 +128,7 @@ impl FromStr for ToolWithVersionSpec {
         };
 
         if tool.is_empty() {
-            return Err(ParseToolWithVersionSpecError::EmptyTool {
+            return Err(ParseToolSpecError::EmptyTool {
                 input: s.to_string(),
             }
             .into());
@@ -136,8 +136,8 @@ impl FromStr for ToolWithVersionSpec {
 
         // Tool format validation
         if let Err(reason) = is_valid_tool_format(tool) {
-            return Err(ParseToolWithVersionSpecError::InvalidToolFormat {
-                tool: tool.to_string(),
+            return Err(ParseToolSpecError::InvalidToolFormat {
+                name: tool.to_string(),
                 reason,
             }
             .into());
@@ -147,7 +147,7 @@ impl FromStr for ToolWithVersionSpec {
         validate_version(tool, version).map_err(String::from)?;
 
         Ok(Self {
-            tool: tool.to_string(),
+            name: tool.to_string(),
             version: version.to_string(), // keep original (or normalise if you want)
         })
     }
