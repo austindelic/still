@@ -25,8 +25,10 @@ pub enum Commands {
     Translate(TranslateArgs),
     Init(InitArgs),
     Convert(ConvertArgs),
+    Env,
+    Tui,
+    Web,
 }
-
 fn run_cli(cmd: &Commands) {
     match cmd {
         Commands::Install(args) => InstallCommand::from(args.clone()).run(),
@@ -39,6 +41,7 @@ fn run_cli(cmd: &Commands) {
         Commands::Doctor(args) => DoctorCommand::from(args.clone()).run(),
         Commands::Init(args) => InitCommand::from(args.clone()).run(),
         Commands::Convert(args) => ConvertCommand::from(args.clone()).run(),
+        _ => {}
     }
 }
 
