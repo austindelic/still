@@ -1,0 +1,77 @@
+
+# still.toml (manifest)
+
+[package]
+name = "bun"
+version = "1.3.5"
+description = "Fast all-in-one JavaScript runtime"
+homepage = "https://bun.sh"
+license = "MIT"
+
+# Optional but useful: where this tool ends up + what to expose on PATH
+[install]
+bin = [
+  "bun",
+] # binaries to expose (e.g., symlink into ~/.local/bin or Still's bin dir)
+
+# Dependencies are intentionally minimal and split by phase
+[dependencies]
+build = []
+runtime = []
+
+# --- macOS ---
+[install.macos.aarch64]
+url = "https://example.com/bun-v1.3.5-darwin-aarch64.zip"
+sha256 = "abc123..."
+extract = "zip"                                           # zip | tar.gz | tar.xz | none
+strip_components = 0                                      # for tarballs; safe default
+# What to copy out of the extracted archive into the install prefix
+copy = [{ from = "bun", to = "bin/bun" }]
+
+[uninstall.macos.aarch64]
+remove = ["bin/bun", "share/man/man1/bun.1"]
+
+[install.macos.x86_64]
+url = "https://example.com/bun-v1.3.5-darwin-x86_64.zip"
+sha256 = "def456..."
+extract = "zip"
+copy = [{ from = "bun", to = "bin/bun" }]
+
+[uninstall.macos.x86_64]
+remove = ["bin/bun", "share/man/man1/bun.1"]
+
+# --- Linux ---
+[install.linux.aarch64]
+url = "https://example.com/bun-v1.3.5-linux-aarch64.tar.gz"
+sha256 = "aaa111..."
+extract = "tar.gz"
+strip_components = 1
+copy = [{ from = "bun", to = "bin/bun" }]
+
+[uninstall.linux.aarch64]
+remove = ["bin/bun"]
+
+[install.linux.x86_64]
+url = "https://example.com/bun-v1.3.5-linux-x86_64.tar.gz"
+sha256 = "bbb222..."
+extract = "tar.gz"
+strip_components = 1
+copy = [{ from = "bun", to = "bin/bun" }]
+
+[uninstall.linux.x86_64]
+remove = ["bin/bun"]
+
+# --- Windows ---
+[install.windows.x86_64]
+url = "https://example.com/bun-v1.3.5-windows-x86_64.zip"
+sha256 = "ccc333..."
+extract = "zip"
+copy = [{ from = "bun.exe", to = "bin/bun.exe" }]
+
+[uninstall.windows.x86_64]
+remove = ["bin/bun.exe"]
+
+# Minimal test: should run and contain version
+[test]
+command = ["bun", "--version"]
+expects_contains = "1.3.5"
