@@ -15,19 +15,21 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Install(InstallArgs),
-    Uninstall(UninstallArgs),
-    Use(UseArgs),
-    Add(AddArgs),
-    Remove(RemoveArgs),
-    Doctor(DoctorArgs),
-    Run(RunArgs),
-    Translate(TranslateArgs),
-    Init(InitArgs),
-    Convert(ConvertArgs),
-    Env,
-    Tui,
-    Web,
+    Install(InstallArgs),     // Install a package/app into the current environment.
+    Uninstall(UninstallArgs), // Remove a package/app from the current environment.
+    Use(UseArgs),             // Switch to a specific runtime or toolchain version.
+    Add(AddArgs),             // Add a dependency or entry to the project manifest.
+    Remove(RemoveArgs),       // Remove a dependency or entry from the project manifest.
+    Doctor(DoctorArgs),       // Diagnose the environment and suggest fixes or updates.
+    Run(RunArgs),             // Run a command within the managed environment.
+    Translate(TranslateArgs), // Translate project definitions between supported formats.
+    Init(InitArgs),           // Initialize configuration for a new project.
+    Convert(ConvertArgs),     // Convert configuration or lockfiles to another supported format.
+    Env,                      // Display environment information required for debugging.
+    Tui,                      // Launch the text-based user interface.
+    Web,                      // Open or run the web-based management dashboard.
+    Activate,                 // Activate a workspace or profile for the current shell session.
+    Sync,                     // Synchronize the workspace state with configured sources.
 }
 fn run_cli(cmd: &Commands) {
     match cmd {
@@ -41,6 +43,7 @@ fn run_cli(cmd: &Commands) {
         Commands::Doctor(args) => DoctorCommand::from(args.clone()).run(),
         Commands::Init(args) => InitCommand::from(args.clone()).run(),
         Commands::Convert(args) => ConvertCommand::from(args.clone()).run(),
+
         _ => {}
     }
 }
