@@ -1,4 +1,4 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -8,7 +8,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use std::io;
+use crate::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
 use crate::tui::tabs::formula::{FormulaTab, NavigationDirection};
+use crate::tui::tabs::resources::ResourcesTab;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -16,6 +18,7 @@ pub enum Tab {
     Tasks,
     Config,
     Logs,
+    Resources,
 }
 
 impl Tab {
@@ -25,11 +28,12 @@ impl Tab {
             Tab::Tasks => "Tasks",
             Tab::Config => "Config",
             Tab::Logs => "Logs",
+            Tab::Resources => "Resources",
         }
     }
 
     pub fn all() -> &'static [Tab] {
-        &[Tab::Packages, Tab::Tasks, Tab::Config, Tab::Logs]
+        &[Tab::Packages, Tab::Tasks, Tab::Config, Tab::Logs, Tab::Resources]
     }
 
     pub fn next(&self) -> Tab {
@@ -57,35 +61,6 @@ impl Default for Tab {
     }
 }
 
-/// Action menu modal state
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActionMenuState {
-    Closed,
-    Open { selected_action: usize },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
-    Install,
-    Uninstall,
-    Info,
-    Cancel,
-}
-
-impl Action {
-    fn all() -> &'static [Action] {
-        &[Action::Install, Action::Uninstall, Action::Info, Action::Cancel]
-    }
-
-    fn as_str(&self) -> &'static str {
-        match self {
-            Action::Install => "Install",
-            Action::Uninstall => "Uninstall",
-            Action::Info => "Info",
-            Action::Cancel => "Cancel",
-        }
-    }
-}
 
 /// Main application state machine
 /// Delegates rendering and event handling to the current tab mode
@@ -98,6 +73,7 @@ pub struct App {
     action_menu: ActionMenuState,
     // Tab-specific state
     formula_tab: FormulaTab,
+    resources_tab: ResourcesTab,
 }
 
 impl Default for App {
@@ -114,6 +90,7 @@ impl Default for App {
             search_focused: false,
             action_menu: ActionMenuState::Closed,
             formula_tab,
+            resources_tab: ResourcesTab::new(),
         }
     }
 }
@@ -235,6 +212,10 @@ impl App {
                 self.formula_tab.render_table(horizontal[0], buf, &self.search_query);
                 self.formula_tab.render_preview(horizontal[1], buf, &self.search_query);
             }
+            Tab::Resources => {
+                // Resources tab uses full area for btop
+                self.render_resources(area, buf);
+            }
             Tab::Tasks | Tab::Config | Tab::Logs => {
                 // Placeholder for other tabs - render empty state
                 self.render_empty_state(horizontal[0], buf);
@@ -256,6 +237,10 @@ impl App {
         Paragraph::new(text)
             .block(block)
             .render(area, buf);
+    }
+
+    fn render_resources(&mut self, area: Rect, buf: &mut Buffer) {
+        self.resources_tab.render(area, buf);
     }
 
     /// Runs the application's main loop until the user quits
@@ -282,8 +267,62 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        // Check if we're in interactive CLI mode (Resources tab)
+        let resources_interactive = self.current_tab == Tab::Resources && self.resources_tab.is_interactive();
+        
+        // If in interactive mode, forward keys to the CLI tool
+        if resources_interactive {
+            // Esc exits interactive mode
+            if key_event.code == KeyCode::Esc {
+                self.resources_tab.toggle_interactive();
+                return;
+            }
+            
+            // Forward all keys to the interactive CLI
+            // Convert key code to bytes that can be sent to the process
+            match key_event.code {
+                KeyCode::Char(c) => {
+                    self.resources_tab.send_key(c as u8);
+                }
+                KeyCode::Enter => {
+                    self.resources_tab.send_key(b'\n');
+                }
+                KeyCode::Backspace => {
+                    self.resources_tab.send_key(0x7f); // DEL character
+                }
+                KeyCode::Tab => {
+                    self.resources_tab.send_key(b'\t');
+                }
+                KeyCode::Up => {
+                    // Send ANSI escape sequence for up arrow
+                    self.resources_tab.send_input("\x1b[A");
+                }
+                KeyCode::Down => {
+                    self.resources_tab.send_input("\x1b[B");
+                }
+                KeyCode::Left => {
+                    self.resources_tab.send_input("\x1b[D");
+                }
+                KeyCode::Right => {
+                    self.resources_tab.send_input("\x1b[C");
+                }
+                _ => {
+                    // For other keys, try to send as-is if possible
+                    // Most special keys won't work without proper terminal emulation
+                }
+            }
+            // Don't process other keys when in interactive mode
+            return;
+        }
+        
         // Check if action menu is open - if so, only handle menu-specific keys
         let menu_open = matches!(self.action_menu, ActionMenuState::Open { .. });
+        
+        // Handle Ctrl+C to exit
+        if key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c') {
+            self.exit();
+            return;
+        }
         
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
@@ -360,6 +399,9 @@ impl App {
             KeyCode::Char('4') if !self.search_focused => {
                 self.switch_tab(Tab::Logs);
             }
+            KeyCode::Char('5') if !self.search_focused => {
+                self.switch_tab(Tab::Resources);
+            }
 
             // Package filters (only when search is not focused and menu is closed)
             KeyCode::Char('t') if !self.search_focused => {
@@ -370,6 +412,9 @@ impl App {
             KeyCode::Char('i') if !self.search_focused => {
                 if self.current_tab == Tab::Packages {
                     self.formula_tab.cycle_install_filter();
+                } else if self.current_tab == Tab::Resources {
+                    // Toggle interactive mode for Resources tab
+                    self.resources_tab.toggle_interactive();
                 }
             }
             KeyCode::Char('r') if !self.search_focused => {
@@ -439,28 +484,6 @@ impl App {
     }
 
     fn render_action_menu(&mut self, area: Rect, buf: &mut Buffer) {
-        // First, render a semi-transparent overlay background covering the entire area
-        // Fill the entire area with a darker overlay to dim the background
-        // Create lines to fill the height
-        let mut overlay_lines = Vec::new();
-        for _ in 0..area.height {
-            overlay_lines.push(Line::from(" ".repeat(area.width as usize)));
-        }
-        let overlay_text = Text::from(overlay_lines);
-        let overlay_block = Block::default()
-            .style(Style::default().bg(Color::DarkGray));
-        Paragraph::new(overlay_text)
-            .block(overlay_block)
-            .render(area, buf);
-        
-        // Calculate modal size and position (centered)
-        let modal_width = 40;
-        let modal_height = Action::all().len() as u16 + 4; // +4 for borders and title
-        let modal_x = (area.width.saturating_sub(modal_width)) / 2;
-        let modal_y = (area.height.saturating_sub(modal_height)) / 2;
-        
-        let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
-        
         // Get selected formula name for display
         let selected_formula = match self.current_tab {
             Tab::Packages => {
@@ -480,45 +503,8 @@ impl App {
             " Actions ".to_string()
         };
 
-        // Create action list
-        let actions = Action::all();
-        let selected_idx = if let ActionMenuState::Open { selected_action } = self.action_menu {
-            selected_action
-        } else {
-            0
-        };
-
-        let mut lines = vec![
-            Line::from(""),
-        ];
-
-        for (idx, action) in actions.iter().enumerate() {
-            let is_selected = idx == selected_idx;
-            let style = if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            let prefix = if is_selected { "▶ " } else { "  " };
-            lines.push(Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(action.as_str(), style),
-            ]));
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .style(Style::default().bg(Color::Black)) // Background for the modal itself
-            .title(title);
-
-        Paragraph::new(Text::from(lines))
-            .block(block)
-            .render(modal_area, buf);
+        let action_menu = ActionMenu::new(self.action_menu, title);
+        action_menu.render(area, buf);
     }
 
     fn handle_action_selection(&mut self, action_idx: usize) {
