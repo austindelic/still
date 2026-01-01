@@ -1,0 +1,41 @@
+[tool]
+name = "bandwhich"
+description = "Terminal bandwidth utilization tool"
+homepage = "https://github.com/imsnif/bandwhich"
+license = "MIT"
+
+[version]
+current = "0.23.1"
+
+[source]
+type = "tarball"
+url = "https://github.com/imsnif/bandwhich/archive/refs/tags/v0.23.1.tar.gz"
+sha256 = "aafb96d059cf9734da915dca4f5940c319d2e6b54e2ffb884332e9f5e820e6d7"
+
+[build]
+system = "cargo"
+args = ["install", "--locked", "--path", "."]
+
+[dependencies]
+build = ["rust"]
+
+[binaries]
+expose = ["bandwhich"]
+
+[completions.bash]
+source = "target/release/build/bandwhich-*/out/bandwhich.bash"
+target = "bandwhich"
+
+[completions.fish]
+source = "target/release/build/bandwhich-*/out/bandwhich.fish"
+
+[completions.zsh]
+source = "target/release/build/bandwhich-*/out/_bandwhich"
+
+[manpages]
+"bandwhich.1" = "target/release/build/bandwhich-*/out/bandwhich.1"
+
+[test]
+command = "bandwhich --interface bandwhich"
+expect_exit = 1
+expect_contains = "Error: Cannot find interface bandwhich"

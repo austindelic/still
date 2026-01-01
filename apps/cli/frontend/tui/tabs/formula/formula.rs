@@ -1,5 +1,5 @@
-use crate::cli::still_cache_dir;
-use crate::specs::brew::{CaskSpec, FormulaSpec};
+use crate::core::specs::brew::{CaskSpec, FormulaSpec};
+use crate::util::fs::FsUtils;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{
@@ -139,7 +139,7 @@ impl FormulaTab {
     }
 
     fn load_formulas_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cache_dir = still_cache_dir()?;
+        let cache_dir = FsUtils::still_cache_dir()?;
         let formula_path = cache_dir.join("formula.json");
         
         if !formula_path.exists() {
@@ -190,7 +190,7 @@ impl FormulaTab {
     }
 
     fn load_casks_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cache_dir = still_cache_dir()?;
+        let cache_dir = FsUtils::still_cache_dir()?;
         let cask_path = cache_dir.join("cask.json");
 
         if !cask_path.exists() {

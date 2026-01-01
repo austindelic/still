@@ -1,11 +1,5 @@
-use crate::commands::{
-    ConvertArgs, ConvertCommand, DoctorArgs, DoctorCommand, InitArgs, InitCommand, InstallArgs,
-    InstallCommand, RunArgs, RunCommand, TranslateArgs, TranslateCommand, UninstallArgs,
-    UninstallCommand, UseArgs, UseCommand,
-};
-use crate::tui;
+use crate::core::specs::tool::ToolSpec;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "Still", about = "Universal Package Manager + Version Manager")]
@@ -33,33 +27,40 @@ pub enum Commands {
     Config,
     PostInstall,
 }
-fn run_cli(cmd: &Commands) {
-    match cmd {
-        Commands::Install(args) => InstallCommand::from(args.clone()).run(),
-        Commands::Uninstall(args) => UninstallCommand::from(args.clone()).run(),
-        Commands::Use(args) => UseCommand::from(args.clone()).run(),
-        Commands::Run(args) => RunCommand::from(args.clone()).run(),
-        Commands::Translate(args) => TranslateCommand::from(args.clone()).run(),
-        Commands::Doctor(args) => DoctorCommand::from(args.clone()).run(),
-        Commands::Init(args) => InitCommand::from(args.clone()).run(),
-        Commands::Convert(args) => ConvertCommand::from(args.clone()).run(),
-        _ => {}
-    }
+
+// Command argument structs
+#[derive(clap::Args, Debug, Clone)]
+pub struct InstallArgs {
+    #[arg(value_name = "TOOL@VERSION")]
+    pub tool: ToolSpec,
 }
 
-pub fn entry() {
-    let cli = Cli::parse();
-
-    match &cli.command {
-        None => tui::launch_tui().expect("tui broke :/"),
-        Some(cmd) => run_cli(cmd),
-    }
+#[derive(clap::Args, Debug, Clone)]
+pub struct UninstallArgs {
+    #[arg(value_name = "TOOL@VERSION")]
+    pub tool: ToolSpec,
 }
 
-pub fn still_cache_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .map_err(|_| "HOME env var not set")?;
-
-    Ok(home.join(".cache").join("still"))
+#[derive(clap::Args, Debug, Clone)]
+pub struct UseArgs {
+    #[arg(short, long, value_name = "TOOL")]
+    pub tool_name: String,
 }
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct DoctorArgs {}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct RunArgs {
+    pub command: Vec<String>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct TranslateArgs {}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct InitArgs {}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ConvertArgs {}
+
