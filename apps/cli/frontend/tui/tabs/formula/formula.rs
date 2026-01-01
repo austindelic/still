@@ -1,5 +1,5 @@
-use crate::core::specs::brew::{CaskSpec, FormulaSpec};
-use crate::util::fs::FsUtils;
+use core::specs::brew::{CaskSpec, FormulaSpec};
+use util::fs::FsUtils;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{

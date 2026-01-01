@@ -1,4 +1,4 @@
-use crate::core::specs::tool::ToolSpec;
+use core::specs::tool::ToolSpec;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]

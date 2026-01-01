@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
+use util::hashing::Hashing;
 
 const GHCR_BASE: &str = "https://ghcr.io/v2";
 const GHCR_TOKEN_URL: &str = "https://ghcr.io/token";
@@ -58,18 +58,7 @@ impl GhcrClient {
 
     /// Verify SHA-256 hash of data
     pub fn verify_sha256(data: &[u8], expected_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        let computed_hash = format!("{:x}", hasher.finalize());
-
-        if computed_hash != expected_hash {
-            return Err(format!(
-                "SHA256 verification failed: expected {}, got {}",
-                expected_hash, computed_hash
-            ).into());
-        }
-
-        Ok(())
+        Hashing::verify_sha256(data, expected_hash)
     }
 
     /// Parse blob URL and extract digest

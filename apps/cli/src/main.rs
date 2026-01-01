@@ -1,15 +1,5 @@
-#[path = "../core/mod.rs"]
-mod core;
-
-#[path = "../frontend/mod.rs"]
-mod frontend;
-
-#[path = "../sources/mod.rs"]
-mod sources;
-
-#[path = "../util/mod.rs"]
-mod util;
+use frontend::cli;
 
 fn main() {
-    frontend::cli::entry()
+    cli::entry()
 }

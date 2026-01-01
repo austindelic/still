@@ -8,9 +8,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use std::io;
-use crate::frontend::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
-use crate::frontend::tui::tabs::formula::{FormulaTab, NavigationDirection};
-use crate::frontend::tui::tabs::resources::ResourcesTab;
+use crate::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
+use crate::tui::tabs::formula::{FormulaTab, NavigationDirection};
+use crate::tui::tabs::resources::ResourcesTab;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {

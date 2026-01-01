@@ -1,4 +1,4 @@
-use crate::core::specs::brew::{BottleFileSpec, FormulaSpec};
+use core::specs::brew::{BottleFileSpec, FormulaSpec};
 use reqwest::Client;
 use std::collections::HashMap;
 

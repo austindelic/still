@@ -1,0 +1,20 @@
+[package]
+name = "sources"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+core = { path = "../core" }
+util = { path = "../util" }
+reqwest = { version = "0.12.28", features = [
+  "json",
+  "gzip",
+  "brotli",
+  "deflate",
+  "rustls-tls",
+] }
+serde = { version = "1.0.228", features = ["derive"] }
+

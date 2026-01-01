@@ -1,11 +1,11 @@
-use crate::core::archive::ArchiveExtractor;
-use crate::core::install::InstallUtils;
-use crate::core::platform::Platform;
-use crate::core::specs::tool::ToolSpec;
-use crate::frontend::cli::args::{Cli, Commands, InstallArgs};
-use crate::frontend::tui;
-use crate::sources::ghcr::GhcrClient;
-use crate::sources::homebrew::HomebrewClient;
+use core::archive::ArchiveExtractor;
+use core::install::InstallUtils;
+use core::platform::Platform;
+use core::specs::tool::ToolSpec;
+use crate::cli::args::{Cli, Commands, InstallArgs};
+use crate::tui;
+use sources::ghcr::GhcrClient;
+use sources::homebrew::HomebrewClient;
 use clap::Parser;
 
 mod install {

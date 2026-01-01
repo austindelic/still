@@ -2,7 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
 };
-use crate::frontend::tui::components::interactive_cli::InteractiveCli;
+use crate::tui::components::interactive_cli::InteractiveCli;
 
 /// Resources tab that displays btop output using the interactive CLI component
 #[derive(Debug)]

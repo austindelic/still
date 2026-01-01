@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use crate::frontend::tui::components::popup::popup_area;
+use crate::tui::components::popup::popup_area;
 
 /// Action menu modal state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
