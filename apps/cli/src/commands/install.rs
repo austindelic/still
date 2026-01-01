@@ -34,25 +34,35 @@ impl InstallCommand {
     }
 
     pub async fn install_from_tool(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let url = "https://formulae.brew.sh/api/formula.json";
         let client = Client::new();
 
         let cache_dir = still_cache_dir()?;
         fs::create_dir_all(&cache_dir).await?;
 
-        let out_path = cache_dir.join("formula.json");
-        let tmp_path = cache_dir.join("formula.json.tmp");
-
-        let resp = client.get(url).send().await?.error_for_status()?;
-        let bytes = resp.bytes().await?;
-
-        let mut file = fs::File::create(&tmp_path).await?;
-        file.write_all(&bytes).await?;
-        file.flush().await?;
-
-        fs::rename(&tmp_path, &out_path).await?;
-
-        println!("saved formula json to {}", out_path.display());
+        // Homebrew catalog caches used by the TUI.
+        download_to_cache(&client, &cache_dir, "https://formulae.brew.sh/api/formula.json", "formula.json").await?;
+        download_to_cache(&client, &cache_dir, "https://formulae.brew.sh/api/cask.json", "cask.json").await?;
         Ok(())
     }
+}
+
+async fn download_to_cache(
+    client: &Client,
+    cache_dir: &std::path::Path,
+    url: &str,
+    filename: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let out_path = cache_dir.join(filename);
+    let tmp_path = cache_dir.join(format!("{filename}.tmp"));
+
+    let resp = client.get(url).send().await?.error_for_status()?;
+    let bytes = resp.bytes().await?;
+
+    let mut file = fs::File::create(&tmp_path).await?;
+    file.write_all(&bytes).await?;
+    file.flush().await?;
+
+    fs::rename(&tmp_path, &out_path).await?;
+    println!("saved {} to {}", filename, out_path.display());
+    Ok(())
 }

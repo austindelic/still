@@ -301,3 +301,27 @@ pub struct ChecksumSpec {
 pub fn parse_formulae(json: &str) -> Result<Vec<FormulaSpec>, serde_json::Error> {
     serde_json::from_str::<Vec<FormulaSpec>>(json)
 }
+
+/// Homebrew cask schema from `https://formulae.brew.sh/api/cask.json`.
+/// We only model the fields we need in the TUI; everything else is flattened.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaskSpec {
+    /// The canonical identifier (e.g. "google-chrome").
+    pub token: String,
+
+    /// Cask version string (often "1.2.3", sometimes more complex).
+    #[serde(default)]
+    pub version: String,
+
+    /// Present for installed casks; shape varies, so keep as JSON values.
+    #[serde(default)]
+    pub installed: Vec<Value>,
+
+    /// Catch-anything else Homebrew adds so this doesn't break later.
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+pub fn parse_casks(json: &str) -> Result<Vec<CaskSpec>, serde_json::Error> {
+    serde_json::from_str::<Vec<CaskSpec>>(json)
+}

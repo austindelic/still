@@ -1,0 +1,9 @@
+[env]
+NODE_ENV = 'production'
+
+[tools]
+terraform = '1.0.0'
+erlang = '24.0'
+
+[tasks.build]
+run = 'echo "running build tasks"'
