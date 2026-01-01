@@ -56,4 +56,3 @@ impl InstallCommand {
         Ok(())
     }
 }
-
