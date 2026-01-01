@@ -1,6 +1,5 @@
 pub mod archive;
-pub mod install;
+pub mod commands;
 pub mod platform;
 pub mod resolver;
 pub mod specs;
-

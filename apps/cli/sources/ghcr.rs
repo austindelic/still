@@ -42,8 +42,6 @@ impl GhcrClient {
         blob_url: &str,
         token: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        println!("Downloading blob from {}...", blob_url);
-        
         let resp = self
             .client
             .get(blob_url)

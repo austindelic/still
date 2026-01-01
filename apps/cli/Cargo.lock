@@ -332,11 +332,13 @@ name = "core"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "reqwest",
  "semver",
  "serde",
  "serde_json",
  "tar",
  "tokio",
+ "util",
 ]
 
 [[package]]

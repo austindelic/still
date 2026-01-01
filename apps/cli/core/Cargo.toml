@@ -13,4 +13,12 @@ tar = "0.4.44"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
 semver = "1.0.27"
+reqwest = { version = "0.12.28", features = [
+  "json",
+  "gzip",
+  "brotli",
+  "deflate",
+  "rustls-tls",
+] }
+util = { path = "../util" }
 
