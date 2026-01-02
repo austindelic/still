@@ -1,32 +1,33 @@
-use crate::cli::args::{Cli, Commands};
+use crate::cli::args::{Cli, Command};
 use crate::cli::install;
 use crate::tui;
 use clap::Parser;
+use engine::platform::policy::system::{System, system};
 
-pub fn run_cli(cmd: Commands) {
+pub fn run_cli(system: System, cmd: Command) {
     match cmd {
-        Commands::Install(args) => {
-            install::run(args);
+        Command::Install(args) => {
+            install::run(system, args);
         }
-        Commands::Uninstall(args) => {
+        Command::Uninstall(args) => {
             println!("Uninstall command: {:?}", args);
         }
-        Commands::Use(args) => {
+        Command::Use(args) => {
             println!("Use command: {:?}", args);
         }
-        Commands::Run(args) => {
+        Command::Run(args) => {
             println!("Run command: {:?}", args);
         }
-        Commands::Translate(args) => {
+        Command::Translate(args) => {
             println!("Translate command: {:?}", args);
         }
-        Commands::Doctor(args) => {
+        Command::Doctor(args) => {
             println!("Doctor command: {:?}", args);
         }
-        Commands::Init(args) => {
+        Command::Init(args) => {
             println!("Init command: {:?}", args);
         }
-        Commands::Convert(args) => {
+        Command::Convert(args) => {
             println!("Convert command: {:?}", args);
         }
         _ => {}
@@ -35,10 +36,10 @@ pub fn run_cli(cmd: Commands) {
 
 pub fn entry() {
     let cli = Cli::parse();
-
+    let system = system();
     match cli.command {
         None => {
-            if let Err(e) = tui::launch_tui() {
+            if let Err(e) = tui::launch_tui(system) {
                 eprintln!("Failed to launch TUI: {e}");
                 eprintln!("\nThis may be due to:");
                 eprintln!("  - Terminal not supporting TUI mode");
@@ -46,6 +47,6 @@ pub fn entry() {
                 eprintln!("  - Missing required terminal capabilities");
             }
         }
-        Some(cmd) => run_cli(cmd),
+        Some(cmd) => run_cli(system, cmd),
     }
 }

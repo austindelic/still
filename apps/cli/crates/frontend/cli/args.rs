@@ -1,15 +1,15 @@
-use engine::specs::tool::ToolSpec;
 use clap::{Parser, Subcommand};
+use engine::specs::tool::ToolSpec;
 
 #[derive(Parser)]
 #[command(name = "Still", about = "Universal Package Manager + Version Manager")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand)]
-pub enum Commands {
+pub enum Command {
     Install(InstallArgs),     // Install a package/app into the current environment.
     Uninstall(UninstallArgs), // Remove a package/app from the current environment.
     Use(UseArgs),             // Switch to a specific runtime or toolchain version.
@@ -63,4 +63,3 @@ pub struct InitArgs {}
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ConvertArgs {}
-

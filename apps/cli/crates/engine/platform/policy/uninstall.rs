@@ -2,7 +2,9 @@ use crate::platform::policy::system::{Linux, MacOS, Windows};
 use std::path::PathBuf;
 
 pub trait UninstallPolicy {
-    fn install_root(&self) -> PathBuf;
+    fn install_root(&self) -> PathBuf {
+        PathBuf::from("/opt/still")
+    }
     fn bin_dir(&self) -> PathBuf;
     fn needs_admin(&self) -> bool;
     fn exe_suffix(&self) -> &'static str;
@@ -11,7 +13,7 @@ pub trait UninstallPolicy {
 // MacOS implementation
 impl UninstallPolicy for MacOS {
     fn install_root(&self) -> PathBuf {
-        dirs::home_dir().unwrap().join(".still");
+        dirs::home_dir().unwrap().join(".still")
     }
 
     fn bin_dir(&self) -> PathBuf {

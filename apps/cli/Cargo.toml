@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/engine", "crates/frontend", "crates/util", "crates/registries"]
+members = [
+  "crates/engine",
+  "crates/frontend",
+  "crates/util",
+  "crates/registries",
+]
 resolver = "2"
 
 [workspace.package]
@@ -22,3 +27,8 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
+
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"

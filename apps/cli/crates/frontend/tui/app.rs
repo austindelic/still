@@ -1,4 +1,8 @@
+use crate::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
+use crate::tui::tabs::formula::{FormulaTab, NavigationDirection};
+use crate::tui::tabs::resources::ResourcesTab;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use engine::platform::policy::system::System;
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -8,9 +12,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use std::io;
-use crate::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
-use crate::tui::tabs::formula::{FormulaTab, NavigationDirection};
-use crate::tui::tabs::resources::ResourcesTab;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -33,7 +34,13 @@ impl Tab {
     }
 
     pub fn all() -> &'static [Tab] {
-        &[Tab::Packages, Tab::Tasks, Tab::Config, Tab::Logs, Tab::Resources]
+        &[
+            Tab::Packages,
+            Tab::Tasks,
+            Tab::Config,
+            Tab::Logs,
+            Tab::Resources,
+        ]
     }
 
     pub fn next(&self) -> Tab {
@@ -61,11 +68,11 @@ impl Default for Tab {
     }
 }
 
-
 /// Main application state machine
 /// Delegates rendering and event handling to the current tab mode
 #[derive(Debug)]
 pub struct App {
+    system: System,
     current_tab: Tab,
     search_query: String,
     exit: bool,
@@ -76,14 +83,15 @@ pub struct App {
     resources_tab: ResourcesTab,
 }
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    pub fn new(system: System) -> Self {
         let formula_tab = FormulaTab::new().unwrap_or_else(|e| {
             eprintln!("Warning: Failed to initialize formula tab: {}", e);
             FormulaTab::default()
         });
-        
+
         Self {
+            system,
             current_tab: Tab::default(),
             search_query: String::new(),
             exit: false,
@@ -92,6 +100,14 @@ impl Default for App {
             formula_tab,
             resources_tab: ResourcesTab::new(),
         }
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        // This is only used for tests - use App::new() in production
+        use engine::platform::policy::system::system;
+        Self::new(system())
     }
 }
 
@@ -137,12 +153,7 @@ impl App {
                     Style::default().fg(Color::Gray)
                 };
 
-                let mut spans = vec![
-                    Span::styled(
-                        format!(" {} ", tab.as_str()),
-                        style,
-                    ),
-                ];
+                let mut spans = vec![Span::styled(format!(" {} ", tab.as_str()), style)];
 
                 // Add separator between tabs (except after last)
                 if idx < Tab::all().len() - 1 {
@@ -165,19 +176,15 @@ impl App {
 
     fn render_search_bar(&mut self, area: Rect, buf: &mut Buffer) {
         let search_text = if self.search_query.is_empty() {
-            Text::from(vec![
-                Line::from(vec![
-                    Span::styled("🔍 ", Style::default().fg(Color::Yellow)),
-                    Span::styled("Search...", Style::default().fg(Color::DarkGray)),
-                ])
-            ])
+            Text::from(vec![Line::from(vec![
+                Span::styled("🔍 ", Style::default().fg(Color::Yellow)),
+                Span::styled("Search...", Style::default().fg(Color::DarkGray)),
+            ])])
         } else {
-            Text::from(vec![
-                Line::from(vec![
-                    Span::styled("🔍 ", Style::default().fg(Color::Yellow)),
-                    Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
-                ])
-            ])
+            Text::from(vec![Line::from(vec![
+                Span::styled("🔍 ", Style::default().fg(Color::Yellow)),
+                Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
+            ])])
         };
 
         let block = Block::default()
@@ -188,14 +195,14 @@ impl App {
                 " Search (press '/' to focus) "
             })
             .border_style(if self.search_focused {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Blue)
             });
 
-        Paragraph::new(search_text)
-            .block(block)
-            .render(area, buf);
+        Paragraph::new(search_text).block(block).render(area, buf);
     }
 
     fn render_content(&mut self, area: Rect, buf: &mut Buffer) {
@@ -209,8 +216,10 @@ impl App {
         // Delegate rendering to the current tab mode
         match self.current_tab {
             Tab::Packages => {
-                self.formula_tab.render_table(horizontal[0], buf, &self.search_query);
-                self.formula_tab.render_preview(horizontal[1], buf, &self.search_query);
+                self.formula_tab
+                    .render_table(horizontal[0], buf, &self.search_query);
+                self.formula_tab
+                    .render_preview(horizontal[1], buf, &self.search_query);
             }
             Tab::Resources => {
                 // Resources tab uses full area for btop
@@ -230,13 +239,11 @@ impl App {
             .border_style(Style::default().fg(Color::Blue))
             .title(format!(" {} - Coming Soon ", self.current_tab.as_str()));
 
-        let text = Text::from(vec![
-            Line::from("This tab is not yet implemented.".fg(Color::DarkGray)),
-        ]);
+        let text = Text::from(vec![Line::from(
+            "This tab is not yet implemented.".fg(Color::DarkGray),
+        )]);
 
-        Paragraph::new(text)
-            .block(block)
-            .render(area, buf);
+        Paragraph::new(text).block(block).render(area, buf);
     }
 
     fn render_resources(&mut self, area: Rect, buf: &mut Buffer) {
@@ -268,8 +275,9 @@ impl App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         // Check if we're in interactive CLI mode (Resources tab)
-        let resources_interactive = self.current_tab == Tab::Resources && self.resources_tab.is_interactive();
-        
+        let resources_interactive =
+            self.current_tab == Tab::Resources && self.resources_tab.is_interactive();
+
         // If in interactive mode, forward keys to the CLI tool
         if resources_interactive {
             // Esc exits interactive mode
@@ -277,7 +285,7 @@ impl App {
                 self.resources_tab.toggle_interactive();
                 return;
             }
-            
+
             // Forward all keys to the interactive CLI
             // Convert key code to bytes that can be sent to the process
             match key_event.code {
@@ -314,22 +322,27 @@ impl App {
             // Don't process other keys when in interactive mode
             return;
         }
-        
+
         // Check if action menu is open - if so, only handle menu-specific keys
         let menu_open = matches!(self.action_menu, ActionMenuState::Open { .. });
-        
+
         // Handle Ctrl+C to exit
-        if key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c') {
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('c')
+        {
             self.exit();
             return;
         }
-        
+
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            
+
             // Handle action menu navigation first (when menu is open)
             KeyCode::Up | KeyCode::Char('k') if menu_open => {
-                if let ActionMenuState::Open { ref mut selected_action } = self.action_menu {
+                if let ActionMenuState::Open {
+                    ref mut selected_action,
+                } = self.action_menu
+                {
                     if *selected_action > 0 {
                         *selected_action -= 1;
                     } else {
@@ -338,11 +351,14 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') if menu_open => {
-                if let ActionMenuState::Open { ref mut selected_action } = self.action_menu {
+                if let ActionMenuState::Open {
+                    ref mut selected_action,
+                } = self.action_menu
+                {
                     *selected_action = (*selected_action + 1) % Action::all().len();
                 }
             }
-            
+
             // Select action in menu
             KeyCode::Enter if menu_open => {
                 if let ActionMenuState::Open { selected_action } = self.action_menu {
@@ -350,20 +366,20 @@ impl App {
                     self.action_menu = ActionMenuState::Closed;
                 }
             }
-            
+
             // Close menu with Esc
             KeyCode::Esc if menu_open => {
                 self.action_menu = ActionMenuState::Closed;
             }
-            
+
             // If menu is open, ignore all other keys
             _ if menu_open => {}
-            
+
             // Focus search bar (only when menu is closed)
             KeyCode::Char('/') => {
                 self.search_focused = true;
             }
-            
+
             // Row navigation (only when search is not focused and menu is closed)
             KeyCode::Up | KeyCode::Char('k') if !self.search_focused => {
                 self.handle_navigation(NavigationDirection::Up);
@@ -371,7 +387,7 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') if !self.search_focused => {
                 self.handle_navigation(NavigationDirection::Down);
             }
-            
+
             // Tab navigation (only when search is not focused and menu is closed)
             KeyCode::Tab if !self.search_focused => {
                 self.switch_tab(self.current_tab.next());
@@ -385,7 +401,7 @@ impl App {
             KeyCode::Right if !self.search_focused => {
                 self.switch_tab(self.current_tab.next());
             }
-            
+
             // Number keys for direct tab selection (only when search is not focused and menu is closed)
             KeyCode::Char('1') if !self.search_focused => {
                 self.switch_tab(Tab::Packages);
@@ -422,7 +438,7 @@ impl App {
                     self.formula_tab.reset_filters();
                 }
             }
-            
+
             // Search bar input (when focused and menu is closed)
             KeyCode::Char(c) if self.search_focused => {
                 self.search_query.push(c);
@@ -441,7 +457,7 @@ impl App {
             KeyCode::Enter if self.search_focused => {
                 self.search_focused = false;
             }
-            
+
             // Open action menu with Enter or 'l' (when not in search and menu is closed)
             KeyCode::Enter | KeyCode::Char('l') if !self.search_focused => {
                 if self.current_tab == Tab::Packages {
@@ -455,7 +471,8 @@ impl App {
     fn handle_navigation(&mut self, direction: NavigationDirection) {
         match self.current_tab {
             Tab::Packages => {
-                self.formula_tab.handle_navigation(direction, &self.search_query);
+                self.formula_tab
+                    .handle_navigation(direction, &self.search_query);
             }
             _ => {
                 // Other tabs don't support navigation yet
@@ -488,7 +505,11 @@ impl App {
         let selected_formula = match self.current_tab {
             Tab::Packages => {
                 let filtered = self.formula_tab.filter(&self.search_query);
-                if let Some(row) = filtered.get(self.formula_tab.selected_index.min(filtered.len().saturating_sub(1))) {
+                if let Some(row) = filtered.get(
+                    self.formula_tab
+                        .selected_index
+                        .min(filtered.len().saturating_sub(1)),
+                ) {
                     Some(row.name.clone())
                 } else {
                     None
@@ -496,7 +517,7 @@ impl App {
             }
             _ => None,
         };
-        
+
         let title = if let Some(name) = selected_formula {
             format!(" Actions: {} ", name)
         } else {
@@ -509,14 +530,18 @@ impl App {
 
     fn handle_action_selection(&mut self, action_idx: usize) {
         let action = Action::all().get(action_idx).copied();
-        
+
         if let Some(action) = action {
             match action {
                 Action::Install => {
                     // Get selected formula name
                     if let Tab::Packages = self.current_tab {
                         let filtered = self.formula_tab.filter(&self.search_query);
-                        if let Some(row) = filtered.get(self.formula_tab.selected_index.min(filtered.len().saturating_sub(1))) {
+                        if let Some(row) = filtered.get(
+                            self.formula_tab
+                                .selected_index
+                                .min(filtered.len().saturating_sub(1)),
+                        ) {
                             eprintln!("Installing: {}", row.name);
                             // TODO: Actually implement install logic
                         }
@@ -525,7 +550,11 @@ impl App {
                 Action::Uninstall => {
                     if let Tab::Packages = self.current_tab {
                         let filtered = self.formula_tab.filter(&self.search_query);
-                        if let Some(row) = filtered.get(self.formula_tab.selected_index.min(filtered.len().saturating_sub(1))) {
+                        if let Some(row) = filtered.get(
+                            self.formula_tab
+                                .selected_index
+                                .min(filtered.len().saturating_sub(1)),
+                        ) {
                             eprintln!("Uninstalling: {}", row.name);
                             // TODO: Actually implement uninstall logic
                         }
@@ -534,7 +563,11 @@ impl App {
                 Action::Info => {
                     if let Tab::Packages = self.current_tab {
                         let filtered = self.formula_tab.filter(&self.search_query);
-                        if let Some(row) = filtered.get(self.formula_tab.selected_index.min(filtered.len().saturating_sub(1))) {
+                        if let Some(row) = filtered.get(
+                            self.formula_tab
+                                .selected_index
+                                .min(filtered.len().saturating_sub(1)),
+                        ) {
                             eprintln!("Info for: {}", row.name);
                             // TODO: Show detailed info
                         }
@@ -548,9 +581,9 @@ impl App {
     }
 }
 
-pub fn launch_tui() -> io::Result<()> {
+pub fn launch_tui(system: System) -> io::Result<()> {
     let mut terminal = ratatui::init();
-    let app_result = App::default().run(&mut terminal);
+    let app_result = App::new(system).run(&mut terminal);
     ratatui::restore();
     app_result
 }

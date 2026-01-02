@@ -23,7 +23,7 @@ impl InstallUtils {
     ) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
         let bin_path = install_path.join("bin").join(binary_name);
         let root_bin_path = install_path.join(binary_name);
-        
+
         // Check which binary exists and make it executable
         if bin_path.exists() {
             #[cfg(unix)]
@@ -72,13 +72,13 @@ pub struct InstallResult {
 async fn get_ghcr_token(repository: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client = Client::new();
     let scope = format!("repository:{}:pull", repository);
-    let url = format!("{}?service=ghcr.io&scope={}", GHCR_TOKEN_URL, urlencoding::encode(&scope));
-    
-    let resp = client
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?;
+    let url = format!(
+        "{}?service=ghcr.io&scope={}",
+        GHCR_TOKEN_URL,
+        urlencoding::encode(&scope)
+    );
+
+    let resp = client.get(&url).send().await?.error_for_status()?;
 
     #[derive(Debug, Deserialize)]
     struct TokenResponse {
@@ -150,7 +150,11 @@ fn select_bottle_file(
         }
     }
 
-    Err(format!("No matching bottle file found for platform: {}", platform_key).into())
+    Err(format!(
+        "No matching bottle file found for platform: {}",
+        platform_key
+    )
+    .into())
 }
 
 /// Install a tool (core logic, no printing)
@@ -159,7 +163,7 @@ pub async fn install(request: InstallRequest) -> Result<InstallResult, Box<dyn s
 
     // Fetch Homebrew formula JSON
     let formula = fetch_formula(tool_name).await?;
-    
+
     // Get bottle information
     let bottle = formula
         .bottle
@@ -184,7 +188,7 @@ pub async fn install(request: InstallRequest) -> Result<InstallResult, Box<dyn s
     // Extract and install
     let version = &formula.versions.stable;
     let install_path = InstallUtils::get_install_path(tool_name, version);
-    
+
     ArchiveExtractor::extract_tar_gz(&blob_data, &install_path).await?;
 
     // Find and set executable permissions on binary

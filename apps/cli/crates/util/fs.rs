@@ -5,6 +5,7 @@ pub struct FsUtils;
 
 impl FsUtils {
     /// Get the still cache directory
+    /// Note: For platform-specific paths, use engine::platform::policy::system::get_system().cache_dir()
     pub fn still_cache_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME")
             .map(PathBuf::from)
