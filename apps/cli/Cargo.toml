@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "frontend", "sources", "util"]
+members = ["crates/engine", "crates/frontend", "crates/util", "crates/registries"]
 resolver = "2"
 
 [workspace.package]
@@ -12,14 +12,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-core = { path = "core" }
-frontend = { path = "frontend" }
-sources = { path = "sources" }
-util = { path = "util" }
+engine = { path = "crates/engine" }
+frontend = { path = "crates/frontend" }
+util = { path = "crates/util" }
+registries = { path = "crates/registries" }
 
 [profile.release]
 strip = true
-opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
