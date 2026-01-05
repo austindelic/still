@@ -1,5 +1,6 @@
 use crate::registries::specs::tool::ToolSpec;
 use crate::system::{Linux, MacOS, System, Windows};
+use anyhow::Result;
 use std::path::PathBuf;
 
 pub trait InstallOps {
@@ -23,9 +24,9 @@ pub struct InstallResult {
 pub async fn run(
     system: System,
     request: InstallRequest,
-) -> Result<InstallResult, Box<dyn std::error::Error>> {
+) -> Result<InstallResult> {
     // TODO: Implement install logic
-    Err("Install not yet implemented".into())
+    anyhow::bail!("Install not yet implemented")
 }
 
 impl InstallOps for MacOS {
