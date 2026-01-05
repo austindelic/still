@@ -9,7 +9,7 @@ path = "lib.rs"
 [dependencies]
 engine = { path = "../engine" }
 registries = { path = "../registries" }
-util = { path = "../util" }
+system = { path = "../system" }
 clap = { version = "4.5.53", features = ["derive"] }
 ratatui = "0.30.0"
 crossterm = "0.29.0"

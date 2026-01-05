@@ -1,5 +1,3 @@
-pub mod policy;
-
 /// Platform detection utilities
 pub struct Platform;
 
@@ -38,3 +36,4 @@ impl Platform {
         std::env::consts::OS
     }
 }
+

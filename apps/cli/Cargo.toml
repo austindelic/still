@@ -2,8 +2,8 @@
 members = [
   "crates/engine",
   "crates/frontend",
-  "crates/util",
   "crates/registries",
+  "crates/system",
 ]
 resolver = "2"
 
@@ -19,7 +19,6 @@ edition.workspace = true
 [dependencies]
 engine = { path = "crates/engine" }
 frontend = { path = "crates/frontend" }
-util = { path = "crates/util" }
 registries = { path = "crates/registries" }
 
 [profile.release]

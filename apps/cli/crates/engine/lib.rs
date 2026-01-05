@@ -1,5 +1,5 @@
-pub mod archive;
 pub mod actions;
-pub mod platform;
+pub mod archive;
 pub mod resolver;
 pub mod specs;
+

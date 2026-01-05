@@ -1,4 +1,4 @@
-use crate::platform::policy::system::{Linux, MacOS, Windows};
+use system::{Linux, MacOS, Windows};
 use std::path::PathBuf;
 
 pub trait InstallPolicy {

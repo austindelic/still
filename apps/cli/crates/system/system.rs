@@ -1,6 +1,6 @@
-use crate::platform::policy::{
-    install::InstallPolicy, paths::PathPolicy, uninstall::UninstallPolicy,
-};
+use crate::utils::install::InstallUtil;
+use crate::utils::paths::PathUtil;
+use crate::utils::uninstall::UninstallUtil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacOS;
@@ -11,10 +11,10 @@ pub struct Linux;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Windows;
 
-pub trait SystemPolicy: InstallPolicy + UninstallPolicy + PathPolicy {}
-impl SystemPolicy for MacOS {}
-impl SystemPolicy for Linux {}
-impl SystemPolicy for Windows {}
+pub trait SystemUtil: InstallUtil + UninstallUtil + PathUtil {}
+impl SystemUtil for MacOS {}
+impl SystemUtil for Linux {}
+impl SystemUtil for Windows {}
 
 #[cfg(target_os = "macos")]
 pub type System = MacOS;
@@ -25,6 +25,6 @@ pub type System = Linux;
 #[cfg(target_os = "windows")]
 pub type System = Windows;
 
-pub fn system() -> System {
+pub fn init_system() -> System {
     System {}
 }

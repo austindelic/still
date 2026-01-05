@@ -20,6 +20,6 @@ reqwest = { version = "0.13", features = [
   "deflate",
   "rustls",
 ] }
-util = { path = "../util" }
+system = { path = "../system" }
 dirs = "5.0.1"
 urlencoding = "2.1"

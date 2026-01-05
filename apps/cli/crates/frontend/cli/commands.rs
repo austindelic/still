@@ -2,7 +2,7 @@ use crate::cli::args::{Cli, Command};
 use crate::cli::install;
 use crate::tui;
 use clap::Parser;
-use engine::platform::policy::system::{System, system};
+use system::{System, init_system};
 
 pub fn run_cli(system: System, cmd: Command) {
     match cmd {
@@ -36,7 +36,7 @@ pub fn run_cli(system: System, cmd: Command) {
 
 pub fn entry() {
     let cli = Cli::parse();
-    let system = system();
+    let system = init_system();
     match cli.command {
         None => {
             if let Err(e) = tui::launch_tui(system) {

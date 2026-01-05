@@ -1,22 +1,19 @@
 use crate::archive::ArchiveExtractor;
-use crate::platform::Platform;
 use crate::specs::brew::{BottleFileSpec, FormulaSpec};
 use crate::specs::tool::ToolSpec;
+use system::Platform;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use util::hashing::Hashing;
-
+use system::utils::hashing::Hashing;
 const GHCR_TOKEN_URL: &str = "https://ghcr.io/token";
 const HOMEBREW_FORMULA_API: &str = "https://formulae.brew.sh/api/formula";
 
-/// Installation utilities
 pub struct InstallUtils;
 
 impl InstallUtils {
-    /// Find and set executable permissions on a binary
-    /// Tries common locations: bin/<name> and <name> at root
     pub async fn find_and_set_executable(
         install_path: &std::path::Path,
         binary_name: &str,
@@ -24,11 +21,9 @@ impl InstallUtils {
         let bin_path = install_path.join("bin").join(binary_name);
         let root_bin_path = install_path.join(binary_name);
 
-        // Check which binary exists and make it executable
         if bin_path.exists() {
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
                 let mut perms = tokio::fs::metadata(&bin_path).await?.permissions();
                 perms.set_mode(0o755);
                 tokio::fs::set_permissions(&bin_path, perms).await?;
@@ -37,7 +32,6 @@ impl InstallUtils {
         } else if root_bin_path.exists() {
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
                 let mut perms = tokio::fs::metadata(&root_bin_path).await?.permissions();
                 perms.set_mode(0o755);
                 tokio::fs::set_permissions(&root_bin_path, perms).await?;
@@ -48,7 +42,6 @@ impl InstallUtils {
         }
     }
 
-    /// Get the standard installation path for a tool
     pub fn get_install_path(tool_name: &str, version: &str) -> PathBuf {
         PathBuf::from("/opt/still/tools")
             .join(tool_name)
@@ -56,12 +49,10 @@ impl InstallUtils {
     }
 }
 
-/// Request to install a tool
 pub struct InstallRequest {
     pub tool: ToolSpec,
 }
 
-/// Result of an installation
 pub struct InstallResult {
     pub tool_name: String,
     pub version: String,
@@ -157,43 +148,25 @@ fn select_bottle_file(
     .into())
 }
 
-/// Install a tool (core logic, no printing)
 pub async fn install(request: InstallRequest) -> Result<InstallResult, Box<dyn std::error::Error>> {
     let tool_name = &request.tool.name;
-
-    // Fetch Homebrew formula JSON
     let formula = fetch_formula(tool_name).await?;
-
-    // Get bottle information
     let bottle = formula
         .bottle
         .as_ref()
         .ok_or(format!("No bottle available for {}", tool_name))?;
 
-    // Detect platform and select appropriate bottle file
     let platform_key = Platform::detect()?;
     let bottle_file = select_bottle_file(&bottle.stable.files, &platform_key)?;
-
-    // Extract blob URL and digest from bottle URL
     let (blob_url, expected_digest) = parse_blob_url(&bottle_file.url)?;
     let repository = format!("homebrew/core/{}", tool_name);
-
-    // Get GHCR token and download blob
     let token = get_ghcr_token(&repository).await?;
     let blob_data = download_blob(&blob_url, &token).await?;
-
-    // Verify SHA-256
     Hashing::verify_sha256(&blob_data, &expected_digest)?;
-
-    // Extract and install
     let version = &formula.versions.stable;
     let install_path = InstallUtils::get_install_path(tool_name, version);
-
     ArchiveExtractor::extract_tar_gz(&blob_data, &install_path).await?;
-
-    // Find and set executable permissions on binary
     let binary_path = InstallUtils::find_and_set_executable(&install_path, tool_name).await?;
-
     Ok(InstallResult {
         tool_name: tool_name.clone(),
         version: version.clone(),

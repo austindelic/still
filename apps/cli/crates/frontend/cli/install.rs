@@ -1,15 +1,11 @@
 use crate::cli::args::InstallArgs;
 use engine::actions::install::{InstallRequest, install};
-use engine::platform::policy::system::System;
+use system::System;
 
 /// CLI wrapper for install command - handles output and error display
 pub fn run(system: System, args: InstallArgs) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    println!("Installing {}...", args.tool.name);
-
     let result = rt.block_on(install(InstallRequest { tool: args.tool }));
-
     match result {
         Ok(res) => {
             if let Some(binary_path) = &res.binary_path {
