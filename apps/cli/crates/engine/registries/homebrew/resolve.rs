@@ -1,4 +1,4 @@
-use engine::specs::brew::BottleFileSpec;
+use crate::registries::specs::brew::BottleFileSpec;
 use std::collections::HashMap;
 
 /// Select the appropriate bottle file for the current platform

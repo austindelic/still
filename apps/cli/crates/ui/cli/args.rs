@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use engine::specs::tool::ToolSpec;
+use engine::registries::specs::tool::ToolSpec;
 
 #[derive(Parser)]
 #[command(name = "Still", about = "Universal Package Manager + Version Manager")]

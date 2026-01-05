@@ -1,4 +1,4 @@
-use frontend::cli;
+use ui::cli;
 
 fn main() {
     cli::entry()

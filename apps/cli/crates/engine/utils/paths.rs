@@ -1,8 +1,8 @@
 use crate::system::{Linux, MacOS, Windows};
 use std::path::PathBuf;
 
-/// Util for all paths that still will use across different operating systems
-pub trait PathUtil {
+/// Ops for all paths that still will use across different operating systems
+pub trait PathOps {
     /// Root installation directory where still stores its data
     fn root_dir(&self) -> PathBuf;
 
@@ -23,7 +23,7 @@ pub trait PathUtil {
 }
 
 // macOS implementation
-impl PathUtil for MacOS {
+impl PathOps for MacOS {
     fn root_dir(&self) -> PathBuf {
         PathBuf::from("/opt/still")
     }
@@ -66,7 +66,7 @@ impl PathUtil for MacOS {
 }
 
 // Linux implementation
-impl PathUtil for Linux {
+impl PathOps for Linux {
     fn root_dir(&self) -> PathBuf {
         PathBuf::from("/opt/still")
     }
@@ -109,7 +109,7 @@ impl PathUtil for Linux {
 }
 
 // Windows implementation
-impl PathUtil for Windows {
+impl PathOps for Windows {
     fn root_dir(&self) -> PathBuf {
         PathBuf::from(r"C:\still")
     }

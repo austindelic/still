@@ -621,7 +621,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "system",
+ "sha2",
  "tar",
  "tokio",
  "urlencoding",
@@ -732,21 +732,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "frontend"
-version = "0.1.0"
-dependencies = [
- "clap",
- "crossterm",
- "engine",
- "fuzzy-matcher",
- "ratatui",
- "registries",
- "serde_json",
- "system",
- "tokio",
 ]
 
 [[package]]
@@ -1900,18 +1885,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
-name = "registries"
-version = "0.1.0"
-dependencies = [
- "engine",
- "reqwest",
- "serde",
- "serde_json",
- "system",
- "urlencoding",
-]
-
-[[package]]
 name = "reqwest"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2274,8 +2247,7 @@ name = "still"
 version = "0.1.0"
 dependencies = [
  "engine",
- "frontend",
- "registries",
+ "ui",
 ]
 
 [[package]]
@@ -2351,15 +2323,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
-]
-
-[[package]]
-name = "system"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "reqwest",
- "sha2",
 ]
 
 [[package]]
@@ -2689,6 +2652,19 @@ name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
+
+[[package]]
+name = "ui"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "engine",
+ "fuzzy-matcher",
+ "ratatui",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "unicode-ident"

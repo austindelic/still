@@ -1,6 +1,6 @@
-use crate::utils::install::InstallUtil;
-use crate::utils::paths::PathUtil;
-use crate::utils::uninstall::UninstallUtil;
+use crate::actions::install::InstallOps;
+use crate::actions::uninstall::UninstallOps;
+use crate::utils::paths::PathOps;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacOS;
@@ -11,10 +11,10 @@ pub struct Linux;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Windows;
 
-pub trait SystemUtil: InstallUtil + UninstallUtil + PathUtil {}
-impl SystemUtil for MacOS {}
-impl SystemUtil for Linux {}
-impl SystemUtil for Windows {}
+pub trait SystemOps: InstallOps + UninstallOps + PathOps {}
+impl SystemOps for MacOS {}
+impl SystemOps for Linux {}
+impl SystemOps for Windows {}
 
 #[cfg(target_os = "macos")]
 pub type System = MacOS;

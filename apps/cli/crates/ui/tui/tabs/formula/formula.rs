@@ -1,5 +1,5 @@
-use engine::specs::brew::{CaskSpec, FormulaSpec};
-use system::utils::fs::FsUtils;
+use engine::registries::specs::brew::{CaskSpec, FormulaSpec};
+use engine::utils::fs::FsUtils;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{

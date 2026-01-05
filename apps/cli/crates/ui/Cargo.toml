@@ -1,5 +1,5 @@
 [package]
-name = "frontend"
+name = "ui"
 version.workspace = true
 edition.workspace = true
 
@@ -8,8 +8,6 @@ path = "lib.rs"
 
 [dependencies]
 engine = { path = "../engine" }
-registries = { path = "../registries" }
-system = { path = "../system" }
 clap = { version = "4.5.53", features = ["derive"] }
 ratatui = "0.30.0"
 crossterm = "0.29.0"

@@ -2,7 +2,7 @@ use crate::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
 use crate::tui::tabs::formula::{FormulaTab, NavigationDirection};
 use crate::tui::tabs::resources::ResourcesTab;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use system::System;
+use engine::system::System;
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -106,7 +106,7 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         // This is only used for tests - use App::new() in production
-        use system::init_system;
+        use engine::system::init_system;
         Self::new(init_system())
     }
 }

@@ -1,5 +1,5 @@
 use super::client::HomebrewClient;
-use engine::specs::brew::FormulaSpec;
+use crate::registries::specs::brew::FormulaSpec;
 
 const HOMEBREW_FORMULA_API: &str = "https://formulae.brew.sh/api/formula";
 

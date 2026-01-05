@@ -1,7 +1,7 @@
-use system::{Linux, MacOS, Windows};
+use crate::system::{Linux, MacOS, Windows};
 use std::path::PathBuf;
 
-pub trait UninstallPolicy {
+pub trait UninstallOps {
     fn install_root(&self) -> PathBuf {
         PathBuf::from("/opt/still")
     }
@@ -11,7 +11,7 @@ pub trait UninstallPolicy {
 }
 
 // MacOS implementation
-impl UninstallPolicy for MacOS {
+impl UninstallOps for MacOS {
     fn install_root(&self) -> PathBuf {
         dirs::home_dir().unwrap().join(".still")
     }
@@ -30,7 +30,7 @@ impl UninstallPolicy for MacOS {
 }
 
 // Linux implementation
-impl UninstallPolicy for Linux {
+impl UninstallOps for Linux {
     fn install_root(&self) -> PathBuf {
         dirs::home_dir().unwrap().join(".still")
     }
@@ -49,7 +49,7 @@ impl UninstallPolicy for Linux {
 }
 
 // Windows implementation
-impl UninstallPolicy for Windows {
+impl UninstallOps for Windows {
     fn install_root(&self) -> PathBuf {
         PathBuf::from(r"C:\still")
     }

@@ -7,4 +7,5 @@ pub mod nix;
 pub mod npm;
 pub mod pkgsrc;
 pub mod scoop;
+pub mod specs;
 

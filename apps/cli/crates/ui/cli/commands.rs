@@ -1,13 +1,43 @@
+use crate::cli::args::InstallArgs;
 use crate::cli::args::{Cli, Command};
-use crate::cli::install;
 use crate::tui;
 use clap::Parser;
-use system::{System, init_system};
+use engine::actions::install::{InstallRequest, run};
+use engine::system::System;
+use engine::system::init_system;
+
+pub fn install(system: System, args: InstallArgs) {
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let install_request = InstallRequest { tool: args.tool };
+    let result = rt.block_on(run(system, install_request));
+    match result {
+        Ok(res) => {
+            if let Some(binary_path) = &res.binary_path {
+                println!("Binary installed at: {}", binary_path.display());
+            } else {
+                println!(
+                    "Warning: Could not find binary in {}",
+                    res.install_path.display()
+                );
+            }
+            println!(
+                "Successfully installed {}@{} to {}",
+                res.tool_name,
+                res.version,
+                res.install_path.display()
+            );
+        }
+        Err(e) => {
+            eprintln!("install failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
 
 pub fn run_cli(system: System, cmd: Command) {
     match cmd {
         Command::Install(args) => {
-            install::run(system, args);
+            install(system, args);
         }
         Command::Uninstall(args) => {
             println!("Uninstall command: {:?}", args);
