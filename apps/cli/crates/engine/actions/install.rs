@@ -1,5 +1,5 @@
 use crate::registries::specs::tool::ToolSpec;
-use crate::system::{Linux, MacOS, System, Windows};
+use crate::system::{MacOS, System};
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -21,10 +21,7 @@ pub struct InstallResult {
     pub binary_path: Option<PathBuf>,
 }
 
-pub async fn run(
-    system: System,
-    request: InstallRequest,
-) -> Result<InstallResult> {
+pub async fn run(_system: System, _request: InstallRequest) -> Result<InstallResult> {
     // TODO: Implement install logic
     anyhow::bail!("Install not yet implemented")
 }
@@ -44,41 +41,5 @@ impl InstallOps for MacOS {
 
     fn exe_suffix(&self) -> &'static str {
         ""
-    }
-}
-
-impl InstallOps for Linux {
-    fn install_root(&self) -> PathBuf {
-        dirs::home_dir().unwrap().join(".still")
-    }
-
-    fn bin_dir(&self) -> PathBuf {
-        dirs::home_dir().unwrap().join(".local/bin")
-    }
-
-    fn needs_admin(&self) -> bool {
-        true
-    }
-
-    fn exe_suffix(&self) -> &'static str {
-        ""
-    }
-}
-
-impl InstallOps for Windows {
-    fn install_root(&self) -> PathBuf {
-        PathBuf::from(r"C:\still")
-    }
-
-    fn bin_dir(&self) -> PathBuf {
-        PathBuf::from(r"C:\still\bin")
-    }
-
-    fn needs_admin(&self) -> bool {
-        false
-    }
-
-    fn exe_suffix(&self) -> &'static str {
-        ".exe"
     }
 }

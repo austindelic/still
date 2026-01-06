@@ -1,5 +1,7 @@
 use std::{fmt, str::FromStr};
 
+use anyhow::{Context, Result, bail};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolSpec {
     pub name: String,
@@ -25,6 +27,8 @@ enum ParseToolSpecError {
         reason: String,
     },
 }
+
+impl std::error::Error for ParseToolSpecError {}
 
 impl fmt::Display for ParseToolSpecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -60,67 +64,56 @@ impl fmt::Display for ParseToolSpecError {
     }
 }
 
-impl From<ParseToolSpecError> for String {
-    fn from(e: ParseToolSpecError) -> Self {
-        e.to_string()
-    }
-}
-
-fn is_valid_tool_format(tool: &str) -> Result<(), String> {
-    // Simple, dependency-free validator:
-    // - first char letter
-    // - rest [A-Za-z0-9_-]
+fn is_valid_tool_format(tool: &str) -> Result<()> {
     let mut chars = tool.chars();
 
     let Some(first) = chars.next() else {
-        return Err("tool name is empty".into());
+        bail!("tool name is empty");
     };
+
     if !first.is_ascii_alphabetic() {
-        return Err("must start with a letter".into());
+        bail!("tool name must start with a letter");
     }
+
     for c in chars {
         if !(c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-            return Err(format!("contains invalid character '{}'", c));
+            bail!("tool name contains invalid character '{}'", c);
         }
     }
+
     Ok(())
 }
 
-fn validate_version(tool: &str, version: &str) -> Result<(), ParseToolSpecError> {
+fn validate_version(tool: &str, version: &str) -> Result<()> {
     if version.eq_ignore_ascii_case("latest") {
         return Ok(());
     }
 
-    match semver::Version::parse(version) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(ParseToolSpecError::InvalidVersion {
+    semver::Version::parse(version).map(|_| ()).map_err(|e| {
+        anyhow::anyhow!(ParseToolSpecError::InvalidVersion {
             name: tool.to_string(),
             version: version.to_string(),
             reason: e.to_string(),
-        }),
-    }
+        })
+    })
 }
 
 impl FromStr for ToolSpec {
-    type Err = String;
+    type Err = anyhow::Error;
 
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
+    fn from_str(input: &str) -> Result<Self> {
         let s = input.trim();
+
         if s.is_empty() {
-            return Err(ParseToolSpecError::EmptyInput.into());
+            bail!(ParseToolSpecError::EmptyInput);
         }
 
-        // At most one '@'
         if s.matches('@').count() > 1 {
-            return Err(ParseToolSpecError::TooManyAts {
+            bail!(ParseToolSpecError::TooManyAts {
                 input: s.to_string(),
-            }
-            .into());
+            });
         }
 
-        // Auto-expand:
-        // - "tool" => "tool@latest"
-        // - "tool@" => version defaults to "latest"
         let (tool, version) = match s.split_once('@') {
             None => (s, "latest"),
             Some((t, v)) if v.is_empty() => (t, "latest"),
@@ -128,27 +121,26 @@ impl FromStr for ToolSpec {
         };
 
         if tool.is_empty() {
-            return Err(ParseToolSpecError::EmptyTool {
+            bail!(ParseToolSpecError::EmptyTool {
                 input: s.to_string(),
-            }
-            .into());
+            });
         }
 
         // Tool format validation
         if let Err(reason) = is_valid_tool_format(tool) {
-            return Err(ParseToolSpecError::InvalidToolFormat {
+            bail!(ParseToolSpecError::InvalidToolFormat {
                 name: tool.to_string(),
-                reason,
-            }
-            .into());
+                reason: format!("{reason:#}"), // preserve anyhow message nicely
+            });
         }
 
-        // Version validation
-        validate_version(tool, version).map_err(String::from)?;
+        // Version validation (+ context)
+        validate_version(tool, version)
+            .with_context(|| format!("while validating version for tool \"{}\"", tool))?;
 
         Ok(Self {
             name: tool.to_string(),
-            version: version.to_string(), // keep original (or normalise if you want)
+            version: version.to_string(),
         })
     }
 }
