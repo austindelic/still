@@ -7,6 +7,7 @@
     "start": "cargo run --release",
     "build": "cargo build --release",
     "check": "cargo check",
-    "preview": "cargo run --release"
+    "preview": "cargo run --release",
+    "test": "cargo test"
   }
 }

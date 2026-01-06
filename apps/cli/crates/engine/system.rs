@@ -13,8 +13,8 @@ pub struct Windows;
 
 pub trait SystemOps: InstallOps + UninstallOps + PathOps {}
 impl SystemOps for MacOS {}
-impl SystemOps for Linux {}
-impl SystemOps for Windows {}
+// impl SystemOps for Linux {}
+// impl SystemOps for Windows {}
 
 #[cfg(target_os = "macos")]
 pub type System = MacOS;
