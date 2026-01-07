@@ -2,7 +2,6 @@ use crate::tui::components::action_menu::{Action, ActionMenu, ActionMenuState};
 use crate::tui::tabs::formula::{FormulaTab, NavigationDirection};
 use crate::tui::tabs::resources::ResourcesTab;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use engine::system::System;
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -72,7 +71,6 @@ impl Default for Tab {
 /// Delegates rendering and event handling to the current tab mode
 #[derive(Debug)]
 pub struct App {
-    system: System,
     current_tab: Tab,
     search_query: String,
     exit: bool,
@@ -84,14 +82,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(system: System) -> Self {
+    pub fn new() -> Self {
         let formula_tab = FormulaTab::new().unwrap_or_else(|e| {
             eprintln!("Warning: Failed to initialize formula tab: {}", e);
             FormulaTab::default()
         });
 
         Self {
-            system,
             current_tab: Tab::default(),
             search_query: String::new(),
             exit: false,
@@ -106,8 +103,7 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         // This is only used for tests - use App::new() in production
-        use engine::system::init_system;
-        Self::new(init_system())
+        Self::new()
     }
 }
 
@@ -581,9 +577,9 @@ impl App {
     }
 }
 
-pub fn launch_tui(system: System) -> io::Result<()> {
+pub fn launch_tui() -> io::Result<()> {
     let mut terminal = ratatui::init();
-    let app_result = App::new(system).run(&mut terminal);
+    let app_result = App::new().run(&mut terminal);
     ratatui::restore();
     app_result
 }

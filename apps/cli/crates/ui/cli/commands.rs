@@ -3,13 +3,12 @@ use crate::cli::args::{Cli, Command};
 use crate::tui;
 use clap::Parser;
 use engine::actions::install::{InstallRequest, run};
-use engine::system::System;
 use engine::system::init_system;
 
-pub fn install(system: System, args: InstallArgs) {
+pub fn install(args: InstallArgs) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     let install_request = InstallRequest { tool: args.tool };
-    let result = rt.block_on(run(system, install_request));
+    let result = rt.block_on(run(install_request));
     match result {
         Ok(res) => {
             if let Some(binary_path) = &res.binary_path {
@@ -34,10 +33,10 @@ pub fn install(system: System, args: InstallArgs) {
     }
 }
 
-pub fn run_cli(system: System, cmd: Command) {
+pub fn run_cli(cmd: Command) {
     match cmd {
         Command::Install(args) => {
-            install(system, args);
+            install(args);
         }
         Command::Uninstall(args) => {
             println!("Uninstall command: {:?}", args);
@@ -69,7 +68,7 @@ pub fn entry() {
     let system = init_system();
     match cli.command {
         None => {
-            if let Err(e) = tui::launch_tui(system) {
+            if let Err(e) = tui::launch_tui() {
                 eprintln!("Failed to launch TUI: {e}");
                 eprintln!("\nThis may be due to:");
                 eprintln!("  - Terminal not supporting TUI mode");
@@ -77,6 +76,6 @@ pub fn entry() {
                 eprintln!("  - Missing required terminal capabilities");
             }
         }
-        Some(cmd) => run_cli(system, cmd),
+        Some(cmd) => run_cli(cmd),
     }
 }

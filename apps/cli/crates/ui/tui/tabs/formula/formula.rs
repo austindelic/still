@@ -1,5 +1,6 @@
 use engine::registries::specs::brew::{CaskSpec, FormulaSpec};
-use engine::utils::fs::FsUtils;
+use engine::system::System;
+use engine::utils::paths::PathOps;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{
@@ -139,26 +140,25 @@ impl FormulaTab {
     }
 
     fn load_formulas_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cache_dir = FsUtils::still_cache_dir()?;
+        let cache_dir = System::cache_dir().join("still");
         let formula_path = cache_dir.join("formula.json");
-        
+
         if !formula_path.exists() {
             return Ok(vec![]);
         }
-        
+
         let json_content = fs::read_to_string(&formula_path)?;
-        
+
         // Parse as a JSON array first, then parse each formula individually
         // This allows us to skip malformed formulas instead of failing entirely
         let json_array: serde_json::Value = serde_json::from_str(&json_content)
             .map_err(|e| format!("Failed to parse JSON array: {}", e))?;
-        
-        let array = json_array.as_array()
-            .ok_or("Expected JSON array")?;
-        
+
+        let array = json_array.as_array().ok_or("Expected JSON array")?;
+
         let mut rows: Vec<PackageRow> = Vec::new();
         let mut skipped = 0;
-        
+
         for (idx, formula_value) in array.iter().enumerate() {
             match serde_json::from_value::<FormulaSpec>(formula_value.clone()) {
                 Ok(formula) => {
@@ -181,16 +181,20 @@ impl FormulaTab {
                 }
             }
         }
-        
+
         if skipped > 0 {
-            eprintln!("Loaded {} formulas (skipped {} malformed entries)", rows.len(), skipped);
+            eprintln!(
+                "Loaded {} formulas (skipped {} malformed entries)",
+                rows.len(),
+                skipped
+            );
         }
-        
+
         Ok(rows)
     }
 
     fn load_casks_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cache_dir = FsUtils::still_cache_dir()?;
+        let cache_dir = System::cache_dir().join("still");
         let cask_path = cache_dir.join("cask.json");
 
         if !cask_path.exists() {
@@ -202,8 +206,7 @@ impl FormulaTab {
         let json_array: serde_json::Value = serde_json::from_str(&json_content)
             .map_err(|e| format!("Failed to parse JSON array: {}", e))?;
 
-        let array = json_array.as_array()
-            .ok_or("Expected JSON array")?;
+        let array = json_array.as_array().ok_or("Expected JSON array")?;
 
         let mut rows: Vec<PackageRow> = Vec::new();
         let mut skipped = 0;
@@ -213,7 +216,11 @@ impl FormulaTab {
                 Ok(cask) => {
                     let installed = !cask.installed.is_empty();
                     let status = if installed { "Installed" } else { "Available" };
-                    let version = if cask.version.is_empty() { "-" } else { cask.version.as_str() };
+                    let version = if cask.version.is_empty() {
+                        "-"
+                    } else {
+                        cask.version.as_str()
+                    };
                     rows.push(PackageRow {
                         kind: PackageKind::Cask,
                         name: cask.token,
@@ -232,7 +239,11 @@ impl FormulaTab {
         }
 
         if skipped > 0 {
-            eprintln!("Loaded {} casks (skipped {} malformed entries)", rows.len(), skipped);
+            eprintln!(
+                "Loaded {} casks (skipped {} malformed entries)",
+                rows.len(),
+                skipped
+            );
         }
 
         Ok(rows)
@@ -287,10 +298,7 @@ impl FormulaTab {
                 let text_score = matcher.fuzzy_match(&searchable_text, &query_lower);
 
                 // Use the best score
-                let best_score = name_score
-                    .or(text_score)
-                    .map(|s| s as i64)
-                    .unwrap_or(0);
+                let best_score = name_score.or(text_score).map(|s| s as i64).unwrap_or(0);
 
                 if best_score > 0 {
                     Some((best_score, row))
@@ -310,7 +318,7 @@ impl FormulaTab {
     pub fn render_table(&mut self, area: Rect, buf: &mut Buffer, search_query: &str) {
         // Calculate filtered count first
         let filtered_count = self.get_item_count(search_query);
-        
+
         // Ensure selected_index is within bounds
         let max_index = if filtered_count == 0 {
             0
@@ -322,14 +330,14 @@ impl FormulaTab {
         // Calculate viewport: account for header (1 row) and borders (2 rows)
         let available_height = area.height.saturating_sub(2); // Subtract borders
         let viewport_height = (available_height.saturating_sub(1)) as usize; // Subtract header
-        
+
         // Adjust scroll offset to keep selected row visible
         if selected_idx < self.scroll_offset {
             self.scroll_offset = selected_idx;
         } else if selected_idx >= self.scroll_offset + viewport_height {
             self.scroll_offset = selected_idx.saturating_sub(viewport_height.saturating_sub(1));
         }
-        
+
         // Ensure scroll_offset doesn't go beyond available rows
         if self.scroll_offset > filtered_count.saturating_sub(viewport_height) {
             self.scroll_offset = filtered_count.saturating_sub(viewport_height);
@@ -337,7 +345,7 @@ impl FormulaTab {
         if self.scroll_offset > filtered_count {
             self.scroll_offset = 0;
         }
-        
+
         let scroll_offset = self.scroll_offset;
 
         // Now get filtered rows and visible rows
@@ -439,7 +447,7 @@ impl FormulaTab {
     pub fn render_preview(&self, area: Rect, buf: &mut Buffer, search_query: &str) {
         let filtered_rows = self.filter(search_query);
         let filtered_count = filtered_rows.len();
-        
+
         let max_index = if filtered_count == 0 {
             0
         } else {
@@ -448,14 +456,19 @@ impl FormulaTab {
         let selected_idx = self.selected_index.min(max_index);
 
         let preview_content = if filtered_rows.is_empty() {
-            Text::from(vec![
-                Line::from("No formulas to display".fg(Color::DarkGray)),
-            ])
+            Text::from(vec![Line::from(
+                "No formulas to display".fg(Color::DarkGray),
+            )])
         } else {
             let selected_row = filtered_rows[selected_idx];
             let lines = vec![
                 Line::from(vec![
-                    Span::styled("Selected Formula ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Selected Formula ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(
                         format!("({}/{})", selected_idx + 1, filtered_count),
                         Style::default().fg(Color::Gray),
@@ -463,32 +476,66 @@ impl FormulaTab {
                 ]),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Name: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Name: ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(selected_row.name.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(vec![
-                    Span::styled("Type: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(selected_row.kind.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(
+                        "Type: ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        selected_row.kind.as_str(),
+                        Style::default().fg(Color::White),
+                    ),
                 ]),
                 Line::from(vec![
-                    Span::styled("Version: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(selected_row.version.clone(), Style::default().fg(Color::White)),
+                    Span::styled(
+                        "Version: ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        selected_row.version.clone(),
+                        Style::default().fg(Color::White),
+                    ),
                 ]),
                 Line::from(vec![
-                    Span::styled("Status: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(selected_row.status.clone(), Style::default().fg(Color::White)),
+                    Span::styled(
+                        "Status: ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        selected_row.status.clone(),
+                        Style::default().fg(Color::White),
+                    ),
                 ]),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Filters: ", Style::default().fg(Color::Gray)),
                     Span::styled(
-                        format!("{} | {}", self.filters.kind.as_str(), self.filters.install.as_str()),
+                        format!(
+                            "{} | {}",
+                            self.filters.kind.as_str(),
+                            self.filters.install.as_str()
+                        ),
                         Style::default().fg(Color::White),
                     ),
                 ]),
-                Line::from(vec![
-                    Span::styled("Navigation: ", Style::default().fg(Color::Gray)),
-                ]),
+                Line::from(vec![Span::styled(
+                    "Navigation: ",
+                    Style::default().fg(Color::Gray),
+                )]),
                 Line::from(vec![
                     Span::styled("  ↑/↓ or j/k ", Style::default().fg(Color::DarkGray)),
                     Span::styled("Move up/down", Style::default().fg(Color::White)),
@@ -532,7 +579,7 @@ impl FormulaTab {
     pub fn handle_navigation(&mut self, direction: NavigationDirection, search_query: &str) {
         let filtered_rows = self.filter(search_query);
         let filtered_count = filtered_rows.len();
-        
+
         match direction {
             NavigationDirection::Up => {
                 if filtered_count > 0 {
@@ -581,4 +628,3 @@ pub enum NavigationDirection {
     Up,
     Down,
 }
-
