@@ -3,7 +3,6 @@ use crate::cli::args::{Cli, Command};
 use crate::tui;
 use clap::Parser;
 use engine::actions::install::{InstallRequest, run};
-use engine::system::init_system;
 
 pub fn install(args: InstallArgs) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -65,7 +64,6 @@ pub fn run_cli(cmd: Command) {
 
 pub fn entry() {
     let cli = Cli::parse();
-    let system = init_system();
     match cli.command {
         None => {
             if let Err(e) = tui::launch_tui() {

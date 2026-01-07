@@ -3,18 +3,17 @@ use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::system::{MacOS, System};
 use crate::utils::archive::ArchiveExtractor;
 use crate::utils::hashing::Hashing;
+use crate::utils::link::SymlinkOps;
 use crate::utils::net::NetUtils;
 use crate::utils::paths::PathOps;
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 pub trait InstallOps {
-    fn install_root() -> PathBuf;
-    fn needs_admin() -> bool;
-    fn exe_suffix() -> &'static str;
     fn select_bottle_file(bottle: &BottleSpec) -> Result<BottleFileSpec>;
     async fn find_binary_recursive(
-        install_path: &PathBuf,
+        install_path: &Path,
         formula_name: &str,
     ) -> Result<Option<PathBuf>>;
 }
@@ -167,19 +166,7 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
             let _ = tokio::fs::remove_file(&symlink_path).await;
         }
 
-        // Create symlink
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(binary, &symlink_path)
-                .context("Failed to create symlink")?;
-        }
-        #[cfg(not(unix))]
-        {
-            // On Windows, copy instead of symlink
-            tokio::fs::copy(binary, &symlink_path)
-                .await
-                .context("Failed to copy binary")?;
-        }
+        System::create_symlink(binary, &symlink_path).expect("failed to create symlink to bin");
         println!(
             "Created symlink: {} -> {}",
             symlink_path.display(),
@@ -257,17 +244,6 @@ pub struct BottleInfo {
 }
 
 impl InstallOps for MacOS {
-    fn install_root() -> PathBuf {
-        PathBuf::from("/opt/still")
-    }
-
-    fn needs_admin() -> bool {
-        true
-    }
-
-    fn exe_suffix() -> &'static str {
-        ""
-    }
     fn select_bottle_file(bottle: &BottleSpec) -> Result<BottleFileSpec> {
         {
             #[cfg(target_arch = "aarch64")]
@@ -314,7 +290,7 @@ impl InstallOps for MacOS {
             .ok_or_else(|| anyhow::anyhow!("No bottle files available for this system"))
     }
     async fn find_binary_recursive(
-        install_path: &PathBuf,
+        install_path: &Path,
         formula_name: &str,
     ) -> Result<Option<PathBuf>> {
         // First, try the direct bin directory
@@ -328,7 +304,6 @@ impl InstallOps for MacOS {
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
                 if path.is_file() {
-                    use std::os::unix::fs::PermissionsExt;
                     let metadata = tokio::fs::metadata(&path).await?;
                     if metadata.permissions().mode() & 0o111 != 0 {
                         return Ok(Some(path));
@@ -338,7 +313,7 @@ impl InstallOps for MacOS {
         }
 
         // Recursively search for bin directories
-        let mut dirs_to_check = vec![install_path.clone()];
+        let mut dirs_to_check = vec![install_path.to_path_buf()];
         while let Some(dir) = dirs_to_check.pop() {
             let mut entries = tokio::fs::read_dir(&dir).await?;
             while let Some(entry) = entries.next_entry().await? {
@@ -350,7 +325,6 @@ impl InstallOps for MacOS {
                         while let Some(bin_entry) = bin_entries.next_entry().await? {
                             let bin_path = bin_entry.path();
                             if bin_path.is_file() {
-                                use std::os::unix::fs::PermissionsExt;
                                 let metadata = tokio::fs::metadata(&bin_path).await?;
                                 if metadata.permissions().mode() & 0o111 != 0 {
                                     return Ok(Some(bin_path));

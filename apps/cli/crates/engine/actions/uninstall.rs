@@ -1,4 +1,4 @@
-use crate::system::{Linux, MacOS, Windows};
+use crate::system::MacOS;
 use std::path::PathBuf;
 
 pub trait UninstallOps {
@@ -26,43 +26,5 @@ impl UninstallOps for MacOS {
 
     fn exe_suffix(&self) -> &'static str {
         ""
-    }
-}
-
-// Linux implementation
-impl UninstallOps for Linux {
-    fn install_root(&self) -> PathBuf {
-        dirs::home_dir().unwrap().join(".still")
-    }
-
-    fn bin_dir(&self) -> PathBuf {
-        dirs::home_dir().unwrap().join(".local/bin")
-    }
-
-    fn needs_admin(&self) -> bool {
-        true
-    }
-
-    fn exe_suffix(&self) -> &'static str {
-        ""
-    }
-}
-
-// Windows implementation
-impl UninstallOps for Windows {
-    fn install_root(&self) -> PathBuf {
-        PathBuf::from(r"C:\still")
-    }
-
-    fn bin_dir(&self) -> PathBuf {
-        PathBuf::from(r"C:\still\bin")
-    }
-
-    fn needs_admin(&self) -> bool {
-        false
-    }
-
-    fn exe_suffix(&self) -> &'static str {
-        ".exe"
     }
 }
