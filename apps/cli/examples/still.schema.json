@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://still.dev/schemas/still.schema.json",
+  "title": "Still Config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "tools": {
+      "$ref": "#/$defs/toolMap"
+    },
+    "env": {
+      "$ref": "#/$defs/env"
+    },
+    "packages": {
+      "$ref": "#/$defs/packageMap"
+    },
+    "apps": {
+      "$ref": "#/$defs/appMap"
+    },
+    "services": {
+      "$ref": "#/$defs/serviceMap"
+    },
+    "hooks": {
+      "$ref": "#/$defs/hooks"
+    },
+    "tasks": {
+      "$ref": "#/$defs/taskMap"
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "platform": {
+      "type": "string",
+      "enum": ["macos", "linux", "windows"]
+    },
+    "platformList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/platform"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "platformNames": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "macos": {
+          "type": "string",
+          "minLength": 1
+        },
+        "linux": {
+          "type": "string",
+          "minLength": 1
+        },
+        "windows": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "backend": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "toolMap": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/version"
+          },
+          {
+            "$ref": "#/$defs/tool"
+          }
+        ]
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "backend": {
+          "$ref": "#/$defs/backend"
+        },
+        "components": {
+          "$ref": "#/$defs/stringList"
+        },
+        "targets": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "properties": {
+        "files": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "packageMap": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/package"
+      },
+      "properties": {
+        "latest": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "backend": {
+          "$ref": "#/$defs/backend"
+        },
+        "names": {
+          "$ref": "#/$defs/platformNames"
+        },
+        "platforms": {
+          "$ref": "#/$defs/platformList"
+        },
+        "ignore": {
+          "$ref": "#/$defs/platform"
+        },
+        "only": {
+          "$ref": "#/$defs/platform"
+        }
+      }
+    },
+    "appMap": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/app"
+      },
+      "properties": {
+        "latest": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "backend": {
+          "$ref": "#/$defs/backend"
+        },
+        "names": {
+          "$ref": "#/$defs/platformNames"
+        },
+        "platforms": {
+          "$ref": "#/$defs/platformList"
+        },
+        "ignore": {
+          "$ref": "#/$defs/platform"
+        },
+        "only": {
+          "$ref": "#/$defs/platform"
+        }
+      }
+    },
+    "serviceMap": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "$ref": "#/$defs/taskRef"
+          },
+          {
+            "$ref": "#/$defs/service"
+          }
+        ]
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start": {
+          "$ref": "#/$defs/serviceAction"
+        },
+        "stop": {
+          "$ref": "#/$defs/serviceAction"
+        },
+        "check": {
+          "$ref": "#/$defs/serviceAction"
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["preset"]
+        },
+        {
+          "required": ["start"]
+        },
+        {
+          "required": ["check"]
+        }
+      ]
+    },
+    "serviceAction": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/taskRef"
+        },
+        {
+          "$ref": "#/$defs/commandRef"
+        }
+      ]
+    },
+    "taskRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task"],
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "commandRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "on_enter": {
+          "$ref": "#/$defs/stringList"
+        },
+        "on_exit": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "taskMap": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "$ref": "#/$defs/task"
+          }
+        ]
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run"],
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "run": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "$ref": "#/$defs/stringList"
+            }
+          ]
+        },
+        "depends": {
+          "$ref": "#/$defs/stringList"
+        },
+        "requires": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    }
+  }
+}

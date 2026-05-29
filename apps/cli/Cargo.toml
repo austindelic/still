@@ -1,18 +1,20 @@
+[package]
+name = "still"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "still_s"
+path = "src/main.rs"
+
 [workspace]
-members = [
-  "crates/engine",
-  "crates/ui",
-]
+members = ["crates/engine", "crates/ui"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-
-[package]
-name = "still"
-version.workspace = true
-edition.workspace = true
+rust-version = "1.85"
 
 [dependencies]
 engine = { path = "crates/engine" }
@@ -22,9 +24,5 @@ ui = { path = "crates/ui" }
 strip = true
 lto = true
 codegen-units = 1
+opt-level = "s"
 panic = "abort"
-
-
-[target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
-ar = "x86_64-w64-mingw32-ar"

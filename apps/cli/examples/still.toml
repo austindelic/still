@@ -1,9 +1,99 @@
-[env]
-NODE_ENV = 'production'
-
 [tools]
-terraform = '1.0.0'
-erlang = '24.0'
+node = "22"
+python = "3.12"
+go = "latest"
 
-[tasks.build]
-run = 'echo "running build tasks"'
+[tools.rust]
+version = "stable"
+backend = "rustup"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+
+[tools.pnpm]
+version = "latest"
+backend = "npm"
+
+[env]
+RUST_LOG = "debug"
+NODE_ENV = "development"
+
+files = [
+  ".env",
+  ".env.local",
+]
+
+[packages]
+latest = ["pandoc", "ripgrep", "fd", "jq", "ffmpeg"]
+postgresql = {version = "16", backend = "auto"}
+
+[packages.llvm]
+version = "18"
+backend = "auto"
+
+[packages.fd.names]
+macos = "fd"
+linux = "fd-find"
+windows = "fd"
+
+[packages.watchman]
+version = "latest"
+platforms = ["macos", "linux"]
+ignore = "windows"
+
+[apps]
+latest = ["docker-desktop", "zed", "firefox"]
+
+[apps.visual-studio-code]
+version = "latest"
+backend = "auto"
+
+# ------------------------------------------------------------
+# Services
+# ------------------------------------------------------------
+# Services are things that must be running while the project is active.
+#
+# You should not need to write start/check/stop commands every time.
+# Still should ship built-in service presets.
+# auto watches if enabled so that the service is never stale
+
+[services]
+docker-compose = "docker compose up" # Shorthand for a start command.
+dev-server = { task = "dev-server" }
+# Expanded form when you need custom behaviour.
+
+[services.docker]
+start = { task = "docker:start" }
+stop = { task = "docker:stop" }
+check = { task = "docker:check" }
+
+
+[tasks]
+test = "cargo test"
+fmt = "cargo fmt"
+dev = "cargo run"
+docker:check = "docker info"
+docker:start = "open -a Docker"
+docker:stop = "osascript -e 'quit app \"Docker\"'"
+
+# Expanded task syntax.
+
+[tasks.lint]
+description = "Run lint checks"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --all-features",
+]
+# also valid:
+# run = """
+#   cargo fmt --check
+#   cargo clippy --all-targets --all-features"""
+
+[tasks.ci]
+description = "Run full CI"
+depends = ["lint", "test"]
+run = "echo CI passed"
+
+[tasks.dev-server]
+description = "Run development server"
+requires = ["docker"]
+run = "cargo run"

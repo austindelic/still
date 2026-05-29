@@ -1,4 +1,5 @@
 use flate2::read::GzDecoder;
+use serde_json::ser::Formatter;
 use std::io::Read;
 use std::path::Path;
 use tar::Archive;
@@ -41,7 +42,7 @@ impl ArchiveExtractor {
         while let Some(entry) = read_dir.next_entry().await? {
             entries.push(entry);
         }
-        
+
         if entries.len() == 1 {
             // Single top-level directory - move its contents to install_path
             let top_level = entries[0].path();
@@ -52,11 +53,11 @@ impl ArchiveExtractor {
                 while let Some(entry) = read_top_dir.next_entry().await? {
                     top_entries.push(entry);
                 }
-                
+
                 for entry in top_entries {
                     let entry_path = entry.path();
                     let dest_path = install_path.join(entry_path.file_name().unwrap());
-                    
+
                     if entry_path.is_dir() {
                         // Use rename for directories (more efficient)
                         fs::rename(&entry_path, &dest_path).await?;
@@ -88,4 +89,3 @@ impl ArchiveExtractor {
         Ok(())
     }
 }
-

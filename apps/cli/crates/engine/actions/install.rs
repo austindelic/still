@@ -30,149 +30,31 @@ pub struct InstallResult {
 }
 
 pub async fn run(request: InstallRequest) -> Result<InstallResult> {
-    // TODO: only using homebrew for now.
-    let formula_path = System::cache_dir().join("still").join("formula.json");
+    let formula_path = formula_json_path();
+    ensure_formula_json_exists(&formula_path)?;
 
-    // Load and parse formula.json
-    if !formula_path.exists() {
-        anyhow::bail!("formula.json not found at: {}", formula_path.display());
-    }
+    let formulas = load_formula_json_array(&formula_path).await?;
+    let formula = find_matching_formula(&formulas, &request.tool.name)
+        .with_context(|| format!("Formula '{}' not found in formula.json", request.tool.name))?;
 
-    let content = tokio::fs::read_to_string(&formula_path)
-        .await
-        .context("Failed to read formula.json")?;
+    warn_if_version_mismatch(&request.tool, &formula);
 
-    // Parse as a JSON array first, then parse each formula individually
-    // This allows us to skip malformed formulas instead of failing entirely
-    let json_array: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse JSON array: {}", e))?;
-
-    let array = json_array
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Expected JSON array"))?;
-
-    // Find formula matching the tool name
-    let formula = array
-        .iter()
-        .find_map(|formula_value| {
-            match serde_json::from_value::<crate::specs::brew::FormulaSpec>(formula_value.clone()) {
-                Ok(f) => {
-                    if f.name == request.tool.name
-                        || f.aliases.contains(&request.tool.name)
-                        || f.oldnames.contains(&request.tool.name)
-                    {
-                        Some(f)
-                    } else {
-                        None
-                    }
-                }
-                Err(_) => None, // Skip malformed formulas
-            }
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!("Formula '{}' not found in formula.json", request.tool.name)
-        })?;
-
-    // Check version match
-    let version_matches = request.tool.version == "latest"
-        || request.tool.version == formula.versions.stable
-        || semver::Version::parse(&request.tool.version)
-            .and_then(|req_ver| {
-                semver::Version::parse(&formula.versions.stable).map(|form_ver| req_ver == form_ver)
-            })
-            .unwrap_or(false);
-
-    if !version_matches && request.tool.version != "latest" {
-        println!(
-            "Warning: Requested version '{}' does not match formula version '{}'",
-            request.tool.version, formula.versions.stable
-        );
-    }
-
-    // Extract bottle information
-    let bottle_info = if let Some(bottle) = &formula.bottle {
-        Some(BottleInfo {
-            formula_name: formula.name.clone(),
-            version: formula.versions.stable.clone(),
-            bottle: bottle.clone(),
-        })
-    } else {
-        None
-    };
-
-    // Check if bottle is available
-    let bottle_info = bottle_info.ok_or_else(|| {
-        anyhow::anyhow!(
-            "No bottle available for {}@{}",
-            formula.name,
-            formula.versions.stable
-        )
-    })?;
-
+    let bottle_info = build_bottle_info(&formula)?;
     println!(
         "Found bottle for {}@{}",
         bottle_info.formula_name, bottle_info.version
     );
 
-    // Select the appropriate bottle file based on system
     let bottle_file = System::select_bottle_file(&bottle_info.bottle)?;
     println!("Selected bottle: {}", bottle_file.url);
 
-    // Get bearer token for GitHub Container Registry
-    let token = get_ghcr_token(&formula.name).await?;
+    let bottle_data = fetch_and_verify_bottle(&formula.name, &bottle_file).await?;
 
-    // Download the bottle
-    println!("Downloading bottle...");
-    let bottle_data = download_bottle(&bottle_file.url, &token)
-        .await
-        .context("Failed to download bottle")?;
+    let install_path = compute_install_path(&formula.name, &formula.versions.stable);
+    reinstall_to_path(&bottle_data, &install_path).await?;
 
-    // Verify SHA256 checksum
-    println!("Verifying checksum...");
-    Hashing::verify_sha256(&bottle_data, &bottle_file.sha256)
-        .map_err(|e| anyhow::anyhow!("Checksum verification failed: {}", e))?;
-    println!("Checksum verified");
-
-    // Determine install path
-    let install_path = System::tool_dir()
-        .join(&formula.name)
-        .join(&formula.versions.stable);
-
-    // Remove existing installation if it exists
-    if install_path.exists() {
-        println!("Removing existing installation...");
-        tokio::fs::remove_dir_all(&install_path)
-            .await
-            .context("Failed to remove existing installation")?;
-    }
-
-    // Extract the bottle
-    println!("Extracting to {}...", install_path.display());
-    ArchiveExtractor::extract_tar_gz(&bottle_data, &install_path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to extract bottle: {}", e))?;
-
-    // Find binary path - search recursively for bin directories
     let binary_path = System::find_binary_recursive(&install_path, &formula.name).await?;
-
-    // Create symlink in bin_dir if binary found
-    if let Some(ref binary) = binary_path {
-        let system_bin_dir = System::bin_dir();
-        tokio::fs::create_dir_all(&system_bin_dir).await?;
-        let symlink_path = system_bin_dir.join(binary.file_name().unwrap());
-
-        // Remove existing symlink if it exists
-        if symlink_path.exists() || symlink_path.is_symlink() {
-            let _ = tokio::fs::remove_file(&symlink_path).await;
-        }
-
-        System::create_symlink(binary, &symlink_path).expect("failed to create symlink to bin");
-        println!(
-            "Created symlink: {} -> {}",
-            symlink_path.display(),
-            binary.display()
-        );
-    }
+    maybe_link_binary(&binary_path).await?;
 
     Ok(InstallResult {
         tool_name: formula.name.clone(),
@@ -182,7 +64,158 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     })
 }
 
-/// Select the appropriate bottle file based on the system architecture
+/* ----------------------------- small helpers ----------------------------- */
+
+fn formula_json_path() -> PathBuf {
+    System::cache_dir().join("still").join("formula.json")
+}
+
+fn ensure_formula_json_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        anyhow::bail!("formula.json not found at: {}", path.display());
+    }
+    Ok(())
+}
+
+async fn load_formula_json_array(path: &Path) -> Result<Vec<serde_json::Value>> {
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .with_context(|| format!("Failed to read formula.json at {}", path.display()))?;
+
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse JSON array: {e}"))?;
+
+    let array = json
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON array"))?;
+
+    Ok(array.clone())
+}
+
+fn find_matching_formula(
+    formulas: &[serde_json::Value],
+    tool_name: &str,
+) -> Result<crate::specs::brew::FormulaSpec> {
+    for v in formulas {
+        let Ok(f) = serde_json::from_value::<crate::specs::brew::FormulaSpec>(v.clone()) else {
+            continue; // skip malformed formulas
+        };
+
+        if f.name == tool_name
+            || f.aliases.contains(&tool_name.to_string())
+            || f.oldnames.contains(&tool_name.to_string())
+        {
+            return Ok(f);
+        }
+    }
+
+    anyhow::bail!("No matching formula")
+}
+
+fn warn_if_version_mismatch(tool: &ToolSpec, formula: &crate::specs::brew::FormulaSpec) {
+    let version_matches = tool.version == "latest"
+        || tool.version == formula.versions.stable
+        || semver::Version::parse(&tool.version)
+            .and_then(|req_ver| {
+                semver::Version::parse(&formula.versions.stable).map(|form_ver| req_ver == form_ver)
+            })
+            .unwrap_or(false);
+
+    if !version_matches && tool.version != "latest" {
+        println!(
+            "Warning: Requested version '{}' does not match formula version '{}'",
+            tool.version, formula.versions.stable
+        );
+    }
+}
+
+fn build_bottle_info(formula: &crate::specs::brew::FormulaSpec) -> Result<BottleInfo> {
+    let bottle = formula.bottle.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "No bottle available for {}@{}",
+            formula.name,
+            formula.versions.stable
+        )
+    })?;
+
+    Ok(BottleInfo {
+        formula_name: formula.name.clone(),
+        version: formula.versions.stable.clone(),
+        bottle,
+    })
+}
+
+fn compute_install_path(formula_name: &str, version: &str) -> PathBuf {
+    System::tool_dir().join(formula_name).join(version)
+}
+
+async fn reinstall_to_path(bottle_data: &[u8], install_path: &Path) -> Result<()> {
+    if install_path.exists() {
+        println!("Removing existing installation...");
+        tokio::fs::remove_dir_all(install_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to remove existing installation at {}",
+                    install_path.display()
+                )
+            })?;
+    }
+
+    println!("Extracting to {}...", install_path.display());
+    ArchiveExtractor::extract_tar_gz(bottle_data, install_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to extract bottle: {e}"))?;
+
+    Ok(())
+}
+
+async fn maybe_link_binary(binary_path: &Option<PathBuf>) -> Result<()> {
+    let Some(binary) = binary_path.as_ref() else {
+        return Ok(());
+    };
+
+    let system_bin_dir = System::bin_dir();
+    tokio::fs::create_dir_all(&system_bin_dir).await?;
+    let symlink_path =
+        system_bin_dir.join(binary.file_name().ok_or_else(|| {
+            anyhow::anyhow!("Binary path has no file name: {}", binary.display())
+        })?);
+
+    if symlink_path.exists() || symlink_path.is_symlink() {
+        let _ = tokio::fs::remove_file(&symlink_path).await;
+    }
+
+    System::create_symlink(binary, &symlink_path).context("failed to create symlink to bin")?;
+
+    println!(
+        "Created symlink: {} -> {}",
+        symlink_path.display(),
+        binary.display()
+    );
+    Ok(())
+}
+
+/* -------------------------- network + verification -------------------------- */
+
+async fn fetch_and_verify_bottle(
+    formula_name: &str,
+    bottle_file: &BottleFileSpec,
+) -> Result<Vec<u8>> {
+    println!("Downloading bottle...");
+    let token = get_ghcr_token(formula_name).await?;
+    let bottle_data = download_bottle(&bottle_file.url, &token)
+        .await
+        .context("Failed to download bottle")?;
+
+    println!("Verifying checksum...");
+    Hashing::verify_sha256(&bottle_data, &bottle_file.sha256)
+        .map_err(|e| anyhow::anyhow!("Checksum verification failed: {e}"))?;
+    println!("Checksum verified");
+
+    Ok(bottle_data)
+}
+
 /// Get a bearer token from GitHub Container Registry
 async fn get_ghcr_token(formula_name: &str) -> Result<String> {
     let token_url = format!(
@@ -243,12 +276,13 @@ pub struct BottleInfo {
     pub bottle: BottleSpec,
 }
 
+/* --------------------------- macOS impl unchanged --------------------------- */
+
 impl InstallOps for MacOS {
     fn select_bottle_file(bottle: &BottleSpec) -> Result<BottleFileSpec> {
         {
             #[cfg(target_arch = "aarch64")]
             {
-                // Try arm64 variants first
                 if let Some(file) = bottle.stable.files.get("arm64_sequoia") {
                     return Ok(file.clone());
                 }
@@ -264,7 +298,6 @@ impl InstallOps for MacOS {
             }
             #[cfg(target_arch = "x86_64")]
             {
-                // Try x86_64 variants
                 if let Some(file) = bottle.stable.files.get("sonoma") {
                     return Ok(file.clone());
                 }
@@ -280,7 +313,6 @@ impl InstallOps for MacOS {
             }
         }
 
-        // If no specific match, try to get any available bottle
         bottle
             .stable
             .files
@@ -289,6 +321,7 @@ impl InstallOps for MacOS {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("No bottle files available for this system"))
     }
+
     async fn find_binary_recursive(
         install_path: &Path,
         formula_name: &str,
@@ -320,7 +353,6 @@ impl InstallOps for MacOS {
                 let path = entry.path();
                 if path.is_dir() {
                     if path.file_name().and_then(|n| n.to_str()) == Some("bin") {
-                        // Found a bin directory, check for binaries
                         let mut bin_entries = tokio::fs::read_dir(&path).await?;
                         while let Some(bin_entry) = bin_entries.next_entry().await? {
                             let bin_path = bin_entry.path();
