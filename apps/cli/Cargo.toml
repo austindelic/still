@@ -18,7 +18,15 @@ rust-version = "1.85"
 
 [dependencies]
 engine = { path = "crates/engine" }
-ui = { path = "crates/ui" }
+ui = { path = "crates/ui", default-features = false }
+
+[dev-dependencies]
+clap = { version = "4.5.53", features = ["derive"] }
+insta = "1.44.1"
+
+[features]
+default = []
+tui = ["ui/tui"]
 
 [profile.release]
 strip = true

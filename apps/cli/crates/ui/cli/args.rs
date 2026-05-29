@@ -19,7 +19,8 @@ pub enum Command {
     Init(InitArgs),           // Initialize configuration for a new project.
     Convert(ConvertArgs),     // Convert configuration or lockfiles to another supported format.
     Env,                      // Display environment information required for debugging.
-    Tui,                      // Launch the text-based user interface.
+    #[cfg(feature = "tui")]
+    Tui, // Launch the text-based user interface.
     Web,                      // Open or run the web-based management dashboard.
     Activate,                 // Activate a workspace or profile for the current shell session.
     Sync,                     // Synchronize the workspace state with configured sources.
@@ -63,3 +64,22 @@ pub struct InitArgs {}
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ConvertArgs {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_install_tool_spec_fails_during_parse() {
+        let err = match Cli::try_parse_from(["still", "install", "bad/tool"]) {
+            Ok(_) => panic!("invalid tool spec should fail to parse"),
+            Err(err) => err,
+        };
+
+        insta::assert_snapshot!(err.to_string(), @r###"
+error: invalid value 'bad/tool' for '<TOOL@VERSION>': Invalid tool name "bad/tool": tool name contains invalid character '/'. Tool names must match: [a-zA-Z][a-zA-Z0-9_-]*
+
+For more information, try '--help'.
+"###);
+    }
+}

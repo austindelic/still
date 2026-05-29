@@ -1,25 +1,56 @@
-/// Output formatting utilities
-pub struct Output;
+pub trait Output {
+    fn info(&mut self, msg: &str);
+    fn error(&mut self, msg: &str);
+    fn success(&mut self, msg: &str);
+    fn warning(&mut self, msg: &str);
+}
 
-impl Output {
-    /// Print an info message
-    pub fn info(msg: &str) {
-        println!("{}", msg);
+#[derive(Debug, Default)]
+pub struct StdOutput;
+
+impl Output for StdOutput {
+    fn info(&mut self, msg: &str) {
+        println!("{msg}");
     }
 
-    /// Print an error message
-    pub fn error(msg: &str) {
-        eprintln!("{}", msg);
+    fn error(&mut self, msg: &str) {
+        eprintln!("{msg}");
     }
 
-    /// Print a success message
-    pub fn success(msg: &str) {
-        println!("✓ {}", msg);
+    fn success(&mut self, msg: &str) {
+        println!("✓ {msg}");
     }
 
-    /// Print a warning message
-    pub fn warning(msg: &str) {
-        eprintln!("⚠ {}", msg);
+    fn warning(&mut self, msg: &str) {
+        eprintln!("⚠ {msg}");
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct BufferedOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl Output for BufferedOutput {
+    fn info(&mut self, msg: &str) {
+        push_line(&mut self.stdout, msg);
+    }
+
+    fn error(&mut self, msg: &str) {
+        push_line(&mut self.stderr, msg);
+    }
+
+    fn success(&mut self, msg: &str) {
+        push_line(&mut self.stdout, &format!("✓ {msg}"));
+    }
+
+    fn warning(&mut self, msg: &str) {
+        push_line(&mut self.stderr, &format!("⚠ {msg}"));
+    }
+}
+
+fn push_line(buffer: &mut String, msg: &str) {
+    buffer.push_str(msg);
+    buffer.push('\n');
+}
