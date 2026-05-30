@@ -196,6 +196,14 @@ mod tests {
         assert!(err.to_string().contains("line 2"));
     }
 
+    #[test]
+    fn env_file_parser_keeps_values_literal() {
+        let vars = parse_env_file("HOME_COPY=$HOME\nMESSAGE=\"hello $USER\"\n").unwrap();
+
+        assert_eq!(vars["HOME_COPY"], "$HOME");
+        assert_eq!(vars["MESSAGE"], "hello $USER");
+    }
+
     #[tokio::test]
     async fn env_file_loading_requires_trust() {
         let temp = tempfile::tempdir().unwrap();
@@ -213,6 +221,23 @@ mod tests {
 
         assert!(err.to_string().contains("not trusted"));
         assert!(err.to_string().contains("env file loading"));
+    }
+
+    #[tokio::test]
+    async fn missing_env_files_are_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [env]
+            files = [".env.missing"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let err = resolve_env(temp.path(), temp.path()).await.unwrap_err();
+
+        assert!(err.to_string().contains("failed to read env file"));
+        assert!(err.to_string().contains(".env.missing"));
     }
 
     fn write_trust_marker(config_path: &Path, content: &[u8]) {

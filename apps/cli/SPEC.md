@@ -154,14 +154,9 @@ Rules:
 - `files` lists env files loaded in order.
 - Later values should override earlier values when the same variable appears multiple times.
 - Loading env files is trust-sensitive because it imports project-defined process state.
-
-Open decisions:
-
-- Whether env files can be optional by syntax.
-- Whether shell expansion is allowed inside env values.
+- Env file entries are required; missing files are errors.
+- Env values are loaded literally after simple quote stripping. Still does not perform shell expansion inside env values.
 - Future Pkl support may validate richer config and environment inputs before they are loaded.
-
-Missing env files are errors.
 
 ### Packages
 
