@@ -237,12 +237,9 @@ Rules:
 
 - Apps use the same metadata shape as packages: `version`, `backend`, `names`, `platforms`, `ignore`, and `only`.
 - Apps should be modeled separately from packages because installation, linking, launchers, and uninstall behavior differ.
-
-Open decisions:
-
-- App install strategy: Still-managed cask/app installation vs delegating to system package managers.
-- Path layout for apps under Still-managed storage.
-- Whether apps should support activation or only install/uninstall/list.
+- Apps delegate installation to app-oriented platform backends, then Still records the managed install marker under `<still-root>/apps/<name>/<version>`.
+- Default app backends are `homebrew-cask` on macOS, `flatpak` on Linux, and `winget` on Windows.
+- Apps participate in install, sync, list, and uninstall. Activation is limited to shell/PATH environment setup and does not launch or expose apps in v0.1.
 
 ### Services
 

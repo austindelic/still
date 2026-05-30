@@ -497,9 +497,7 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
         .into());
     }
 
-    let install_path = System::apps_dir()
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str());
+    let install_path = app_install_path(item);
     write_install_marker(
         &install_path,
         item,
@@ -517,6 +515,12 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
         outputs: vec![install_path],
         linked_executables: Vec::new(),
     })
+}
+
+fn app_install_path(item: &InstallItemRequest) -> PathBuf {
+    System::apps_dir()
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1116,6 +1120,19 @@ mod tests {
         let err = app_install_command(&item).unwrap_err();
 
         assert!(err.to_string().contains("app backend unknown-backend"));
+    }
+
+    #[test]
+    fn app_install_path_uses_still_managed_app_storage() {
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox@latest@flatpak".parse::<ItemSpec>().unwrap(),
+        };
+
+        assert_eq!(
+            app_install_path(&item),
+            System::apps_dir().join("firefox").join("latest")
+        );
     }
 
     #[test]
