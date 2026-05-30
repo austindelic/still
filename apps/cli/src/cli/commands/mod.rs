@@ -35,10 +35,32 @@ where
             0
         }
         Command::Install(args) => install::run(args, runtime, output),
-        Command::Sync(args) => {
-            output.info(&format!("Sync command: {:?}", args));
-            0
-        }
+        Command::Sync(_args) => match runtime.sync() {
+            Ok(result) => {
+                output.info(&format!("Config: {}", result.path.display()));
+                output.info("Sync plan:");
+                if result.items.is_empty() {
+                    output.info("  (nothing to sync)");
+                }
+                for item in result.items {
+                    let backend = item
+                        .spec
+                        .backend
+                        .as_ref()
+                        .map(|backend| format!("@{backend}"))
+                        .unwrap_or_default();
+                    output.info(&format!(
+                        "  {} {}@{}{}",
+                        item.kind, item.spec.name, item.spec.version, backend
+                    ));
+                }
+                0
+            }
+            Err(e) => {
+                output.error(&format!("sync failed: {e}"));
+                1
+            }
+        },
         Command::List(args) => match runtime.list(args.all) {
             Ok(result) => {
                 output.info(&format!("Config: {}", result.path.display()));
@@ -299,6 +321,7 @@ mod tests {
         install::InstallResult,
         list::{ListItem, ListResult, ListSection},
         run::RunResult,
+        sync::{SyncItem, SyncResult},
         task::{TaskExecution, TaskResult, TaskSummary},
     };
     use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
@@ -327,6 +350,7 @@ mod tests {
         activate_result: Option<anyhow::Result<ActivateResult>>,
         activate_shells: Vec<Option<String>>,
         doctor_result: Option<anyhow::Result<DoctorResult>>,
+        sync_result: Option<anyhow::Result<SyncResult>>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -398,6 +422,12 @@ mod tests {
                 .take()
                 .expect("test runtime doctor result was not configured")
         }
+
+        fn sync(&mut self) -> anyhow::Result<SyncResult> {
+            self.sync_result
+                .take()
+                .expect("test runtime sync result was not configured")
+        }
     }
 
     #[test]
@@ -423,6 +453,7 @@ mod tests {
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -463,6 +494,7 @@ mod tests {
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -505,6 +537,7 @@ config check failed: failed to parse still.toml
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -542,6 +575,7 @@ config check failed: failed to parse still.toml
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -583,6 +617,7 @@ init failed: still.toml already exists
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -622,6 +657,7 @@ RUST_LOG=debug
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -672,6 +708,7 @@ env failed: failed to read still.toml
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -716,6 +753,7 @@ Apps:
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -762,6 +800,7 @@ list failed: failed to read still.toml
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -810,6 +849,7 @@ Skills:
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -863,6 +903,7 @@ warn
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -905,6 +946,7 @@ run failed: failed to run cargo
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -966,6 +1008,7 @@ run failed: failed to run cargo
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1017,6 +1060,7 @@ Tasks:
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1062,6 +1106,7 @@ failed
             })),
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1101,6 +1146,7 @@ export PATH="/opt/still/bin:$PATH"
             activate_result: Some(Err(anyhow!("unsupported shell"))),
             activate_shells: Vec::new(),
             doctor_result: None,
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1152,6 +1198,7 @@ activate failed: unsupported shell
                     },
                 ],
             })),
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1189,6 +1236,7 @@ activate failed: unsupported shell
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: Some(Err(anyhow!("home directory missing"))),
+            sync_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1205,6 +1253,95 @@ doctor failed: home directory missing
 "###);
     }
 
+    #[test]
+    fn sync_formats_desired_items() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: Some(Ok(SyncResult {
+                path: PathBuf::from("/repo/still.toml"),
+                items: vec![
+                    sync_item(ItemKind::Tool, "rust@stable@rustup"),
+                    sync_item(ItemKind::Package, "openssl"),
+                    sync_item(ItemKind::App, "firefox@latest@homebrew-cask"),
+                ],
+            })),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Sync(crate::cli::args::SyncArgs {}),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Sync plan:
+  tool rust@stable@rustup
+  package openssl@latest
+  app firefox@latest@homebrew-cask
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn sync_formats_empty_plan() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: Some(Ok(SyncResult {
+                path: PathBuf::from("/repo/still.toml"),
+                items: Vec::new(),
+            })),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Sync(crate::cli::args::SyncArgs {}),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Sync plan:
+  (nothing to sync)
+"###);
+    }
+
     fn section<const N: usize>(kind: ItemKind, items: [ListItem; N]) -> ListSection {
         ListSection {
             kind,
@@ -1217,6 +1354,13 @@ doctor failed: home directory missing
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+        }
+    }
+
+    fn sync_item(kind: ItemKind, spec: &str) -> SyncItem {
+        SyncItem {
+            kind,
+            spec: spec.parse().unwrap(),
         }
     }
 

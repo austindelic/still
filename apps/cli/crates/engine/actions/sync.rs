@@ -1,0 +1,216 @@
+//! Engine action for planning config synchronization.
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+
+use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::platform::{PlatformFilter, PlatformId};
+use crate::specs::item::{ItemKind, ItemSpec};
+use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
+
+/// Request to synchronize installed state with config.
+#[derive(Debug, Clone)]
+pub struct SyncRequest {
+    pub start_dir: PathBuf,
+    pub home_dir: PathBuf,
+}
+
+/// Side-effect-free sync report for desired install state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncResult {
+    pub path: PathBuf,
+    pub items: Vec<SyncItem>,
+}
+
+/// One desired item that sync should reconcile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncItem {
+    pub kind: ItemKind,
+    pub spec: ItemSpec,
+}
+
+/// Reads config and returns the desired install state that needs reconciliation.
+/// # Errors
+/// Fails when config cannot be found, read, parsed, or normalized.
+pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
+    let resolved = resolve_config_path(
+        &request.start_dir,
+        &request.home_dir,
+        ConfigSelection {
+            scope: ConfigScope::Project,
+            for_write: false,
+        },
+    )?;
+    let content = tokio::fs::read_to_string(&resolved.path)
+        .await
+        .with_context(|| format!("failed to read {}", resolved.path.display()))?;
+    let config = parse_still_toml(&content)?;
+
+    Ok(SyncResult {
+        path: resolved.path,
+        items: sync_items(config)?,
+    })
+}
+
+fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
+    let platform = current_platform();
+    let mut items = Vec::new();
+    for (name, entry) in config.tools {
+        items.push(SyncItem {
+            kind: ItemKind::Tool,
+            spec: tool_spec(name, entry)?,
+        });
+    }
+    items.extend(package_items(ItemKind::Package, config.packages, platform)?);
+    items.extend(package_items(ItemKind::App, config.apps, platform)?);
+    Ok(items)
+}
+
+fn tool_spec(name: String, entry: ToolEntry) -> Result<ItemSpec> {
+    match entry {
+        ToolEntry::Version(version) => item_spec(name, version, None),
+        ToolEntry::Expanded(tool) => {
+            let version = if tool.version.is_empty() {
+                "latest".to_string()
+            } else {
+                tool.version
+            };
+            item_spec(name, version, tool.backend)
+        }
+    }
+}
+
+fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Result<Vec<SyncItem>> {
+    let mut items = Vec::new();
+    for name in map.latest {
+        items.push(SyncItem {
+            kind,
+            spec: item_spec(name, "latest".to_string(), None)?,
+        });
+    }
+
+    for (name, entry) in map.entries {
+        let PackageEntry::Expanded(package) = entry;
+        let filter = PlatformFilter::from_config(
+            &package.platforms,
+            package.ignore.as_deref(),
+            package.only.as_deref(),
+        )?;
+        if !filter.matches(platform) {
+            continue;
+        }
+
+        items.push(SyncItem {
+            kind,
+            spec: item_spec(
+                name,
+                package.version.unwrap_or_else(|| "latest".to_string()),
+                package.backend,
+            )?,
+        });
+    }
+    Ok(items)
+}
+
+fn item_spec(name: String, version: String, backend: Option<String>) -> Result<ItemSpec> {
+    match backend {
+        Some(backend) => format!("{name}@{version}@{backend}").parse(),
+        None => format!("{name}@{version}").parse(),
+    }
+}
+
+fn current_platform() -> PlatformId {
+    if cfg!(target_os = "macos") {
+        PlatformId::Macos
+    } else if cfg!(target_os = "windows") {
+        PlatformId::Windows
+    } else {
+        PlatformId::Linux
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn sync_plans_tools_packages_and_apps() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools]
+            jq = "latest"
+            rust = { version = "stable", backend = "rustup" }
+
+            [packages]
+            latest = ["openssl"]
+            llvm = { version = "18", backend = "homebrew" }
+
+            [apps]
+            latest = ["firefox"]
+            "#,
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, temp.path().join("still.toml"));
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| { item.kind == ItemKind::Tool && item.spec.name == "rust" })
+        );
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| { item.kind == ItemKind::Package && item.spec.name == "openssl" })
+        );
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| { item.kind == ItemKind::App && item.spec.name == "firefox" })
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_skips_items_for_other_platforms() {
+        let temp = tempfile::tempdir().unwrap();
+        let other_platform = if cfg!(target_os = "windows") {
+            "linux"
+        } else {
+            "windows"
+        };
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [packages.skip-me]
+                version = "latest"
+                only = "{other_platform}"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.items.is_empty());
+    }
+}

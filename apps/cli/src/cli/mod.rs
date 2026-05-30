@@ -128,6 +128,7 @@ mod tests {
         init::InitResult,
         list::ListResult,
         run::RunResult,
+        sync::SyncResult,
         task::TaskResult,
     };
 
@@ -182,6 +183,10 @@ mod tests {
                     detail: "detected test".to_string(),
                 }],
             })
+        }
+
+        fn sync(&mut self) -> anyhow::Result<SyncResult> {
+            panic!("sync should not run in these routing tests");
         }
     }
 

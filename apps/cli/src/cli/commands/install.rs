@@ -85,6 +85,7 @@ mod tests {
     use engine::actions::install::InstallResult;
     use engine::actions::list::ListResult;
     use engine::actions::run::RunResult;
+    use engine::actions::sync::SyncResult;
     use engine::actions::task::TaskResult;
 
     use super::*;
@@ -148,6 +149,10 @@ mod tests {
 
         fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
             panic!("doctor should not run in install tests");
+        }
+
+        fn sync(&mut self) -> anyhow::Result<SyncResult> {
+            panic!("sync should not run in install tests");
         }
     }
 

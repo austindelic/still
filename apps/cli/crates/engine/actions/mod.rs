@@ -18,6 +18,8 @@ pub mod install;
 pub mod list;
 /// Run action implementation.
 pub mod run;
+/// Sync action implementation.
+pub mod sync;
 /// Task action implementation.
 pub mod task;
 /// Uninstall action implementation.

@@ -10,6 +10,7 @@ use engine::actions::{
     install::{InstallRequest, InstallResult},
     list::{ListRequest, ListResult},
     run::{RunRequest, RunResult},
+    sync::{SyncRequest, SyncResult},
     task::{TaskRequest, TaskResult},
 };
 use engine::config::{ConfigScope, ConfigSelection, resolve_config_path};
@@ -61,6 +62,9 @@ pub trait CliRuntime {
 
     /// Runs local diagnostics.
     fn doctor(&mut self) -> anyhow::Result<DoctorResult>;
+
+    /// Plans synchronization against configured desired state.
+    fn sync(&mut self) -> anyhow::Result<SyncResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -182,6 +186,18 @@ impl CliRuntime for RealRuntime {
             start_dir,
             home_dir,
         })
+    }
+
+    fn sync(&mut self) -> anyhow::Result<SyncResult> {
+        let start_dir = std::env::current_dir()?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        let request = SyncRequest {
+            start_dir,
+            home_dir,
+        };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::sync::plan(request))
     }
 }
 
