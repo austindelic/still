@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -42,6 +42,8 @@ pub struct ListItem {
     pub version: String,
     pub backend: Option<String>,
     pub configured: bool,
+    pub project: bool,
+    pub global: bool,
     pub installed: bool,
 }
 
@@ -70,8 +72,9 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let mut sections = sections_from_config(config);
+    let mut sections = sections_from_config(config, resolved.scope);
     if request.all {
+        merge_global_config_items(&mut sections, &resolved.path, &request.home_dir).await?;
         merge_installed_items(&mut sections, discover_installed_items().await?);
     }
 
@@ -81,24 +84,43 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
     })
 }
 
-fn sections_from_config(config: StillConfig) -> Vec<ListSection> {
+async fn merge_global_config_items(
+    sections: &mut [ListSection],
+    active_path: &std::path::Path,
+    home_dir: &std::path::Path,
+) -> Result<()> {
+    let path = global_config_path(home_dir);
+    if path == active_path {
+        return Ok(());
+    }
+    let content = match tokio::fs::read_to_string(&path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
+    };
+    let config = parse_still_toml(&content)?;
+    merge_config_items(sections, sections_from_config(config, ConfigScope::Global));
+    Ok(())
+}
+
+fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Vec<ListSection> {
     vec![
         ListSection {
             kind: ItemKind::Tool,
-            items: tool_items(config.tools),
+            items: tool_items(config.tools, scope),
         },
         ListSection {
             kind: ItemKind::Package,
-            items: package_items(config.packages),
+            items: package_items(config.packages, scope),
         },
         ListSection {
             kind: ItemKind::App,
-            items: package_items(config.apps),
+            items: package_items(config.apps, scope),
         },
     ]
 }
 
-fn tool_items(tools: BTreeMap<String, ToolEntry>) -> Vec<ListItem> {
+fn tool_items(tools: BTreeMap<String, ToolEntry>, scope: ConfigScope) -> Vec<ListItem> {
     tools
         .into_iter()
         .map(|(name, entry)| match entry {
@@ -107,6 +129,8 @@ fn tool_items(tools: BTreeMap<String, ToolEntry>) -> Vec<ListItem> {
                 version,
                 backend: None,
                 configured: true,
+                project: scope == ConfigScope::Project,
+                global: scope == ConfigScope::Global,
                 installed: false,
             },
             ToolEntry::Expanded(tool) => ListItem {
@@ -118,13 +142,15 @@ fn tool_items(tools: BTreeMap<String, ToolEntry>) -> Vec<ListItem> {
                 },
                 backend: tool.backend,
                 configured: true,
+                project: scope == ConfigScope::Project,
+                global: scope == ConfigScope::Global,
                 installed: false,
             },
         })
         .collect()
 }
 
-fn package_items(map: PackageMap) -> Vec<ListItem> {
+fn package_items(map: PackageMap, scope: ConfigScope) -> Vec<ListItem> {
     let mut items = BTreeMap::new();
     for name in map.latest {
         items.insert(
@@ -134,6 +160,8 @@ fn package_items(map: PackageMap) -> Vec<ListItem> {
                 version: "latest".to_string(),
                 backend: None,
                 configured: true,
+                project: scope == ConfigScope::Project,
+                global: scope == ConfigScope::Global,
                 installed: false,
             },
         );
@@ -148,6 +176,8 @@ fn package_items(map: PackageMap) -> Vec<ListItem> {
                 version: package.version.unwrap_or_else(|| "latest".to_string()),
                 backend: package.backend,
                 configured: true,
+                project: scope == ConfigScope::Project,
+                global: scope == ConfigScope::Global,
                 installed: false,
             },
         );
@@ -244,8 +274,35 @@ async fn read_marker_item(kind: ItemKind, path: PathBuf) -> Result<Option<ListIt
         version: marker.version,
         backend: marker.backend,
         configured: false,
+        project: false,
+        global: false,
         installed: true,
     }))
+}
+
+fn merge_config_items(sections: &mut [ListSection], config_sections: Vec<ListSection>) {
+    for config_section in config_sections {
+        let Some(section) = sections
+            .iter_mut()
+            .find(|section| section.kind == config_section.kind)
+        else {
+            continue;
+        };
+        for config_item in config_section.items {
+            if let Some(existing) = section.items.iter_mut().find(|item| {
+                item.name == config_item.name
+                    && item.version == config_item.version
+                    && item.backend == config_item.backend
+            }) {
+                existing.configured = true;
+                existing.project |= config_item.project;
+                existing.global |= config_item.global;
+            } else {
+                section.items.push(config_item);
+            }
+        }
+        sort_items(&mut section.items);
+    }
 }
 
 fn merge_installed_items(sections: &mut [ListSection], installed_sections: Vec<ListSection>) {
@@ -267,13 +324,17 @@ fn merge_installed_items(sections: &mut [ListSection], installed_sections: Vec<L
                 section.items.push(installed_item);
             }
         }
-        section.items.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
-                .then_with(|| left.version.cmp(&right.version))
-                .then_with(|| left.backend.cmp(&right.backend))
-        });
+        sort_items(&mut section.items);
     }
+}
+
+fn sort_items(items: &mut [ListItem]) {
+    items.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.version.cmp(&right.version))
+            .then_with(|| left.backend.cmp(&right.backend))
+    });
 }
 
 #[cfg(test)]
@@ -353,7 +414,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.path, config);
-        assert_eq!(result.sections[0].items, [item("node", "22", None)]);
+        assert_eq!(result.sections[0].items, [global_item("node", "22", None)]);
     }
 
     #[tokio::test]
@@ -429,9 +490,57 @@ mod tests {
                     version: "14.1.1".to_string(),
                     backend: Some("homebrew".to_string()),
                     configured: true,
+                    project: true,
+                    global: false,
                     installed: true,
                 },
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_all_merges_global_config_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(
+            &global,
+            r#"
+            [tools]
+            node = "22"
+
+            [apps]
+            latest = ["firefox"]
+            "#,
+        )
+        .unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: true,
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            result.sections[0]
+                .items
+                .contains(&global_item("node", "22", None))
+        );
+        assert!(
+            result.sections[0]
+                .items
+                .contains(&item("rust", "stable", None))
+        );
+        assert!(
+            result.sections[2]
+                .items
+                .contains(&global_item("firefox", "latest", None))
         );
     }
 
@@ -441,6 +550,20 @@ mod tests {
             version: version.to_string(),
             backend: backend.map(str::to_string),
             configured: true,
+            project: true,
+            global: false,
+            installed: false,
+        }
+    }
+
+    fn global_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
+        ListItem {
+            name: name.to_string(),
+            version: version.to_string(),
+            backend: backend.map(str::to_string),
+            configured: true,
+            project: false,
+            global: true,
             installed: false,
         }
     }
@@ -451,6 +574,8 @@ mod tests {
             version: version.to_string(),
             backend: backend.map(str::to_string),
             configured: false,
+            project: false,
+            global: false,
             installed: true,
         }
     }

@@ -114,11 +114,15 @@ where
                             .backend
                             .map(|backend| format!("@{backend}"))
                             .unwrap_or_default();
-                        let status = match (item.configured, item.installed) {
-                            (true, true) => " (configured, installed)",
-                            (true, false) => "",
-                            (false, true) => " (installed)",
-                            (false, false) => "",
+                        let status = match (item.project, item.global, item.installed) {
+                            (true, true, true) => " (project, global, installed)",
+                            (true, true, false) => " (project, global)",
+                            (true, false, true) => " (configured, installed)",
+                            (true, false, false) => "",
+                            (false, true, true) => " (global, installed)",
+                            (false, true, false) => " (global)",
+                            (false, false, true) => " (installed)",
+                            (false, false, false) => "",
                         };
                         output.info(&format!(
                             "  {}@{}{}{}",
@@ -874,7 +878,10 @@ env failed: failed to read still.toml
             list_result: Some(Ok(ListResult {
                 path: PathBuf::from("/repo/still.toml"),
                 sections: vec![
-                    section(ItemKind::Tool, [item("jq", "latest", None)]),
+                    section(
+                        ItemKind::Tool,
+                        [item("jq", "latest", None), global_item("node", "22", None)],
+                    ),
                     section(
                         ItemKind::Package,
                         [
@@ -922,6 +929,7 @@ env failed: failed to read still.toml
 Config: /repo/still.toml
 Tools:
   jq@latest
+  node@22 (global)
 Packages:
   llvm@18@homebrew
   openssl@latest
@@ -1862,6 +1870,8 @@ Removed artifact /opt/still/packages/openssl
             version: version.to_string(),
             backend: backend.map(str::to_string),
             configured: true,
+            project: true,
+            global: false,
             installed: false,
         }
     }
@@ -1872,7 +1882,21 @@ Removed artifact /opt/still/packages/openssl
             version: version.to_string(),
             backend: backend.map(str::to_string),
             configured: false,
+            project: false,
+            global: false,
             installed: true,
+        }
+    }
+
+    fn global_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
+        ListItem {
+            name: name.to_string(),
+            version: version.to_string(),
+            backend: backend.map(str::to_string),
+            configured: true,
+            project: false,
+            global: true,
+            installed: false,
         }
     }
 
