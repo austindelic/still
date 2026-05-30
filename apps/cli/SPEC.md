@@ -214,6 +214,7 @@ ignore = "windows"
 Rules:
 
 - `latest` is an array of package names that should track the latest available version.
+- `latest` entries use the same portable name on every platform; use a keyed package entry with `names` when a backend needs a platform-specific package name.
 - A keyed package may specify `version`, `backend`, `backends`, `names`, `platforms`, `ignore`, and `only`.
 - `backends` overrides `backend` for specific platforms.
 - `names` maps Still's logical package name to backend/platform-specific package names.
@@ -221,11 +222,7 @@ Rules:
 - `ignore` excludes one platform.
 - `only` restricts an entry to one platform.
 - These three fields are normalized into the same platform filter used by sync and list planning.
-
-Open decisions:
-
-- Whether package names in `latest` can also have platform-specific name overrides.
-- How package installs map to platform-specific Still-managed storage.
+- Package and app install plans use the resolved platform/backend name for install storage under Still-managed roots until a backend adapter supplies a native platform path.
 
 ### Apps
 

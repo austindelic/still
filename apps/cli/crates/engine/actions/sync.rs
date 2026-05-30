@@ -234,16 +234,31 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
             continue;
         }
 
+        let resolved_name = name_for_platform(name, package.names, platform)?;
         items.push(SyncItem {
             kind,
             spec: item_spec(
-                name,
+                resolved_name,
                 package.version.unwrap_or_else(|| "latest".to_string()),
                 backend_for_platform(package.backend, package.backends, platform)?,
             )?,
         });
     }
     Ok(items)
+}
+
+fn name_for_platform(
+    name: String,
+    names: std::collections::BTreeMap<String, String>,
+    platform: PlatformId,
+) -> Result<String> {
+    for (key, value) in names {
+        let key_platform: PlatformId = key.parse()?;
+        if key_platform == platform {
+            return Ok(value);
+        }
+    }
+    Ok(name)
 }
 
 fn backend_for_platform(
@@ -406,6 +421,48 @@ mod tests {
                 && item.spec.name == "openssl"
                 && item.spec.backend.as_ref().unwrap().as_str() == "apt"
         }));
+    }
+
+    #[tokio::test]
+    async fn sync_uses_platform_specific_package_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let platform = current_platform().to_string();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+
+                [apps.browser]
+                version = "latest"
+                names = {{ {platform} = "firefox" }}
+                "#
+            ),
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| { item.kind == ItemKind::Package && item.spec.name == "fd-find" })
+        );
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| { item.kind == ItemKind::App && item.spec.name == "firefox" })
+        );
+        assert!(!result.items.iter().any(|item| item.spec.name == "browser"));
     }
 
     #[tokio::test]

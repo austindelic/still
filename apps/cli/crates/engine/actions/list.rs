@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
-use crate::platform::{PlatformId, current_platform};
+use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -79,7 +79,7 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let mut sections = sections_from_config(config, resolved.scope);
+    let mut sections = sections_from_config(config, resolved.scope)?;
     if request.all {
         merge_global_config_items(&mut sections, &resolved.path, &request.home_dir).await?;
         merge_installed_items(&mut sections, discover_installed_items().await?);
@@ -106,26 +106,26 @@ async fn merge_global_config_items(
         Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
     };
     let config = parse_still_toml(&content)?;
-    merge_config_items(sections, sections_from_config(config, ConfigScope::Global));
+    merge_config_items(sections, sections_from_config(config, ConfigScope::Global)?);
     Ok(())
 }
 
-fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Vec<ListSection> {
+fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Result<Vec<ListSection>> {
     let platform = current_platform();
-    vec![
+    Ok(vec![
         ListSection {
             kind: ItemKind::Tool,
             items: tool_items(config.tools, scope, platform),
         },
         ListSection {
             kind: ItemKind::Package,
-            items: package_items(config.packages, scope, platform),
+            items: package_items(config.packages, scope, platform)?,
         },
         ListSection {
             kind: ItemKind::App,
-            items: package_items(config.apps, scope, platform),
+            items: package_items(config.apps, scope, platform)?,
         },
-    ]
+    ])
 }
 
 fn tool_items(
@@ -166,7 +166,11 @@ fn tool_items(
         .collect()
 }
 
-fn package_items(map: PackageMap, scope: ConfigScope, platform: PlatformId) -> Vec<ListItem> {
+fn package_items(
+    map: PackageMap,
+    scope: ConfigScope,
+    platform: PlatformId,
+) -> Result<Vec<ListItem>> {
     let mut items = BTreeMap::new();
     for name in map.latest {
         items.insert(
@@ -187,10 +191,19 @@ fn package_items(map: PackageMap, scope: ConfigScope, platform: PlatformId) -> V
 
     for (name, entry) in map.entries {
         let PackageEntry::Expanded(package) = entry;
+        let filter = PlatformFilter::from_config(
+            &package.platforms,
+            package.ignore.as_deref(),
+            package.only.as_deref(),
+        )?;
+        if !filter.matches(platform) {
+            continue;
+        }
+        let resolved_name = name_for_platform(name, package.names, platform)?;
         items.insert(
-            name.clone(),
+            resolved_name.clone(),
             ListItem {
-                name,
+                name: resolved_name,
                 version: package.version.unwrap_or_else(|| "latest".to_string()),
                 backend: backend_for_platform(package.backend, package.backends, platform),
                 outputs: Vec::new(),
@@ -203,7 +216,21 @@ fn package_items(map: PackageMap, scope: ConfigScope, platform: PlatformId) -> V
         );
     }
 
-    items.into_values().collect()
+    Ok(items.into_values().collect())
+}
+
+fn name_for_platform(
+    name: String,
+    names: BTreeMap<String, String>,
+    platform: PlatformId,
+) -> Result<String> {
+    for (key, value) in names {
+        let key_platform: PlatformId = key.parse()?;
+        if key_platform == platform {
+            return Ok(value);
+        }
+    }
+    Ok(name)
 }
 
 fn backend_for_platform(
@@ -433,6 +460,43 @@ mod tests {
                 item("zed", "latest", Some("homebrew-cask"))
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn list_uses_platform_filters_and_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let platform = current_platform().to_string();
+        let other_platform = if cfg!(target_os = "windows") {
+            "linux"
+        } else {
+            "windows"
+        };
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+
+                [packages.skip-me]
+                version = "latest"
+                only = "{other_platform}"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.sections[1].items, [item("fd-find", "latest", None)]);
     }
 
     #[tokio::test]
