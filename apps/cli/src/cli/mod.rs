@@ -115,11 +115,11 @@ where
 mod tests {
     use super::*;
     use crate::cli::{
-        args::{Cli, Command, InitArgs},
+        args::{Cli, Command, DoctorArgs},
         output::BufferedOutput,
         runtime::CliRuntime,
     };
-    use engine::actions::config::CheckConfigResult;
+    use engine::actions::{config::CheckConfigResult, init::InitResult};
 
     #[derive(Debug, Default)]
     struct FakeRuntime;
@@ -134,6 +134,10 @@ mod tests {
 
         fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
             panic!("config_check should not run in these routing tests");
+        }
+
+        fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
+            panic!("init should not run in these routing tests");
         }
     }
 
@@ -171,7 +175,7 @@ mod tests {
     #[test]
     fn command_delegates_to_cli_runner() {
         let cli = Cli {
-            command: Some(Command::Init(InitArgs {})),
+            command: Some(Command::Doctor(DoctorArgs {})),
         };
         let mut runtime = FakeRuntime;
         let mut output = BufferedOutput::default();
@@ -179,7 +183,7 @@ mod tests {
         let code = run_parsed(cli, &mut runtime, &mut output);
 
         assert_eq!(code, 0);
-        assert_eq!(output.stdout, "Init command: InitArgs\n");
+        assert_eq!(output.stdout, "Doctor command: DoctorArgs\n");
         assert_eq!(output.stderr, "");
     }
 

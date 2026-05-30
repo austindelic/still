@@ -20,10 +20,16 @@ where
     O: Output,
 {
     match cmd {
-        Command::Init(args) => {
-            output.info(&format!("Init command: {:?}", args));
-            0
-        }
+        Command::Init(args) => match runtime.init(args.force) {
+            Ok(result) => {
+                output.success(&format!("Created {}", result.path.display()));
+                0
+            }
+            Err(e) => {
+                output.error(&format!("init failed: {e}"));
+                1
+            }
+        },
         Command::Trust(args) => {
             output.info(&format!("Trust command: {:?}", args));
             0
@@ -142,6 +148,7 @@ mod tests {
     use anyhow::anyhow;
     use engine::actions::{
         config::CheckConfigResult,
+        init::InitResult,
         install::{InstallRequest, InstallResult},
     };
     use engine::specs::toml::StillConfig;
@@ -153,6 +160,8 @@ mod tests {
     struct FakeRuntime {
         config_check_result: Option<anyhow::Result<CheckConfigResult>>,
         config_check_globals: Vec<bool>,
+        init_result: Option<anyhow::Result<InitResult>>,
+        init_forces: Vec<bool>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -166,6 +175,13 @@ mod tests {
                 .take()
                 .expect("test runtime config_check result was not configured")
         }
+
+        fn init(&mut self, force: bool) -> anyhow::Result<InitResult> {
+            self.init_forces.push(force);
+            self.init_result
+                .take()
+                .expect("test runtime init result was not configured")
+        }
     }
 
     #[test]
@@ -176,6 +192,8 @@ mod tests {
                 config: StillConfig::default(),
             })),
             config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -201,6 +219,8 @@ mod tests {
         let mut runtime = FakeRuntime {
             config_check_result: Some(Err(anyhow!("failed to parse still.toml"))),
             config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -218,6 +238,56 @@ mod tests {
         assert_eq!(output.stdout, "");
         insta::assert_snapshot!(output.stderr, @r###"
 config check failed: failed to parse still.toml
+"###);
+    }
+
+    #[test]
+    fn init_formats_success() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: Some(Ok(InitResult {
+                path: PathBuf::from("/repo/still.toml"),
+            })),
+            init_forces: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Init(crate::cli::args::InitArgs { force: true }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.init_forces, [true]);
+        insta::assert_snapshot!(output.stdout, @r###"
+✓ Created /repo/still.toml
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn init_formats_error() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: Some(Err(anyhow!("still.toml already exists"))),
+            init_forces: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Init(crate::cli::args::InitArgs { force: false }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(runtime.init_forces, [false]);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+init failed: still.toml already exists
 "###);
     }
 }

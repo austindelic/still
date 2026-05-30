@@ -160,11 +160,12 @@ pub enum AgentsCommand {
 }
 
 /// Arguments for initializing a project config.
-///
-/// Empty for now; future flags should describe template choice, overwrite
-/// behavior, and schema version rather than hiding those choices in prompts.
 #[derive(clap::Args, Debug, Clone)]
-pub struct InitArgs {}
+pub struct InitArgs {
+    /// Overwrite an existing still.toml.
+    #[arg(long)]
+    pub force: bool,
+}
 
 /// Arguments for config operations.
 #[derive(clap::Args, Debug, Clone)]

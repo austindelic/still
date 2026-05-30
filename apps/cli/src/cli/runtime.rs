@@ -2,6 +2,7 @@
 
 use engine::actions::{
     config::{CheckConfigRequest, CheckConfigResult},
+    init::{InitRequest, InitResult},
     install::{InstallRequest, InstallResult},
 };
 
@@ -20,6 +21,9 @@ pub trait CliRuntime {
 
     /// Checks the selected config file through the engine.
     fn config_check(&mut self, global: bool) -> anyhow::Result<CheckConfigResult>;
+
+    /// Initializes a starter config in the current project directory.
+    fn init(&mut self, force: bool) -> anyhow::Result<InitResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -46,5 +50,12 @@ impl CliRuntime for RealRuntime {
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::config::check(request))
+    }
+
+    fn init(&mut self, force: bool) -> anyhow::Result<InitResult> {
+        let start_dir = std::env::current_dir()?;
+        let request = InitRequest { start_dir, force };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::init::run(request))
     }
 }

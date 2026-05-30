@@ -74,6 +74,7 @@ mod tests {
 
     use anyhow::anyhow;
     use engine::actions::config::CheckConfigResult;
+    use engine::actions::init::InitResult;
     use engine::actions::install::{InstallRequest, InstallResult};
 
     use super::*;
@@ -103,6 +104,10 @@ mod tests {
 
         fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
             panic!("config_check should not run in install tests");
+        }
+
+        fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
+            panic!("init should not run in install tests");
         }
     }
 
