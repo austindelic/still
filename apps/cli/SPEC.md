@@ -84,6 +84,7 @@ Rules:
 - `platforms` is an allow-list for supported platforms.
 - `ignore` excludes a platform.
 - `only` restricts an entry to one platform.
+- Still normalizes `platforms`, `only`, and `ignore` into one platform filter before planning: `only` replaces the allow-list when present, then `ignore` is applied as a deny-list.
 - `names` maps a portable Still name to platform/backend-specific names.
 - `backends` maps platform names to platform-specific backend choices, with scalar `backend` as the fallback.
 - Platform-specific install paths, executable linking, app registration, service management, and shell activation belong in the engine layer.
@@ -91,7 +92,6 @@ Rules:
 
 Open decisions:
 
-- Whether `platforms`, `ignore`, and `only` should be consolidated into one canonical platform filter.
 - Whether lockfiles are per-platform, multi-platform, or both.
 
 ## Config Surface
@@ -220,10 +220,10 @@ Rules:
 - `platforms` is an allow-list.
 - `ignore` excludes one platform.
 - `only` restricts an entry to one platform.
+- These three fields are normalized into the same platform filter used by sync and list planning.
 
 Open decisions:
 
-- Whether `ignore` and `only` should be replaced by one canonical platform filter.
 - Whether package names in `latest` can also have platform-specific name overrides.
 - How package installs map to platform-specific Still-managed storage.
 

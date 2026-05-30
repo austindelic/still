@@ -149,6 +149,16 @@ mod tests {
     }
 
     #[test]
+    fn ignore_excludes_after_only_filter() {
+        let filter =
+            PlatformFilter::from_config(&["macos".to_string()], Some("windows"), Some("windows"))
+                .unwrap();
+
+        assert!(!filter.matches(PlatformId::Macos));
+        assert!(!filter.matches(PlatformId::Windows));
+    }
+
+    #[test]
     fn unknown_platform_is_an_error() {
         let err = PlatformFilter::from_config(&["freebsd".to_string()], None, None).unwrap_err();
 
