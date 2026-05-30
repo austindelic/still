@@ -2,7 +2,10 @@
 
 `apps/cli` contains the Rust implementation of the `still` binary, the install engine, and the optional TUI library.
 
-Still is a config-first project environment manager. The CLI should make local state match `still.toml`, then run commands and tasks inside that managed environment.
+Still is a config-first, multi-OS project environment manager. The CLI should make local state match `still.toml`, then run commands and tasks inside that managed environment.
+
+See `SPEC.md` for the working CLI feature spec and open product decisions. See
+`DESIGN.md` for the intended Rust code structure and architecture boundaries.
 
 ## Product Model
 
@@ -14,6 +17,7 @@ Still is a config-first project environment manager. The CLI should make local s
 - `env`: environment variables and env files.
 - `services`: long-running dependencies needed while the project is active.
 - `tasks`: named commands and task graphs.
+- `agents`: AI-agent instructions, targets, and skills.
 
 The core loop is:
 
@@ -30,7 +34,7 @@ still task lint
 - `init`: create a starter `still.toml`. CLI mode may infer project defaults; TUI mode can review choices interactively.
 - `trust`: mark the current project/config as trusted before executing project-defined behavior.
 - `sync`: read `still.toml`, resolve desired state, update the lockfile, install missing items, and report drift.
-- `install <TOOL@VERSION>`: install an item now. It should not silently edit `still.toml` by default.
+- `install`: install requested tools/packages/apps now and add them to config.
 - `uninstall <TOOL@VERSION>`: remove a Still-managed install and related links.
 - `run <COMMAND...>`: run an arbitrary command with Still-managed PATH/env and return the child exit code.
 - `task <NAME>`: run a named task from config; no name should list available tasks.
@@ -38,8 +42,8 @@ still task lint
 - `doctor`: diagnose machine, cache, config, permissions, and platform health.
 - `env`: print resolved environment/debug information.
 - `activate`: print shell-specific activation code or instructions.
-
-Commands such as `translate`, `convert`, `web`, and `post-install` are not v0.1 priorities unless they are reintroduced with a concrete product role.
+- `list`: list active tools/packages/apps and show which config selected each version.
+- `list --all`: list all known installed and configured items, including inactive project/global entries.
 
 ## Trust Model
 
@@ -49,7 +53,7 @@ Trust should gate:
 
 - tasks
 - services
-- hooks
+- agents and external skills
 - env files
 - project-defined commands that can execute arbitrary shell code
 
@@ -62,8 +66,8 @@ Use `examples/still.toml` and `examples/still.schema.json` as the working concep
 Important decisions:
 
 - `auto` is backend selection, not a backend.
-- Config mutation should be explicit through commands like `use`, `add`, or `config set`.
-- `install` installs immediately; `sync` reconciles from config.
+- Config mutation should be explicit through commands like `install`, `use`, `add`, or `config set`.
+- `install` installs immediately and records requested items in config; `sync` reconciles from config.
 - `config check` validates config; `doctor` diagnoses the environment.
 
 ## V1 Backends
