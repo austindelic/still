@@ -1,14 +1,17 @@
 //! Main TUI application state, rendering, and input handling.
 
 use crate::components::action_menu::{Action, ActionMenu, ActionMenuState};
+use crate::tabs::config::ConfigTab;
 use crate::tabs::formula::{FormulaTab, NavigationDirection};
+use crate::tabs::logs::LogsTab;
 use crate::tabs::resources::ResourcesTab;
+use crate::tabs::tasks::TasksTab;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Widget},
 };
@@ -100,6 +103,9 @@ pub struct App {
     action_menu: ActionMenuState,
     // Tab-specific state
     formula_tab: FormulaTab,
+    tasks_tab: TasksTab,
+    config_tab: ConfigTab,
+    logs_tab: LogsTab,
     resources_tab: ResourcesTab,
 }
 
@@ -123,6 +129,9 @@ impl App {
             search_focused: false,
             action_menu: ActionMenuState::Closed,
             formula_tab,
+            tasks_tab: TasksTab,
+            config_tab: ConfigTab,
+            logs_tab: LogsTab,
             resources_tab: ResourcesTab::new(),
         }
     }
@@ -249,25 +258,16 @@ impl App {
                 // Resources tab uses full area for btop
                 self.render_resources(area, buf);
             }
-            Tab::Tasks | Tab::Config | Tab::Logs => {
-                // Placeholder for other tabs - render empty state
-                self.render_empty_state(horizontal[0], buf);
-                self.render_empty_state(horizontal[1], buf);
+            Tab::Tasks => {
+                self.tasks_tab.render(area, buf);
+            }
+            Tab::Config => {
+                self.config_tab.render(area, buf);
+            }
+            Tab::Logs => {
+                self.logs_tab.render(area, buf);
             }
         }
-    }
-
-    fn render_empty_state(&mut self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue))
-            .title(format!(" {} - Coming Soon ", self.current_tab.as_str()));
-
-        let text = Text::from(vec![Line::from(
-            "This tab is not yet implemented.".fg(Color::DarkGray),
-        )]);
-
-        Paragraph::new(text).block(block).render(area, buf);
     }
 
     fn render_resources(&mut self, area: Rect, buf: &mut Buffer) {
@@ -571,7 +571,7 @@ impl App {
                                 .min(filtered.len().saturating_sub(1)),
                         ) {
                             eprintln!("Installing: {}", row.name);
-                            // TODO: Actually implement install logic
+                            eprintln!("Install from TUI is not wired to the engine yet");
                         }
                     }
                 }
@@ -584,7 +584,7 @@ impl App {
                                 .min(filtered.len().saturating_sub(1)),
                         ) {
                             eprintln!("Uninstalling: {}", row.name);
-                            // TODO: Actually implement uninstall logic
+                            eprintln!("Uninstall from TUI is not wired to the engine yet");
                         }
                     }
                 }
@@ -597,7 +597,7 @@ impl App {
                                 .min(filtered.len().saturating_sub(1)),
                         ) {
                             eprintln!("Info for: {}", row.name);
-                            // TODO: Show detailed info
+                            eprintln!("Selected package version: {}", row.version);
                         }
                     }
                 }

@@ -33,7 +33,7 @@ impl ResourcesTab {
     /// Renders the embedded resource monitor.
     ///
     /// `area` is provided by the parent TUI layout and `buf` receives the panel.
-    /// Rendering delegates to `InteractiveCli` and may update placeholder output.
+    /// Rendering delegates to `InteractiveCli` and may update cached output.
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.cli.render(area, buf);
     }

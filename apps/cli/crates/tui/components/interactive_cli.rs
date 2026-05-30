@@ -154,7 +154,7 @@ impl InteractiveCli {
     /// Renders the embedded CLI panel.
     ///
     /// `area` is the region allocated by the parent tab and `buf` is the ratatui
-    /// frame buffer to draw into. Rendering may update placeholder output in view
+    /// frame buffer to draw into. Rendering may update cached output in view
     /// mode, but it does not spawn or stop the child process.
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         // Update output periodically in view mode
