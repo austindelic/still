@@ -123,6 +123,7 @@ mod tests {
         activate::ActivateResult,
         agents::{AgentsOperation, AgentsResult},
         config::CheckConfigResult,
+        doctor::{DoctorCheck, DoctorResult, DoctorStatus},
         env::EnvResult,
         init::InitResult,
         list::ListResult,
@@ -172,6 +173,16 @@ mod tests {
         fn activate(&mut self, _shell: Option<String>) -> anyhow::Result<ActivateResult> {
             panic!("activate should not run in these routing tests");
         }
+
+        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+            Ok(DoctorResult {
+                checks: vec![DoctorCheck {
+                    name: "platform".to_string(),
+                    status: DoctorStatus::Ok,
+                    detail: "detected test".to_string(),
+                }],
+            })
+        }
     }
 
     #[cfg(not(feature = "tui"))]
@@ -216,7 +227,7 @@ mod tests {
         let code = run_parsed(cli, &mut runtime, &mut output);
 
         assert_eq!(code, 0);
-        assert_eq!(output.stdout, "Doctor command: DoctorArgs\n");
+        assert_eq!(output.stdout, "[ok] platform: detected test\n");
         assert_eq!(output.stderr, "");
     }
 

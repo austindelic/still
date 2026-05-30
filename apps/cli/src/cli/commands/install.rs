@@ -79,6 +79,7 @@ mod tests {
     use engine::actions::activate::ActivateResult;
     use engine::actions::agents::{AgentsOperation, AgentsResult};
     use engine::actions::config::CheckConfigResult;
+    use engine::actions::doctor::DoctorResult;
     use engine::actions::env::EnvResult;
     use engine::actions::init::InitResult;
     use engine::actions::install::InstallResult;
@@ -143,6 +144,10 @@ mod tests {
 
         fn activate(&mut self, _shell: Option<String>) -> anyhow::Result<ActivateResult> {
             panic!("activate should not run in install tests");
+        }
+
+        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+            panic!("doctor should not run in install tests");
         }
     }
 

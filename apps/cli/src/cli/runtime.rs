@@ -4,6 +4,7 @@ use engine::actions::{
     activate::{ActivateRequest, ActivateResult},
     agents::{AgentsOperation, AgentsRequest, AgentsResult},
     config::{CheckConfigRequest, CheckConfigResult},
+    doctor::{DoctorRequest, DoctorResult},
     env::{EnvRequest, EnvResult},
     init::{InitRequest, InitResult},
     install::{InstallRequest, InstallResult},
@@ -57,6 +58,9 @@ pub trait CliRuntime {
 
     /// Generates shell activation code.
     fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult>;
+
+    /// Runs local diagnostics.
+    fn doctor(&mut self) -> anyhow::Result<DoctorResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -168,6 +172,16 @@ impl CliRuntime for RealRuntime {
             home_dir,
             shell,
         })?)
+    }
+
+    fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+        let start_dir = std::env::current_dir()?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        engine::actions::doctor::inspect(DoctorRequest {
+            start_dir,
+            home_dir,
+        })
     }
 }
 

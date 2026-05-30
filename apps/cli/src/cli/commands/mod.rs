@@ -163,10 +163,23 @@ where
                 }
             },
         },
-        Command::Doctor(args) => {
-            output.info(&format!("Doctor command: {:?}", args));
-            0
-        }
+        Command::Doctor(_args) => match runtime.doctor() {
+            Ok(result) => {
+                for check in result.checks {
+                    let status = match check.status {
+                        engine::actions::doctor::DoctorStatus::Ok => "ok",
+                        engine::actions::doctor::DoctorStatus::Warning => "warn",
+                        engine::actions::doctor::DoctorStatus::Error => "error",
+                    };
+                    output.info(&format!("[{status}] {}: {}", check.name, check.detail));
+                }
+                0
+            }
+            Err(e) => {
+                output.error(&format!("doctor failed: {e}"));
+                1
+            }
+        },
         Command::Env(args) => match runtime.env(args.global) {
             Ok(result) => {
                 output.info(&format!("Config: {}", result.path.display()));
@@ -280,6 +293,7 @@ mod tests {
         activate::{ActivateResult, ShellKind},
         agents::{AgentsOperation, AgentsResult},
         config::CheckConfigResult,
+        doctor::{DoctorCheck, DoctorResult, DoctorStatus},
         env::EnvResult,
         init::InitResult,
         install::InstallResult,
@@ -312,6 +326,7 @@ mod tests {
         task_names: Vec<Option<String>>,
         activate_result: Option<anyhow::Result<ActivateResult>>,
         activate_shells: Vec<Option<String>>,
+        doctor_result: Option<anyhow::Result<DoctorResult>>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -377,6 +392,12 @@ mod tests {
                 .take()
                 .expect("test runtime activate result was not configured")
         }
+
+        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+            self.doctor_result
+                .take()
+                .expect("test runtime doctor result was not configured")
+        }
     }
 
     #[test]
@@ -401,6 +422,7 @@ mod tests {
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -440,6 +462,7 @@ mod tests {
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -481,6 +504,7 @@ config check failed: failed to parse still.toml
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -517,6 +541,7 @@ config check failed: failed to parse still.toml
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -557,6 +582,7 @@ init failed: still.toml already exists
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -595,6 +621,7 @@ RUST_LOG=debug
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -644,6 +671,7 @@ env failed: failed to read still.toml
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -687,6 +715,7 @@ Apps:
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -732,6 +761,7 @@ list failed: failed to read still.toml
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -779,6 +809,7 @@ Skills:
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -831,6 +862,7 @@ warn
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -872,6 +904,7 @@ run failed: failed to run cargo
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -932,6 +965,7 @@ run failed: failed to run cargo
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -982,6 +1016,7 @@ Tasks:
             task_names: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1026,6 +1061,7 @@ failed
                 code: "export PATH=\"/opt/still/bin:$PATH\"".to_string(),
             })),
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1064,6 +1100,7 @@ export PATH="/opt/still/bin:$PATH"
             task_names: Vec::new(),
             activate_result: Some(Err(anyhow!("unsupported shell"))),
             activate_shells: Vec::new(),
+            doctor_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1079,6 +1116,92 @@ export PATH="/opt/still/bin:$PATH"
         assert_eq!(output.stdout, "");
         insta::assert_snapshot!(output.stderr, @r###"
 activate failed: unsupported shell
+"###);
+    }
+
+    #[test]
+    fn doctor_formats_checks() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: Some(Ok(DoctorResult {
+                checks: vec![
+                    DoctorCheck {
+                        name: "platform".to_string(),
+                        status: DoctorStatus::Ok,
+                        detail: "detected macos".to_string(),
+                    },
+                    DoctorCheck {
+                        name: "project config".to_string(),
+                        status: DoctorStatus::Warning,
+                        detail: "no still.toml found".to_string(),
+                    },
+                ],
+            })),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Doctor(crate::cli::args::DoctorArgs {}),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        insta::assert_snapshot!(output.stdout, @r###"
+[ok] platform: detected macos
+[warn] project config: no still.toml found
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn doctor_formats_errors() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: Some(Err(anyhow!("home directory missing"))),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Doctor(crate::cli::args::DoctorArgs {}),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+doctor failed: home directory missing
 "###);
     }
 

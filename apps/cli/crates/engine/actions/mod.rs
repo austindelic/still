@@ -6,6 +6,8 @@ pub mod activate;
 pub mod agents;
 /// Config validation actions.
 pub mod config;
+/// Doctor diagnostic actions.
+pub mod doctor;
 /// Environment inspection actions.
 pub mod env;
 /// Init action implementation.
