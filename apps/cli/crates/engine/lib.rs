@@ -10,6 +10,8 @@ pub mod config;
 pub mod config_edit;
 /// Typed engine errors.
 pub mod error;
+/// Lockfile rendering helpers.
+pub mod lockfile;
 /// Side-effect-free planning models.
 pub mod planner;
 /// Platform identifiers and filters.

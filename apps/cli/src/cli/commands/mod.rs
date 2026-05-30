@@ -45,6 +45,7 @@ where
         Command::Sync(_args) => match runtime.sync() {
             Ok(result) => {
                 output.info(&format!("Config: {}", result.path.display()));
+                output.info(&format!("Lockfile: {}", result.lockfile_path.display()));
                 output.info("Sync plan:");
                 if result.items.is_empty() {
                     output.info("  (nothing to sync)");
@@ -1462,6 +1463,7 @@ doctor failed: home directory missing
             doctor_result: None,
             sync_result: Some(Ok(SyncResult {
                 path: PathBuf::from("/repo/still.toml"),
+                lockfile_path: PathBuf::from("/repo/still.lock.toml"),
                 items: vec![
                     sync_item(ItemKind::Tool, "rust@stable@rustup"),
                     sync_item(ItemKind::Package, "openssl"),
@@ -1485,6 +1487,7 @@ doctor failed: home directory missing
         assert_eq!(code, 0);
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
+Lockfile: /repo/still.lock.toml
 Sync plan:
   tool rust@stable@rustup
   package openssl@latest
@@ -1515,6 +1518,7 @@ Sync plan:
             doctor_result: None,
             sync_result: Some(Ok(SyncResult {
                 path: PathBuf::from("/repo/still.toml"),
+                lockfile_path: PathBuf::from("/repo/still.lock.toml"),
                 items: Vec::new(),
             })),
             services_result: None,
@@ -1534,6 +1538,7 @@ Sync plan:
         assert_eq!(code, 0);
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
+Lockfile: /repo/still.lock.toml
 Sync plan:
   (nothing to sync)
 "###);

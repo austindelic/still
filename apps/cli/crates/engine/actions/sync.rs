@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::lockfile::{lockfile_path, render_lockfile};
 use crate::platform::{PlatformFilter, PlatformId};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
@@ -16,10 +17,11 @@ pub struct SyncRequest {
     pub home_dir: PathBuf,
 }
 
-/// Side-effect-free sync report for desired install state.
+/// Sync report for desired install state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncResult {
     pub path: PathBuf,
+    pub lockfile_path: PathBuf,
     pub items: Vec<SyncItem>,
 }
 
@@ -30,7 +32,7 @@ pub struct SyncItem {
     pub spec: ItemSpec,
 }
 
-/// Reads config and returns the desired install state that needs reconciliation.
+/// Reads config, writes a lockfile, and returns desired install state.
 /// # Errors
 /// Fails when config cannot be found, read, parsed, or normalized.
 pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
@@ -46,10 +48,16 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
+    let items = sync_items(config)?;
+    let lockfile_path = lockfile_path(&resolved.path);
+    tokio::fs::write(&lockfile_path, render_lockfile(&items))
+        .await
+        .with_context(|| format!("failed to write {}", lockfile_path.display()))?;
 
     Ok(SyncResult {
         path: resolved.path,
-        items: sync_items(config)?,
+        lockfile_path,
+        items,
     })
 }
 
@@ -164,6 +172,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.path, temp.path().join("still.toml"));
+        assert_eq!(result.lockfile_path, temp.path().join("still.lock.toml"));
+        assert!(temp.path().join("still.lock.toml").is_file());
         assert!(
             result
                 .items
@@ -212,5 +222,26 @@ mod tests {
         .unwrap();
 
         assert!(result.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_writes_lockfile() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nrust = \"stable\"\n",
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        let lockfile = fs::read_to_string(result.lockfile_path).unwrap();
+        assert!(lockfile.contains("name = \"rust\""));
+        assert!(lockfile.contains("version = \"stable\""));
     }
 }
