@@ -6,6 +6,8 @@
 pub mod actions;
 /// Config discovery and filesystem locations.
 pub mod config;
+/// Side-effect-free planning models.
+pub mod planner;
 /// Platform identifiers and filters.
 pub mod platform;
 /// Package registry integrations and re-exports.
