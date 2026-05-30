@@ -1,6 +1,7 @@
 //! Engine action for inspecting and syncing agent config.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -18,6 +19,7 @@ use crate::specs::toml::{PackageMap, StillConfig, parse_still_toml};
 
 const MANAGED_MARKER: &str = ".still-managed";
 const SOURCE_METADATA: &str = "source.toml";
+const CONTENT_DIR: &str = "content";
 
 /// Agent operation requested by a caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +178,108 @@ async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<(
 
         tokio::fs::write(path.join(MANAGED_MARKER), managed_marker(skill)?).await?;
         tokio::fs::write(path.join(SOURCE_METADATA), source_metadata(skill)?).await?;
+        materialize_skill_source(skill, &path).await?;
+    }
+    Ok(())
+}
+
+async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
+    match &skill.source {
+        NormalizedSkillSource::Official { .. } => Ok(()),
+        NormalizedSkillSource::GitHub { path: repo } => {
+            let url = format!("https://github.com/{repo}.git");
+            clone_skill_source(&url, path).await
+        }
+        NormalizedSkillSource::Url { url, .. } if url.starts_with("file://") => {
+            let source = PathBuf::from(url.trim_start_matches("file://"));
+            copy_skill_source(&source, &path.join(CONTENT_DIR)).await
+        }
+        NormalizedSkillSource::Url { url, .. } if is_git_source(url) => {
+            clone_skill_source(url, path).await
+        }
+        NormalizedSkillSource::Url { url, .. } => {
+            download_skill_file(url, &path.join(CONTENT_DIR)).await
+        }
+    }
+}
+
+fn is_git_source(url: &str) -> bool {
+    url.ends_with(".git") || url.starts_with("git@")
+}
+
+async fn clone_skill_source(url: &str, path: &Path) -> Result<()> {
+    let content_path = path.join(CONTENT_DIR);
+    if tokio::fs::metadata(&content_path).await.is_ok() {
+        tokio::fs::remove_dir_all(&content_path).await?;
+    }
+    let status = Command::new("git")
+        .args(["clone", "--depth", "1", url])
+        .arg(&content_path)
+        .status()
+        .with_context(|| format!("failed to run git clone for agent skill source {url}"))?;
+    if !status.success() {
+        return Err(EngineError::Conflict {
+            message: format!("failed to clone agent skill source {url}"),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+async fn download_skill_file(url: &str, destination: &Path) -> Result<()> {
+    if tokio::fs::metadata(destination).await.is_ok() {
+        tokio::fs::remove_dir_all(destination).await?;
+    }
+    tokio::fs::create_dir_all(destination).await?;
+    let response = reqwest::get(url)
+        .await
+        .with_context(|| format!("failed to download agent skill source {url}"))?;
+    if !response.status().is_success() {
+        return Err(EngineError::Conflict {
+            message: format!(
+                "failed to download agent skill source {url}: HTTP {}",
+                response.status()
+            ),
+        }
+        .into());
+    }
+    let body = response.bytes().await?;
+    tokio::fs::write(destination.join("SKILL.md"), body).await?;
+    Ok(())
+}
+
+async fn copy_skill_source(source: &Path, destination: &Path) -> Result<()> {
+    let metadata = tokio::fs::metadata(source)
+        .await
+        .with_context(|| format!("failed to read skill source {}", source.display()))?;
+    if !metadata.is_dir() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("skill source {} is not a directory", source.display()),
+        }
+        .into());
+    }
+    if tokio::fs::metadata(destination).await.is_ok() {
+        tokio::fs::remove_dir_all(destination).await?;
+    }
+    tokio::fs::create_dir_all(destination).await?;
+    copy_dir_recursive(source, destination).await
+}
+
+async fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<()> {
+    let mut stack = vec![(source.to_path_buf(), destination.to_path_buf())];
+    while let Some((from, to)) = stack.pop() {
+        tokio::fs::create_dir_all(&to).await?;
+        let mut entries = tokio::fs::read_dir(&from).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+            let target_path = to.join(entry.file_name());
+            let metadata = entry.metadata().await?;
+            if metadata.is_dir() {
+                stack.push((entry_path, target_path));
+            } else if metadata.is_file() {
+                tokio::fs::copy(&entry_path, &target_path).await?;
+            }
+        }
     }
     Ok(())
 }
@@ -381,5 +485,45 @@ mod tests {
         assert!(config.tools.contains_key("cargo-nextest"));
         assert!(config.packages.latest.contains(&"llvm".to_string()));
         assert!(config.apps.latest.contains(&"zed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_copies_file_url_skill_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(source.join("nested/config.toml"), "ok = true\n").unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [agents]
+
+                [agents.skills]
+                local-skill = "file://{}"
+                "#,
+                source.display()
+            ),
+        )
+        .unwrap();
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let content = temp.path().join(".agents/skills/local-skill/content");
+        assert_eq!(
+            fs::read_to_string(content.join("SKILL.md")).unwrap(),
+            "# Local skill\n"
+        );
+        assert_eq!(
+            fs::read_to_string(content.join("nested/config.toml")).unwrap(),
+            "ok = true\n"
+        );
     }
 }
