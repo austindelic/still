@@ -478,7 +478,7 @@ Config write rules:
 - `task`: run a named task from config; no name should list available tasks.
 - `services`: inspect, start, stop, and check configured services.
 - `agents`: inspect, sync, and validate configured agent instructions and skills.
-- `config check`: validate `still.toml` through the schema/Taplo path.
+- `config check`: validate `still.toml` through the typed TOML parser and engine config validators.
 - `doctor`: diagnose machine, cache, config, permissions, and platform health.
 - `env`: print resolved environment/debug information.
 - `activate`: print shell-specific activation code or instructions.
