@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::config::{ConfigScope, ConfigSelection, find_project_config, resolve_config_path};
-use crate::platform::PlatformId;
+use crate::platform::current_platform;
 
 /// Request to diagnose local Still state.
 #[derive(Debug, Clone)]
@@ -119,16 +119,6 @@ fn still_paths_check(home_dir: &std::path::Path) -> DoctorCheck {
         name: "still root".to_string(),
         status: DoctorStatus::Ok,
         detail: root.display().to_string(),
-    }
-}
-
-fn current_platform() -> PlatformId {
-    if cfg!(target_os = "macos") {
-        PlatformId::Macos
-    } else if cfg!(target_os = "windows") {
-        PlatformId::Windows
-    } else {
-        PlatformId::Linux
     }
 }
 

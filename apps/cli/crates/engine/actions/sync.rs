@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::lockfile::{lockfile_path, render_lockfile};
-use crate::platform::{PlatformFilter, PlatformId};
+use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -246,16 +246,6 @@ fn item_spec(name: String, version: String, backend: Option<String>) -> Result<I
     match backend {
         Some(backend) => format!("{name}@{version}@{backend}").parse(),
         None => format!("{name}@{version}").parse(),
-    }
-}
-
-fn current_platform() -> PlatformId {
-    if cfg!(target_os = "macos") {
-        PlatformId::Macos
-    } else if cfg!(target_os = "windows") {
-        PlatformId::Windows
-    } else {
-        PlatformId::Linux
     }
 }
 

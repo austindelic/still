@@ -12,6 +12,16 @@ pub enum PlatformId {
     Windows,
 }
 
+pub fn current_platform() -> PlatformId {
+    if cfg!(target_os = "macos") {
+        PlatformId::Macos
+    } else if cfg!(target_os = "windows") {
+        PlatformId::Windows
+    } else {
+        PlatformId::Linux
+    }
+}
+
 impl fmt::Display for PlatformId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

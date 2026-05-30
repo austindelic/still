@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::actions::sync::SyncItem;
+use crate::platform::current_platform;
 
 /// Project lockfile name written next to `still.toml`.
 pub const LOCKFILE_NAME: &str = "still.lock.toml";
@@ -27,6 +28,7 @@ pub fn render_lockfile(items: &[SyncItem]) -> String {
         output.push_str("[[items]]\n");
         output.push_str(&format!("kind = \"{}\"\n", item.kind));
         output.push_str(&format!("name = \"{}\"\n", item.spec.name));
+        output.push_str(&format!("platform = \"{}\"\n", current_platform()));
         output.push_str(&format!("version = \"{}\"\n", item.spec.version));
         if let Some(backend) = &item.spec.backend {
             output.push_str(&format!("backend = \"{}\"\n", backend));
@@ -51,6 +53,7 @@ mod tests {
 
         assert!(output.contains("kind = \"tool\""));
         assert!(output.contains("name = \"rust\""));
+        assert!(output.contains(&format!("platform = \"{}\"", current_platform())));
         assert!(output.contains("backend = \"rustup\""));
         assert!(output.contains("kind = \"package\""));
     }
