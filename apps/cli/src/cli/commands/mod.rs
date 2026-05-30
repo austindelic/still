@@ -81,10 +81,37 @@ where
                 1
             }
         },
-        Command::Task(args) => {
-            output.info(&format!("Task command: {:?}", args));
-            0
-        }
+        Command::Task(args) => match runtime.task(args.name) {
+            Ok(result) => {
+                if result.executions.is_empty() {
+                    output.info(&format!("Config: {}", result.path.display()));
+                    output.info("Tasks:");
+                    if result.tasks.is_empty() {
+                        output.info("  (none)");
+                    }
+                    for task in result.tasks {
+                        match task.description {
+                            Some(description) => {
+                                output.info(&format!("  {} - {}", task.name, description));
+                            }
+                            None => output.info(&format!("  {}", task.name)),
+                        }
+                    }
+                    0
+                } else {
+                    for execution in result.executions {
+                        output.info(&format!("task {}: {}", execution.task, execution.command));
+                        write_child_output(output, &execution.stdout, false);
+                        write_child_output(output, &execution.stderr, true);
+                    }
+                    result.status
+                }
+            }
+            Err(e) => {
+                output.error(&format!("task failed: {e}"));
+                1
+            }
+        },
         Command::Services(args) => {
             output.info(&format!("Services command: {:?}", args));
             0
@@ -251,6 +278,7 @@ mod tests {
         install::InstallResult,
         list::{ListItem, ListResult, ListSection},
         run::RunResult,
+        task::{TaskExecution, TaskResult, TaskSummary},
     };
     use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
     use engine::specs::item::ItemKind;
@@ -273,6 +301,8 @@ mod tests {
         agents_operations: Vec<AgentsOperation>,
         run_result: Option<anyhow::Result<RunResult>>,
         run_commands: Vec<Vec<String>>,
+        task_result: Option<anyhow::Result<TaskResult>>,
+        task_names: Vec<Option<String>>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -324,6 +354,13 @@ mod tests {
                 .take()
                 .expect("test runtime run result was not configured")
         }
+
+        fn task(&mut self, name: Option<String>) -> anyhow::Result<TaskResult> {
+            self.task_names.push(name);
+            self.task_result
+                .take()
+                .expect("test runtime task result was not configured")
+        }
     }
 
     #[test]
@@ -344,6 +381,8 @@ mod tests {
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -379,6 +418,8 @@ mod tests {
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -416,6 +457,8 @@ config check failed: failed to parse still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -448,6 +491,8 @@ config check failed: failed to parse still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -484,6 +529,8 @@ init failed: still.toml already exists
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -518,6 +565,8 @@ RUST_LOG=debug
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -563,6 +612,8 @@ env failed: failed to read still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -602,6 +653,8 @@ Apps:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -643,6 +696,8 @@ list failed: failed to read still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -686,6 +741,8 @@ Skills:
                 stderr: "warn\n".to_string(),
             })),
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -734,6 +791,8 @@ warn
             agents_operations: Vec::new(),
             run_result: Some(Err(anyhow!("failed to run cargo"))),
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -771,6 +830,8 @@ run failed: failed to run cargo
                 stderr: String::new(),
             })),
             run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -796,6 +857,107 @@ run failed: failed to run cargo
                 "--quiet".to_string()
             ]]
         );
+    }
+
+    #[test]
+    fn task_without_name_lists_tasks() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: Some(Ok(TaskResult {
+                path: PathBuf::from("/repo/still.toml"),
+                tasks: vec![
+                    TaskSummary {
+                        name: "lint".to_string(),
+                        description: Some("Run lint".to_string()),
+                    },
+                    TaskSummary {
+                        name: "test".to_string(),
+                        description: None,
+                    },
+                ],
+                executions: Vec::new(),
+                status: 0,
+            })),
+            task_names: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Task(crate::cli::args::TaskArgs { name: None }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.task_names, [None]);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Tasks:
+  lint - Run lint
+  test
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn task_with_name_formats_executions_and_status() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: Some(Ok(TaskResult {
+                path: PathBuf::from("/repo/still.toml"),
+                tasks: Vec::new(),
+                executions: vec![TaskExecution {
+                    task: "test".to_string(),
+                    command: "cargo test".to_string(),
+                    status: 2,
+                    stdout: "running tests\n".to_string(),
+                    stderr: "failed\n".to_string(),
+                }],
+                status: 2,
+            })),
+            task_names: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Task(crate::cli::args::TaskArgs {
+                name: Some("test".to_string()),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 2);
+        assert_eq!(runtime.task_names, [Some("test".to_string())]);
+        insta::assert_snapshot!(output.stdout, @r###"
+task test: cargo test
+running tests
+"###);
+        insta::assert_snapshot!(output.stderr, @r###"
+failed
+"###);
     }
 
     fn section<const N: usize>(kind: ItemKind, items: [ListItem; N]) -> ListSection {

@@ -1,0 +1,266 @@
+//! Engine action for listing and running configured tasks.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Context, Result};
+
+use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::error::EngineError;
+use crate::specs::toml::{ExpandedTask, TaskEntry, TaskRun, parse_still_toml};
+
+/// Request to list or run configured tasks.
+#[derive(Debug, Clone)]
+pub struct TaskRequest {
+    pub start_dir: PathBuf,
+    pub home_dir: PathBuf,
+    pub name: Option<String>,
+}
+
+/// Result from listing or running tasks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskResult {
+    pub path: PathBuf,
+    pub tasks: Vec<TaskSummary>,
+    pub executions: Vec<TaskExecution>,
+    pub status: i32,
+}
+
+/// One task available in config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSummary {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// Captured output for one executed task command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskExecution {
+    pub task: String,
+    pub command: String,
+    pub status: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Lists tasks when `name` is absent, otherwise runs the named task graph.
+/// # Errors
+/// Fails when config cannot be read, the task is unknown, or a child command
+/// cannot be spawned.
+pub async fn run(request: TaskRequest) -> Result<TaskResult> {
+    let resolved = resolve_config_path(
+        &request.start_dir,
+        &request.home_dir,
+        ConfigSelection {
+            scope: ConfigScope::Project,
+            for_write: false,
+        },
+    )?;
+    let content = tokio::fs::read_to_string(&resolved.path)
+        .await
+        .with_context(|| format!("failed to read {}", resolved.path.display()))?;
+    let config = parse_still_toml(&content)?;
+    let working_dir = resolved
+        .path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let tasks = config.tasks;
+    let summaries = task_summaries(&tasks);
+
+    let Some(name) = request.name else {
+        return Ok(TaskResult {
+            path: resolved.path,
+            tasks: summaries,
+            executions: Vec::new(),
+            status: 0,
+        });
+    };
+
+    let mut executions = Vec::new();
+    let mut visited = BTreeSet::new();
+    run_task_graph(&tasks, &name, &working_dir, &mut visited, &mut executions)?;
+    let status = executions
+        .last()
+        .map(|execution| execution.status)
+        .unwrap_or(0);
+
+    Ok(TaskResult {
+        path: resolved.path,
+        tasks: summaries,
+        executions,
+        status,
+    })
+}
+
+fn task_summaries(tasks: &BTreeMap<String, TaskEntry>) -> Vec<TaskSummary> {
+    tasks
+        .iter()
+        .map(|(name, entry)| TaskSummary {
+            name: name.clone(),
+            description: match entry {
+                TaskEntry::Command(_) => None,
+                TaskEntry::Expanded(task) => task.description.clone(),
+            },
+        })
+        .collect()
+}
+
+fn run_task_graph(
+    tasks: &BTreeMap<String, TaskEntry>,
+    name: &str,
+    working_dir: &Path,
+    visited: &mut BTreeSet<String>,
+    executions: &mut Vec<TaskExecution>,
+) -> Result<()> {
+    if !visited.insert(name.to_string()) {
+        return Ok(());
+    }
+
+    let task = tasks.get(name).ok_or_else(|| EngineError::Conflict {
+        message: format!("unknown task \"{name}\""),
+    })?;
+    let normalized = normalize_task(name, task)?;
+    for dependency in normalized.depends {
+        run_task_graph(tasks, &dependency, working_dir, visited, executions)?;
+        if executions
+            .last()
+            .is_some_and(|execution| execution.status != 0)
+        {
+            return Ok(());
+        }
+    }
+
+    for command in normalized.commands {
+        let output = shell_command(&command)
+            .current_dir(working_dir)
+            .output()
+            .with_context(|| format!("failed to run task {name}"))?;
+        let status = output.status.code().unwrap_or(1);
+        executions.push(TaskExecution {
+            task: name.to_string(),
+            command,
+            status,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+        if status != 0 {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+struct NormalizedTask {
+    depends: Vec<String>,
+    commands: Vec<String>,
+}
+
+fn normalize_task(name: &str, entry: &TaskEntry) -> Result<NormalizedTask> {
+    match entry {
+        TaskEntry::Command(command) => Ok(NormalizedTask {
+            depends: Vec::new(),
+            commands: vec![command.clone()],
+        }),
+        TaskEntry::Expanded(task) => normalize_expanded_task(name, task),
+    }
+}
+
+fn normalize_expanded_task(name: &str, task: &ExpandedTask) -> Result<NormalizedTask> {
+    let commands = match &task.run {
+        TaskRun::None => {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("task \"{name}\" must define run"),
+            }
+            .into());
+        }
+        TaskRun::Command(command) => vec![command.clone()],
+        TaskRun::Commands(commands) => commands.clone(),
+    };
+
+    Ok(NormalizedTask {
+        depends: task.depends.clone(),
+        commands,
+    })
+}
+
+fn shell_command(command: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let mut child = Command::new("cmd");
+        child.args(["/C", command]);
+        child
+    }
+    #[cfg(not(windows))]
+    {
+        let mut child = Command::new("sh");
+        child.args(["-c", command]);
+        child
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn task_without_name_lists_configured_tasks() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tasks]
+            test = "cargo test"
+            lint = { description = "Run lint", run = "cargo fmt --check" }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.tasks,
+            [
+                TaskSummary {
+                    name: "lint".to_string(),
+                    description: Some("Run lint".to_string()),
+                },
+                TaskSummary {
+                    name: "test".to_string(),
+                    description: None,
+                },
+            ]
+        );
+        assert_eq!(result.executions, []);
+    }
+
+    #[tokio::test]
+    async fn task_reports_unknown_task() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tasks]\ntest = \"echo ok\"\n",
+        )
+        .unwrap();
+
+        let err = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("missing".to_string()),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown task"));
+    }
+}

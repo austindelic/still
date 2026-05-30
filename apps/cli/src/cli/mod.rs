@@ -126,6 +126,7 @@ mod tests {
         init::InitResult,
         list::ListResult,
         run::RunResult,
+        task::TaskResult,
     };
 
     #[derive(Debug, Default)]
@@ -161,6 +162,10 @@ mod tests {
 
         fn run_command(&mut self, _command: Vec<String>) -> anyhow::Result<RunResult> {
             panic!("run_command should not run in these routing tests");
+        }
+
+        fn task(&mut self, _name: Option<String>) -> anyhow::Result<TaskResult> {
+            panic!("task should not run in these routing tests");
         }
     }
 

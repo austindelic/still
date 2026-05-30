@@ -83,6 +83,7 @@ mod tests {
     use engine::actions::install::InstallResult;
     use engine::actions::list::ListResult;
     use engine::actions::run::RunResult;
+    use engine::actions::task::TaskResult;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -133,6 +134,10 @@ mod tests {
 
         fn run_command(&mut self, _command: Vec<String>) -> anyhow::Result<RunResult> {
             panic!("run_command should not run in install tests");
+        }
+
+        fn task(&mut self, _name: Option<String>) -> anyhow::Result<TaskResult> {
+            panic!("task should not run in install tests");
         }
     }
 
