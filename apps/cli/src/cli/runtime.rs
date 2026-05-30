@@ -6,6 +6,15 @@ use engine::actions::{
     init::{InitRequest, InitResult},
     install::{InstallRequest, InstallResult},
 };
+use engine::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use engine::config_edit::add_install_items;
+
+/// CLI install request plus desired-state write scope.
+#[derive(Debug, Clone)]
+pub struct InstallCommandRequest {
+    pub install: InstallRequest,
+    pub global: bool,
+}
 
 /// Operations command handlers need from the engine layer.
 ///
@@ -18,7 +27,7 @@ pub trait CliRuntime {
     /// `request` is the command-neutral install request built by the CLI handler.
     /// Implementations return the engine result on success or an error that the
     /// handler will format for the user.
-    fn install(&mut self, request: InstallRequest) -> anyhow::Result<InstallResult>;
+    fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult>;
 
     /// Checks the selected config file through the engine.
     fn config_check(&mut self, global: bool) -> anyhow::Result<CheckConfigResult>;
@@ -38,9 +47,12 @@ pub trait CliRuntime {
 pub struct RealRuntime;
 
 impl CliRuntime for RealRuntime {
-    fn install(&mut self, request: InstallRequest) -> anyhow::Result<InstallResult> {
+    fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult> {
+        let install_request = request.install.clone();
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        runtime.block_on(engine::actions::install::run(request))
+        let result = runtime.block_on(engine::actions::install::run(request.install))?;
+        record_install_items(install_request, request.global)?;
+        Ok(result)
     }
 
     fn config_check(&mut self, global: bool) -> anyhow::Result<CheckConfigResult> {
@@ -75,4 +87,34 @@ impl CliRuntime for RealRuntime {
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::env::inspect(request))
     }
+}
+
+fn record_install_items(request: InstallRequest, global: bool) -> anyhow::Result<()> {
+    let start_dir = std::env::current_dir()?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+    let resolved = resolve_config_path(
+        &start_dir,
+        &home_dir,
+        ConfigSelection {
+            scope: if global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
+            for_write: false,
+        },
+    )?;
+
+    let content = match std::fs::read_to_string(&resolved.path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err.into()),
+    };
+    let updated = add_install_items(&content, &request.items)?;
+    if let Some(parent) = resolved.path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&resolved.path, updated)?;
+    Ok(())
 }

@@ -65,6 +65,9 @@ pub enum Command {
 /// syntax fail as Clap input errors instead of reaching the engine.
 #[derive(clap::Args, Debug, Clone)]
 pub struct InstallArgs {
+    /// Record the requested items in the global Still config.
+    #[arg(short = 'g', long)]
+    pub global: bool,
     /// Requested tools in `name`, `name@version`, or `name@version@backend` form.
     #[arg(short = 't', long = "tool", value_name = "TOOL", num_args = 1..)]
     pub tools: Vec<ToolSpec>,

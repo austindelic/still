@@ -43,6 +43,7 @@ pub trait InstallOps {
 ///
 /// Build this after CLI/config parsing has classified the item as a tool,
 /// package, or app. Resolution may still choose the final backend.
+#[derive(Debug, Clone)]
 pub struct InstallItemRequest {
     pub kind: ItemKind,
     pub spec: ItemSpec,
@@ -53,6 +54,7 @@ pub struct InstallItemRequest {
 /// Build this at the boundary where user input or config has already been
 /// validated. The install action owns resolution, download, verification,
 /// extraction, linking, and later config writes from this point forward.
+#[derive(Debug, Clone)]
 pub struct InstallRequest {
     /// Parsed and classified items requested by the caller.
     pub items: Vec<InstallItemRequest>,

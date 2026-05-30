@@ -2,7 +2,7 @@
 
 use crate::cli::args::InstallArgs;
 use crate::cli::output::Output;
-use crate::cli::runtime::CliRuntime;
+use crate::cli::runtime::{CliRuntime, InstallCommandRequest};
 use engine::actions::install::{InstallItemRequest, InstallRequest};
 use engine::registries::specs::tool::ToolSpec;
 use engine::specs::item::{ItemKind, ItemSpec};
@@ -19,8 +19,11 @@ where
     R: CliRuntime,
     O: Output,
 {
-    let install_request = InstallRequest {
-        items: install_items(args),
+    let install_request = InstallCommandRequest {
+        global: args.global,
+        install: InstallRequest {
+            items: install_items(args),
+        },
     };
 
     match runtime.install(install_request) {
@@ -76,7 +79,7 @@ mod tests {
     use engine::actions::config::CheckConfigResult;
     use engine::actions::env::EnvResult;
     use engine::actions::init::InitResult;
-    use engine::actions::install::{InstallRequest, InstallResult};
+    use engine::actions::install::InstallResult;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -85,12 +88,14 @@ mod tests {
     struct FakeRuntime {
         install_result: Option<anyhow::Result<InstallResult>>,
         install_requests: Vec<(ItemKind, String, String, Option<String>)>,
+        install_globals: Vec<bool>,
     }
 
     impl CliRuntime for FakeRuntime {
-        fn install(&mut self, request: InstallRequest) -> anyhow::Result<InstallResult> {
+        fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult> {
+            self.install_globals.push(request.global);
             self.install_requests
-                .extend(request.items.into_iter().map(|item| {
+                .extend(request.install.items.into_iter().map(|item| {
                     (
                         item.kind,
                         item.spec.name,
@@ -142,6 +147,7 @@ mod tests {
                 None
             )]
         );
+        assert_eq!(runtime.install_globals, [false]);
         insta::assert_snapshot!(output.stdout, @r###"
 Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
 ✓ Successfully installed ripgrep@14.1.1 to /opt/still/tools/ripgrep/14.1.1
@@ -192,8 +198,30 @@ install failed: formula.json not found
 "###);
     }
 
+    #[test]
+    fn install_passes_global_scope_to_runtime() {
+        let mut args = install_args("ripgrep");
+        args.global = true;
+        let mut runtime = FakeRuntime {
+            install_result: Some(Ok(InstallResult {
+                tool_name: "ripgrep".to_string(),
+                version: "14.1.1".to_string(),
+                install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
+                binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
+            })),
+            ..FakeRuntime::default()
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run(args, &mut runtime, &mut output);
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.install_globals, [true]);
+    }
+
     fn install_args(tool: &str) -> InstallArgs {
         InstallArgs {
+            global: false,
             tools: vec![tool.parse().expect("test tool spec should parse")],
             packages: Vec::new(),
             apps: Vec::new(),

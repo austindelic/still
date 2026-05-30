@@ -159,10 +159,7 @@ mod tests {
 
     use anyhow::anyhow;
     use engine::actions::{
-        config::CheckConfigResult,
-        env::EnvResult,
-        init::InitResult,
-        install::{InstallRequest, InstallResult},
+        config::CheckConfigResult, env::EnvResult, init::InitResult, install::InstallResult,
     };
     use engine::specs::toml::StillConfig;
 
@@ -180,7 +177,10 @@ mod tests {
     }
 
     impl CliRuntime for FakeRuntime {
-        fn install(&mut self, _request: InstallRequest) -> anyhow::Result<InstallResult> {
+        fn install(
+            &mut self,
+            _request: crate::cli::runtime::InstallCommandRequest,
+        ) -> anyhow::Result<InstallResult> {
             panic!("install should not run in config tests");
         }
 

@@ -127,7 +127,7 @@ mod tests {
     impl CliRuntime for FakeRuntime {
         fn install(
             &mut self,
-            _request: engine::actions::install::InstallRequest,
+            _request: crate::cli::runtime::InstallCommandRequest,
         ) -> anyhow::Result<engine::actions::install::InstallResult> {
             panic!("install should not run in these routing tests");
         }
