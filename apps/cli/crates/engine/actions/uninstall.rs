@@ -1,9 +1,115 @@
-//! Engine uninstall action traits.
+//! Engine action for removing desired install state.
 
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+
+use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config_edit::remove_item;
+use crate::error::EngineError;
+use crate::specs::item::ItemKind;
 use crate::system::MacOS;
 
 /// Platform-specific uninstall operations.
 pub trait UninstallOps {}
 
-// macOS currently uses the marker trait until uninstall behavior is implemented.
+// macOS currently uses the marker trait until backend removal behavior exists.
 impl UninstallOps for MacOS {}
+
+/// Request to remove one configured item.
+#[derive(Debug, Clone)]
+pub struct UninstallRequest {
+    pub start_dir: PathBuf,
+    pub home_dir: PathBuf,
+    pub name: String,
+}
+
+/// Desired-state removal result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UninstallResult {
+    pub path: PathBuf,
+    pub kind: ItemKind,
+    pub name: String,
+}
+
+/// Removes an item from `still.toml`.
+/// # Errors
+/// Fails when config cannot be read/written or the item is not configured.
+pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
+    let resolved = resolve_config_path(
+        &request.start_dir,
+        &request.home_dir,
+        ConfigSelection {
+            scope: ConfigScope::Project,
+            for_write: true,
+        },
+    )?;
+    let content = tokio::fs::read_to_string(&resolved.path)
+        .await
+        .with_context(|| format!("failed to read {}", resolved.path.display()))?;
+    let (updated, removed) = remove_item(&content, &request.name)?;
+    let Some(kind) = removed else {
+        return Err(EngineError::Conflict {
+            message: format!("{} is not configured", request.name),
+        }
+        .into());
+    };
+
+    tokio::fs::write(&resolved.path, updated)
+        .await
+        .with_context(|| format!("failed to write {}", resolved.path.display()))?;
+
+    Ok(UninstallResult {
+        path: resolved.path,
+        kind,
+        name: request.name,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use crate::specs::toml::parse_still_toml;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn uninstall_removes_configured_package() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("still.toml");
+        fs::write(&path, "[packages]\nlatest = [\"openssl\", \"llvm\"]\n").unwrap();
+
+        let result = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: "openssl".to_string(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.kind, ItemKind::Package);
+        let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(config.packages.latest, ["llvm"]);
+    }
+
+    #[tokio::test]
+    async fn uninstall_errors_for_unknown_item() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nrust = \"stable\"\n",
+        )
+        .unwrap();
+
+        let err = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: "node".to_string(),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("not configured"));
+    }
+}

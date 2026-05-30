@@ -95,10 +95,21 @@ where
                 1
             }
         },
-        Command::Uninstall(args) => {
-            output.info(&format!("Uninstall command: {:?}", args));
-            0
-        }
+        Command::Uninstall(args) => match runtime.uninstall(args.tool.name) {
+            Ok(result) => {
+                output.success(&format!(
+                    "Removed {} {} from {}",
+                    result.kind,
+                    result.name,
+                    result.path.display()
+                ));
+                0
+            }
+            Err(e) => {
+                output.error(&format!("uninstall failed: {e}"));
+                1
+            }
+        },
         Command::Run(args) => match runtime.run_command(normalize_child_command(args.command)) {
             Ok(result) => {
                 write_child_output(output, &result.stdout, false);
@@ -379,6 +390,7 @@ mod tests {
         sync::{SyncItem, SyncResult},
         task::{TaskExecution, TaskResult, TaskSummary},
         trust::TrustResult,
+        uninstall::UninstallResult,
     };
     use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
     use engine::specs::item::ItemKind;
@@ -410,6 +422,8 @@ mod tests {
         services_result: Option<anyhow::Result<ServicesResult>>,
         services_requests: Vec<(ServicesOperation, Option<String>)>,
         trust_result: Option<anyhow::Result<TrustResult>>,
+        uninstall_result: Option<anyhow::Result<UninstallResult>>,
+        uninstall_names: Vec<String>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -504,6 +518,13 @@ mod tests {
                 .take()
                 .expect("test runtime trust result was not configured")
         }
+
+        fn uninstall(&mut self, name: String) -> anyhow::Result<UninstallResult> {
+            self.uninstall_names.push(name);
+            self.uninstall_result
+                .take()
+                .expect("test runtime uninstall result was not configured")
+        }
     }
 
     #[test]
@@ -533,6 +554,8 @@ mod tests {
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -577,6 +600,8 @@ mod tests {
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -623,6 +648,8 @@ config check failed: failed to parse still.toml
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -664,6 +691,8 @@ config check failed: failed to parse still.toml
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -709,6 +738,8 @@ init failed: still.toml already exists
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -752,6 +783,8 @@ RUST_LOG=debug
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -806,6 +839,8 @@ env failed: failed to read still.toml
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -854,6 +889,8 @@ Apps:
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -904,6 +941,8 @@ list failed: failed to read still.toml
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -956,6 +995,8 @@ Skills:
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1013,6 +1054,8 @@ warn
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1059,6 +1102,8 @@ run failed: failed to run cargo
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1124,6 +1169,8 @@ run failed: failed to run cargo
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1179,6 +1226,8 @@ Tasks:
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1228,6 +1277,8 @@ failed
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1271,6 +1322,8 @@ export PATH="/opt/still/bin:$PATH"
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1326,6 +1379,8 @@ activate failed: unsupported shell
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1367,6 +1422,8 @@ activate failed: unsupported shell
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1414,6 +1471,8 @@ doctor failed: home directory missing
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1461,6 +1520,8 @@ Sync plan:
             services_result: None,
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1510,6 +1571,8 @@ Sync plan:
             })),
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1572,6 +1635,8 @@ web: configured - echo web
             })),
             services_requests: Vec::new(),
             trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1627,6 +1692,8 @@ web
                 trust_path: PathBuf::from("/repo/.still/trust.toml"),
                 fingerprint: "abc".to_string(),
             })),
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1640,6 +1707,55 @@ web
         insta::assert_snapshot!(output.stdout, @r###"
 ✓ Trusted /repo/still.toml
 Marker: /repo/.still/trust.toml
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn uninstall_formats_success() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
+            trust_result: None,
+            uninstall_result: Some(Ok(UninstallResult {
+                path: PathBuf::from("/repo/still.toml"),
+                kind: ItemKind::Package,
+                name: "openssl".to_string(),
+            })),
+            uninstall_names: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Uninstall(crate::cli::args::UninstallArgs {
+                tool: "openssl".parse().unwrap(),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.uninstall_names, ["openssl"]);
+        insta::assert_snapshot!(output.stdout, @r###"
+✓ Removed package openssl from /repo/still.toml
 "###);
         assert_eq!(output.stderr, "");
     }

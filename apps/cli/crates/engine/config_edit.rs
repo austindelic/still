@@ -29,6 +29,21 @@ pub fn add_install_items(input: &str, items: &[InstallItemRequest]) -> EngineRes
     Ok(doc.to_string())
 }
 
+/// Removes one named item from tools, packages, or apps.
+pub fn remove_item(input: &str, name: &str) -> EngineResult<(String, Option<ItemKind>)> {
+    let mut doc = input
+        .parse::<DocumentMut>()
+        .map_err(|err| EngineError::InvalidConfig {
+            reason: err.to_string(),
+        })?;
+
+    let removed = remove_from_section(&mut doc, "tools", name, ItemKind::Tool)
+        .or_else(|| remove_from_section(&mut doc, "packages", name, ItemKind::Package))
+        .or_else(|| remove_from_section(&mut doc, "apps", name, ItemKind::App));
+
+    Ok((doc.to_string(), removed))
+}
+
 fn add_tool(doc: &mut DocumentMut, spec: &ItemSpec) {
     let tools = table_mut(doc, "tools");
     if should_use_latest_shorthand(spec) {
@@ -81,6 +96,29 @@ fn append_unique_latest(table: &mut Table, name: &str) {
     if !latest.iter().any(|value| value.as_str() == Some(name)) {
         latest.push(name);
     }
+}
+
+fn remove_from_section(
+    doc: &mut DocumentMut,
+    section: &str,
+    name: &str,
+    kind: ItemKind,
+) -> Option<ItemKind> {
+    let item = doc.get_mut(section)?;
+    let table = item.as_table_mut()?;
+    let mut removed = false;
+
+    if table.remove(name).is_some() {
+        removed = true;
+    }
+
+    if let Some(latest) = table.get_mut("latest").and_then(Item::as_array_mut) {
+        let before = latest.len();
+        latest.retain(|value| value.as_str() != Some(name));
+        removed |= latest.len() != before;
+    }
+
+    removed.then_some(kind)
 }
 
 fn should_use_latest_shorthand(spec: &ItemSpec) -> bool {
@@ -181,6 +219,33 @@ mod tests {
         assert_eq!(config.env.vars["RUST_LOG"], "debug");
         assert!(config.tasks.contains_key("test"));
         assert!(config.tools.contains_key("ripgrep"));
+    }
+
+    #[test]
+    fn removes_tool_entries() {
+        let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", "rust").unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, Some(ItemKind::Tool));
+        assert!(!config.tools.contains_key("rust"));
+    }
+
+    #[test]
+    fn removes_latest_package_entries() {
+        let (output, removed) =
+            remove_item("[packages]\nlatest = [\"openssl\", \"llvm\"]\n", "openssl").unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, Some(ItemKind::Package));
+        assert_eq!(config.packages.latest, ["llvm"]);
+    }
+
+    #[test]
+    fn reports_when_remove_target_is_missing() {
+        let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", "node").unwrap();
+
+        assert_eq!(removed, None);
+        assert_eq!(parse(&output).tools.len(), 1);
     }
 
     fn item(kind: ItemKind, spec: &str) -> InstallItemRequest {
