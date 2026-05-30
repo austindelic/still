@@ -51,15 +51,16 @@ still task lint
 - Project config should override global config for active project state.
 - `sync` reconciles installed state from config.
 - `install` installs immediately and records successful requested items in config.
+- Config-changing install and uninstall flows refresh the lockfile next to the selected config.
 - Config writes should preserve unrelated sections and existing user formatting as much as practical.
 - Duplicate entries should not be added.
+- If no project config exists, commands that write desired state use the global config unless the command explicitly requires project scope.
+- When project and global config both define an item, the project config is the active source; `list --all` still shows global-only entries.
 - No floating installs are allowed. Every installed tool, package, or app must be attached to either a project config or the global config.
 
 Open decisions:
 
-- Whether command-line config writes should create a local `still.toml` instead of using global fallback when no project config exists.
-- Exact merge behavior when project and global config define the same tool/package/app.
-- Lockfile schema and whether config writes update the lockfile immediately.
+- Whether config writes should support a mode that creates a local `still.toml` instead of using global fallback when no project config exists.
 
 ## Platform Model
 
@@ -470,11 +471,12 @@ Behavior:
 
 - Explicit `--tool`, `--package`, and `--app` flags classify following values until another group flag appears.
 - Short aliases should be available: `-t` for `--tool`, `-p` for `--package`, and `-a` for `--app`.
-- Unclassified positional installs may be supported later.
+- Unclassified positional installs are accepted when Still can infer the type from an obvious type-specific backend.
 - When an item is unclassified, Still should infer only when the answer is obvious.
 - If inference is ambiguous, return an error that suggests using `--tool`, `--package`, or `--app`.
 - Install all requested items first; write config once after every install succeeds.
 - If any install fails, leave config unchanged and report which item failed.
+- Partial successful installs are not recorded by default; there is no `--partial` behavior in the v0.1 contract.
 
 Config write rules:
 
@@ -483,12 +485,8 @@ Config write rules:
 - Latest packages/apps from explicit multi-item flags can append to `[packages].latest` and `[apps].latest`.
 - Pinned or backend-specific packages/apps write as keyed entries.
 - Repeated entries should be a no-op unless the requested version/backend changes.
-
-Open decisions:
-
-- Whether partial successful installs should be recorded with an explicit `--partial` flag.
-- Whether a changed existing entry should update config by default or require `--force`.
-- Whether install should update the lockfile in the same operation.
+- Changed existing entries require `--force`.
+- Install refreshes the lockfile after successful config writes.
 
 ## Command Catalog
 
@@ -497,7 +495,7 @@ Open decisions:
 - `sync`: read config, resolve desired state, update the lockfile, install missing items, and report drift.
 - `list`: show active tools/packages/apps and where each version came from.
 - `list --all`: show known installed and configured items, including inactive project/global entries.
-- `uninstall`: remove a Still-managed install and related links; config mutation policy is still open.
+- `uninstall`: remove an item from desired state, remove Still-managed artifacts and links when present, and refresh the lockfile.
 - `run`: run a command with Still-managed PATH/env and return the child exit code.
 - `task`: run a named task from config; no name should list available tasks.
 - `services`: inspect, start, stop, and check configured services.
@@ -543,6 +541,7 @@ The implementation should keep the future multi-platform shape visible from the 
 - Platform adapters own filesystem paths, executable linking, app registration, shell activation, and service process behavior.
 - CLI and TUI layers should not know backend internals.
 - Lockfiles should be able to record resolved backend, platform, version, source, checksums, outputs, and linked executables.
+- Current lockfiles record kind, name, platform, version, backend when selected, source identity, desired-state checksum, expected outputs, and linked executable placeholders.
 - Tests should cover parser/planner behavior without requiring real package managers whenever possible.
 
 ## Trust And Safety
@@ -559,9 +558,10 @@ Trust should gate:
 
 Installing public packages from configured backends is not the same as running project-defined shell code, but backend post-install behavior and external agent skills may need trust policy.
 
+- Trust is stored in a project-local `.still/trust.toml` marker scoped to the config path and content fingerprint.
+- `still init` writes a Still-managed trust marker for the newly created config.
+
 Open decisions:
 
 - Whether package post-install scripts are allowed by default.
-- How trust is stored and scoped.
-- Whether `still init` trust should integrate with mise trust or use only Still-managed trust metadata.
 - How TUI review/confirmation should work for trust-sensitive actions.
