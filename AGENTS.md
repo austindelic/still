@@ -2,16 +2,16 @@
 
 ## Project Overview
 
-Still is a monorepo for a Rust-based package and toolchain manager with companion web and documentation apps. The root workspace is managed with Bun and Turborepo.
+Still is a monorepo for a Rust-based project environment manager with companion web and documentation apps. The root JavaScript/TypeScript workspace is managed with Bun and Turborepo.
 
 ## Repository Layout
 
-- `apps/cli`: Rust CLI workspace for the `still_s` binary, with `engine` and `ui` crates.
-- `apps/web`: SvelteKit app. Follow the nested `apps/web/AGENTS.md` for Svelte-specific guidance.
-- `apps/docs`: Next/Fumadocs documentation app.
+- `apps/cli`: Rust workspace for the `still` binary, `engine` crate, and optional TUI crate.
+- `apps/web`: SvelteKit app. Follow `apps/web/AGENTS.md`.
+- `apps/docs`: Next/Fumadocs documentation app. Follow `apps/docs/AGENTS.md`.
 - `packages/ui`: Shared React UI package.
-- `packages/eslint-config`: Shared ESLint configs.
-- `packages/typescript-config`: Shared TypeScript configs.
+- `packages/eslint-config`: Shared ESLint config.
+- `packages/typescript-config`: Shared TypeScript config.
 
 ## Common Commands
 
@@ -34,9 +34,10 @@ Package-specific commands:
 Run Rust commands from `apps/cli`:
 
 - `cargo fmt`: Format Rust code.
-- `cargo check`: Check the CLI workspace.
-- `cargo test`: Run Rust tests.
-- `cargo build`: Build the CLI workspace.
+- `cargo check -p still`: Check the default CLI build.
+- `cargo test -p still`: Test the default CLI build.
+- `cargo check -p still --features tui`: Check the TUI-enabled build.
+- `cargo test --workspace`: Run Rust workspace tests.
 
 ## Workflow Guidance
 
@@ -46,8 +47,10 @@ Run Rust commands from `apps/cli`:
 - Do not rewrite unrelated files or revert changes you did not make.
 - Avoid changing lockfiles unless dependency changes require it.
 - Prefer existing workspace scripts and package-local commands over ad hoc commands.
-- For CLI backend/provider work, follow `apps/cli/AGENTS.md`; v1 backends are `core`/`native`, `github`, `http`, `cargo`, `go`, `npm`, `pipx`, `asdf`, and `aqua`.
+- Public product goals belong in README files. Agent-only implementation guidance belongs in AGENTS files.
+- For CLI backend/provider work, follow `apps/cli/AGENTS.md` and `apps/cli/crates/engine/AGENTS.md`.
+- Before adding, rewriting, or auditing code comments, read and follow `.agents/skills/code-comments/SKILL.md`. Use compact, caller-oriented docs and avoid comments that merely repeat what the code already says.
 
 ## Validation
 
-For documentation-only changes, a read-through is usually enough. For code changes, run the narrowest relevant checks first, then broaden to workspace-level checks when the change touches shared behavior or contracts.
+For documentation-only changes, a read-through and stale-term search is usually enough. For code changes, run the narrowest relevant checks first, then broaden to workspace-level checks when the change touches shared behavior or contracts.
