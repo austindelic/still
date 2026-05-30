@@ -32,6 +32,7 @@ pub enum ToolEntry {
 pub struct ExpandedTool {
     pub version: String,
     pub backend: Option<String>,
+    pub backends: BTreeMap<String, String>,
     pub components: Vec<String>,
     pub targets: Vec<String>,
 }
@@ -67,6 +68,7 @@ pub enum PackageEntry {
 pub struct ExpandedPackage {
     pub version: Option<String>,
     pub backend: Option<String>,
+    pub backends: BTreeMap<String, String>,
     pub names: BTreeMap<String, String>,
     pub platforms: Vec<String>,
     pub ignore: Option<String>,
@@ -192,6 +194,7 @@ mod tests {
             [tools.rust]
             version = "stable"
             backend = "rustup"
+            backends = { macos = "rustup", linux = "mise" }
             components = ["rustfmt", "clippy"]
             targets = ["wasm32-unknown-unknown"]
             "#,
@@ -204,6 +207,7 @@ mod tests {
         };
         assert_eq!(rust.version, "stable");
         assert_eq!(rust.backend.as_deref(), Some("rustup"));
+        assert_eq!(rust.backends["linux"], "mise");
         assert_eq!(rust.components, ["rustfmt", "clippy"]);
     }
 
@@ -213,7 +217,7 @@ mod tests {
             r#"
             [packages]
             latest = ["ripgrep", "fd"]
-            postgresql = { version = "16", backend = "auto" }
+            postgresql = { version = "16", backend = "auto", backends = { macos = "homebrew", linux = "apt" } }
 
             [packages.fd.names]
             macos = "fd"
@@ -227,6 +231,8 @@ mod tests {
 
         assert_eq!(config.packages.latest, ["ripgrep", "fd"]);
         assert!(config.packages.entries.contains_key("postgresql"));
+        let PackageEntry::Expanded(postgresql) = &config.packages.entries["postgresql"];
+        assert_eq!(postgresql.backends["linux"], "apt");
         let PackageEntry::Expanded(fd) = &config.packages.entries["fd"];
         assert_eq!(fd.names["linux"], "fd-find");
         assert_eq!(config.apps.latest, ["zed"]);

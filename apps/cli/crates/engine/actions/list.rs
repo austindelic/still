@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
+use crate::platform::{PlatformId, current_platform};
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -110,23 +111,28 @@ async fn merge_global_config_items(
 }
 
 fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Vec<ListSection> {
+    let platform = current_platform();
     vec![
         ListSection {
             kind: ItemKind::Tool,
-            items: tool_items(config.tools, scope),
+            items: tool_items(config.tools, scope, platform),
         },
         ListSection {
             kind: ItemKind::Package,
-            items: package_items(config.packages, scope),
+            items: package_items(config.packages, scope, platform),
         },
         ListSection {
             kind: ItemKind::App,
-            items: package_items(config.apps, scope),
+            items: package_items(config.apps, scope, platform),
         },
     ]
 }
 
-fn tool_items(tools: BTreeMap<String, ToolEntry>, scope: ConfigScope) -> Vec<ListItem> {
+fn tool_items(
+    tools: BTreeMap<String, ToolEntry>,
+    scope: ConfigScope,
+    platform: PlatformId,
+) -> Vec<ListItem> {
     tools
         .into_iter()
         .map(|(name, entry)| match entry {
@@ -148,7 +154,7 @@ fn tool_items(tools: BTreeMap<String, ToolEntry>, scope: ConfigScope) -> Vec<Lis
                 } else {
                     tool.version
                 },
-                backend: tool.backend,
+                backend: backend_for_platform(tool.backend, tool.backends, platform),
                 outputs: Vec::new(),
                 linked_executables: Vec::new(),
                 configured: true,
@@ -160,7 +166,7 @@ fn tool_items(tools: BTreeMap<String, ToolEntry>, scope: ConfigScope) -> Vec<Lis
         .collect()
 }
 
-fn package_items(map: PackageMap, scope: ConfigScope) -> Vec<ListItem> {
+fn package_items(map: PackageMap, scope: ConfigScope, platform: PlatformId) -> Vec<ListItem> {
     let mut items = BTreeMap::new();
     for name in map.latest {
         items.insert(
@@ -186,7 +192,7 @@ fn package_items(map: PackageMap, scope: ConfigScope) -> Vec<ListItem> {
             ListItem {
                 name,
                 version: package.version.unwrap_or_else(|| "latest".to_string()),
-                backend: package.backend,
+                backend: backend_for_platform(package.backend, package.backends, platform),
                 outputs: Vec::new(),
                 linked_executables: Vec::new(),
                 configured: true,
@@ -198,6 +204,20 @@ fn package_items(map: PackageMap, scope: ConfigScope) -> Vec<ListItem> {
     }
 
     items.into_values().collect()
+}
+
+fn backend_for_platform(
+    backend: Option<String>,
+    backends: BTreeMap<String, String>,
+    platform: PlatformId,
+) -> Option<String> {
+    backends
+        .into_iter()
+        .find_map(|(key, value)| match key.parse::<PlatformId>() {
+            Ok(key_platform) if key_platform == platform => Some(value),
+            _ => None,
+        })
+        .or(backend)
 }
 
 async fn discover_installed_items() -> Result<Vec<ListSection>> {
@@ -433,6 +453,46 @@ mod tests {
 
         assert_eq!(result.path, config);
         assert_eq!(result.sections[0].items, [global_item("node", "22", None)]);
+    }
+
+    #[tokio::test]
+    async fn list_uses_platform_specific_backend_overrides() {
+        let temp = tempfile::tempdir().unwrap();
+        let platform = current_platform().to_string();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [tools.rust]
+                version = "stable"
+                backend = "rustup"
+                backends = {{ {platform} = "mise" }}
+
+                [apps.zed]
+                backend = "homebrew-cask"
+                backends = {{ {platform} = "flatpak" }}
+                "#
+            ),
+        )
+        .unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.sections[0].items,
+            [item("rust", "stable", Some("mise"))]
+        );
+        assert_eq!(
+            result.sections[2].items,
+            [item("zed", "latest", Some("flatpak"))]
+        );
     }
 
     #[tokio::test]

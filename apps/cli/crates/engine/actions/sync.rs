@@ -188,7 +188,7 @@ fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
     for (name, entry) in config.tools {
         items.push(SyncItem {
             kind: ItemKind::Tool,
-            spec: tool_spec(name, entry)?,
+            spec: tool_spec(name, entry, platform)?,
         });
     }
     items.extend(package_items(ItemKind::Package, config.packages, platform)?);
@@ -196,7 +196,7 @@ fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
     Ok(items)
 }
 
-fn tool_spec(name: String, entry: ToolEntry) -> Result<ItemSpec> {
+fn tool_spec(name: String, entry: ToolEntry, platform: PlatformId) -> Result<ItemSpec> {
     match entry {
         ToolEntry::Version(version) => item_spec(name, version, None),
         ToolEntry::Expanded(tool) => {
@@ -205,7 +205,11 @@ fn tool_spec(name: String, entry: ToolEntry) -> Result<ItemSpec> {
             } else {
                 tool.version
             };
-            item_spec(name, version, tool.backend)
+            item_spec(
+                name,
+                version,
+                backend_for_platform(tool.backend, tool.backends, platform)?,
+            )
         }
     }
 }
@@ -235,11 +239,25 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
             spec: item_spec(
                 name,
                 package.version.unwrap_or_else(|| "latest".to_string()),
-                package.backend,
+                backend_for_platform(package.backend, package.backends, platform)?,
             )?,
         });
     }
     Ok(items)
+}
+
+fn backend_for_platform(
+    backend: Option<String>,
+    backends: std::collections::BTreeMap<String, String>,
+    platform: PlatformId,
+) -> Result<Option<String>> {
+    for (key, value) in backends {
+        let key_platform: PlatformId = key.parse()?;
+        if key_platform == platform {
+            return Ok(Some(value));
+        }
+    }
+    Ok(backend)
 }
 
 fn item_spec(name: String, version: String, backend: Option<String>) -> Result<ItemSpec> {
@@ -347,6 +365,47 @@ mod tests {
 
         assert!(result.items.is_empty());
         assert_eq!(result.drift, [SyncDrift::LockfileMissing]);
+    }
+
+    #[tokio::test]
+    async fn sync_uses_platform_specific_backend_overrides() {
+        let temp = tempfile::tempdir().unwrap();
+        let platform = current_platform().to_string();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [tools.rust]
+                version = "stable"
+                backend = "rustup"
+                backends = {{ {platform} = "mise" }}
+
+                [packages.openssl]
+                version = "3"
+                backend = "homebrew"
+                backends = {{ {platform} = "apt" }}
+                "#
+            ),
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.items.iter().any(|item| {
+            item.kind == ItemKind::Tool
+                && item.spec.name == "rust"
+                && item.spec.backend.as_ref().unwrap().as_str() == "mise"
+        }));
+        assert!(result.items.iter().any(|item| {
+            item.kind == ItemKind::Package
+                && item.spec.name == "openssl"
+                && item.spec.backend.as_ref().unwrap().as_str() == "apt"
+        }));
     }
 
     #[tokio::test]
