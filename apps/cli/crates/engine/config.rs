@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use crate::error::{EngineError, EngineResult};
 
 /// File name used for project-local desired state.
 pub const PROJECT_CONFIG_FILE: &str = "still.toml";
@@ -50,7 +50,7 @@ pub fn resolve_config_path(
     start_dir: &Path,
     home_dir: &Path,
     selection: ConfigSelection,
-) -> Result<ResolvedConfigPath> {
+) -> EngineResult<ResolvedConfigPath> {
     match selection.scope {
         ConfigScope::Global => Ok(ResolvedConfigPath {
             scope: ConfigScope::Global,
@@ -65,7 +65,7 @@ pub fn resolve_config_path(
             }
 
             if selection.for_write {
-                bail!("no still.toml found; run `still init` in this project or pass `--global`");
+                return Err(EngineError::MissingProjectConfig);
             }
 
             Ok(ResolvedConfigPath {

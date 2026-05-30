@@ -6,6 +6,8 @@
 pub mod actions;
 /// Config discovery and filesystem locations.
 pub mod config;
+/// Typed engine errors.
+pub mod error;
 /// Side-effect-free planning models.
 pub mod planner;
 /// Platform identifiers and filters.

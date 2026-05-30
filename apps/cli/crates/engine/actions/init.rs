@@ -2,9 +2,10 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use crate::config::PROJECT_CONFIG_FILE;
+use crate::error::EngineError;
 
 const STARTER_CONFIG: &str = r#"[tools]
 
@@ -47,10 +48,7 @@ pub struct InitResult {
 pub async fn run(request: InitRequest) -> Result<InitResult> {
     let path = request.start_dir.join(PROJECT_CONFIG_FILE);
     if path.exists() && !request.force {
-        bail!(
-            "{} already exists; pass --force to overwrite it",
-            path.display()
-        );
+        return Err(EngineError::ConfigAlreadyExists { path }.into());
     }
 
     tokio::fs::write(&path, STARTER_CONFIG)

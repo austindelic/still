@@ -2,7 +2,9 @@
 
 use std::{fmt, str::FromStr};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
+
+use crate::error::EngineError;
 
 /// User-facing role an item plays in a Still project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,14 +25,16 @@ impl fmt::Display for ItemKind {
 }
 
 impl FromStr for ItemKind {
-    type Err = anyhow::Error;
+    type Err = EngineError;
 
-    fn from_str(input: &str) -> Result<Self> {
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
         match input {
             "tool" | "tools" => Ok(Self::Tool),
             "package" | "packages" | "pkg" | "pkgs" => Ok(Self::Package),
             "app" | "apps" => Ok(Self::App),
-            value => bail!("unknown item kind \"{value}\""),
+            value => Err(Self::Err::UnknownItemKind {
+                kind: value.to_string(),
+            }),
         }
     }
 }
@@ -124,14 +128,14 @@ impl ItemSpec {
     pub fn parse(input: &str) -> Result<Self> {
         let value = input.trim();
         if value.is_empty() {
-            bail!("item spec cannot be empty");
+            return Err(invalid_item_spec("item spec cannot be empty"));
         }
 
         let parts: Vec<&str> = value.split('@').collect();
         if parts.len() > 3 {
-            bail!(
+            return Err(invalid_item_spec(format!(
                 "invalid item spec \"{value}\": expected name, name@version, or name@version@backend"
-            );
+            )));
         }
 
         let name = parts[0].trim();
@@ -139,7 +143,11 @@ impl ItemSpec {
 
         let version = VersionReq::new(parts.get(1).copied().unwrap_or("latest"))?;
         let backend = match parts.get(2).map(|value| value.trim()) {
-            Some("") => bail!("invalid item spec \"{value}\": backend cannot be empty"),
+            Some("") => {
+                return Err(invalid_item_spec(format!(
+                    "invalid item spec \"{value}\": backend cannot be empty"
+                )));
+            }
             Some(value) => Some(BackendId::new(value)?),
             None => None,
         };
@@ -162,22 +170,26 @@ impl FromStr for ItemSpec {
 
 fn validate_identifier(label: &str, value: &str, allow_slash: bool) -> Result<()> {
     if value.is_empty() {
-        bail!("{label} name cannot be empty");
+        return Err(invalid_item_spec(format!("{label} name cannot be empty")));
     }
 
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
-        bail!("{label} name cannot be empty");
+        return Err(invalid_item_spec(format!("{label} name cannot be empty")));
     };
 
     if !first.is_ascii_alphanumeric() {
-        bail!("{label} name must start with a letter or number");
+        return Err(invalid_item_spec(format!(
+            "{label} name must start with a letter or number"
+        )));
     }
 
     for c in chars {
         if !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') || (allow_slash && c == '/'))
         {
-            bail!("{label} name contains invalid character '{c}'");
+            return Err(invalid_item_spec(format!(
+                "{label} name contains invalid character '{c}'"
+            )));
         }
     }
 
@@ -187,10 +199,19 @@ fn validate_identifier(label: &str, value: &str, allow_slash: bool) -> Result<()
 fn validate_version_req(value: &str) -> Result<()> {
     for c in value.chars() {
         if !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+' | '/')) {
-            bail!("version contains invalid character '{c}'");
+            return Err(invalid_item_spec(format!(
+                "version contains invalid character '{c}'"
+            )));
         }
     }
     Ok(())
+}
+
+fn invalid_item_spec(reason: impl Into<String>) -> anyhow::Error {
+    EngineError::InvalidItemSpec {
+        reason: reason.into(),
+    }
+    .into()
 }
 
 #[cfg(test)]
@@ -229,5 +250,17 @@ mod tests {
         let err = ItemSpec::parse("ripgrep@latest@").unwrap_err();
 
         assert!(err.to_string().contains("backend cannot be empty"));
+    }
+
+    #[test]
+    fn unknown_item_kind_is_typed() {
+        let err = "service".parse::<ItemKind>().unwrap_err();
+
+        assert_eq!(
+            err,
+            EngineError::UnknownItemKind {
+                kind: "service".to_string()
+            }
+        );
     }
 }

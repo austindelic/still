@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use anyhow::{Result, bail};
+use crate::error::{EngineError, EngineResult};
 
 /// Supported host platform identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -23,14 +23,17 @@ impl fmt::Display for PlatformId {
 }
 
 impl FromStr for PlatformId {
-    type Err = anyhow::Error;
+    type Err = EngineError;
 
-    fn from_str(input: &str) -> Result<Self> {
+    fn from_str(input: &str) -> EngineResult<Self> {
         match input {
             "macos" | "darwin" => Ok(Self::Macos),
             "linux" => Ok(Self::Linux),
             "windows" | "win32" => Ok(Self::Windows),
-            value => bail!("unknown platform \"{value}\""),
+            value => Err(EngineError::UnknownPlatform {
+                platform: value.to_string(),
+            }
+            .into()),
         }
     }
 }
@@ -50,15 +53,15 @@ impl PlatformFilter {
         platforms: &[String],
         ignore: Option<&str>,
         only: Option<&str>,
-    ) -> Result<Self> {
+    ) -> EngineResult<Self> {
         let allow = if let Some(only) = only {
-            vec![only.parse()?]
+            vec![parse_platform(only)?]
         } else {
             parse_platforms(platforms)?
         };
 
         let deny = match ignore {
-            Some(platform) => vec![platform.parse()?],
+            Some(platform) => vec![parse_platform(platform)?],
             None => Vec::new(),
         };
 
@@ -73,8 +76,12 @@ impl PlatformFilter {
     }
 }
 
-fn parse_platforms(values: &[String]) -> Result<Vec<PlatformId>> {
+fn parse_platforms(values: &[String]) -> EngineResult<Vec<PlatformId>> {
     values.iter().map(|value| value.parse()).collect()
+}
+
+fn parse_platform(value: &str) -> EngineResult<PlatformId> {
+    value.parse()
 }
 
 #[cfg(test)]
@@ -135,6 +142,11 @@ mod tests {
     fn unknown_platform_is_an_error() {
         let err = PlatformFilter::from_config(&["freebsd".to_string()], None, None).unwrap_err();
 
-        assert!(err.to_string().contains("unknown platform"));
+        assert_eq!(
+            err,
+            EngineError::UnknownPlatform {
+                platform: "freebsd".to_string()
+            }
+        );
     }
 }

@@ -1,8 +1,7 @@
 //! Side-effect-free plans produced before execution.
 
-use anyhow::{Result, bail};
-
 use crate::actions::install::InstallRequest;
+use crate::error::{EngineError, EngineResult};
 use crate::specs::item::{ItemKind, ItemSpec};
 
 /// Plan for installing requested tools, packages, and apps.
@@ -15,9 +14,9 @@ impl InstallPlan {
     /// Builds an install plan from a parsed install request.
     /// # Errors
     /// Fails when the request contains no items.
-    pub fn from_request(request: InstallRequest) -> Result<Self> {
+    pub fn from_request(request: InstallRequest) -> EngineResult<Self> {
         if request.items.is_empty() {
-            bail!("install request must include at least one item");
+            return Err(EngineError::EmptyInstallRequest);
         }
 
         Ok(Self {
@@ -89,7 +88,7 @@ mod tests {
     fn install_plan_rejects_empty_requests() {
         let err = InstallPlan::from_request(InstallRequest { items: Vec::new() }).unwrap_err();
 
-        assert!(err.to_string().contains("at least one item"));
+        assert_eq!(err, crate::error::EngineError::EmptyInstallRequest);
     }
 
     fn item(kind: ItemKind, spec: &str) -> InstallItemRequest {

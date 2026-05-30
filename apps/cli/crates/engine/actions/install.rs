@@ -1,5 +1,6 @@
 //! Engine install action for resolving, downloading, verifying, extracting, and linking packages.
 
+use crate::error::EngineError;
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
@@ -86,12 +87,12 @@ pub struct InstallResult {
 pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     let item = match request.items.as_slice() {
         [item] => item,
-        [] => anyhow::bail!("install request must include at least one item"),
-        _ => anyhow::bail!("multi-item install execution is not implemented yet"),
+        [] => return Err(EngineError::EmptyInstallRequest.into()),
+        _ => return Err(EngineError::not_implemented("multi-item install execution").into()),
     };
 
     if item.kind == ItemKind::App {
-        anyhow::bail!("app install execution is not implemented yet");
+        return Err(EngineError::not_implemented("app install execution").into());
     }
 
     let tool = ToolSpec {

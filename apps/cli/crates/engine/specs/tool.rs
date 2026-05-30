@@ -38,9 +38,12 @@ impl FromStr for ToolSpec {
 
     fn from_str(input: &str) -> Result<Self> {
         let item = ItemSpec::parse(input).map_err(|e| {
-            anyhow::anyhow!(ParseToolSpecError::Invalid {
-                reason: e.to_string()
-            })
+            let message = e.to_string();
+            let reason = message
+                .strip_prefix("invalid item spec: ")
+                .unwrap_or(&message)
+                .to_string();
+            anyhow::anyhow!(ParseToolSpecError::Invalid { reason })
         })?;
 
         Ok(Self {

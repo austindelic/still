@@ -642,6 +642,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "thiserror 2.0.17",
  "tokio",
  "toml_edit",
  "urlencoding",
