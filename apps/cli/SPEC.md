@@ -86,10 +86,8 @@ Rules:
 - `backends` maps platform names to platform-specific backend choices, with scalar `backend` as the fallback.
 - Platform-specific install paths, executable linking, app registration, service management, and shell activation belong in the engine layer.
 - Config should express intent; backends and platform adapters should translate that intent into host-specific operations.
-
-Open decisions:
-
-- Whether lockfiles are per-platform, multi-platform, or both.
+- Still uses one multi-platform-capable `still.lock.toml` next to the selected config. Each lockfile item records its resolved platform.
+- `sync` replaces entries for the active host platform and preserves entries for other platforms, allowing the lockfile to accumulate resolved state across macOS, Linux, and Windows runs.
 
 ## Config Surface
 

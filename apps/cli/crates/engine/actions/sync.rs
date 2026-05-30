@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::lockfile::{lockfile_path, render_lockfile};
+use crate::lockfile::{lockfile_path, render_merged_lockfile};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
@@ -97,7 +97,9 @@ pub async fn run_with_installer(
 pub async fn refresh_lockfile(config_path: &Path) -> Result<PathBuf> {
     let items = sync_items_for_path(config_path).await?;
     let path = lockfile_path(config_path);
-    tokio::fs::write(&path, render_lockfile(&items))
+    let existing = read_optional_lockfile(&path).await?;
+    let rendered = render_merged_lockfile(existing.as_deref(), &items);
+    tokio::fs::write(&path, rendered)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(path)
@@ -117,8 +119,9 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
     )?;
     let items = sync_items_for_path(&resolved.path).await?;
     let lockfile_path = lockfile_path(&resolved.path);
-    let rendered_lockfile = render_lockfile(&items);
-    let drift = lockfile_drift(&lockfile_path, &rendered_lockfile).await?;
+    let existing_lockfile = read_optional_lockfile(&lockfile_path).await?;
+    let rendered_lockfile = render_merged_lockfile(existing_lockfile.as_deref(), &items);
+    let drift = lockfile_drift(existing_lockfile.as_deref(), &rendered_lockfile);
     let missing = missing_items(&items).await?;
     tokio::fs::write(&lockfile_path, rendered_lockfile)
         .await
@@ -152,14 +155,19 @@ fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
         .collect()
 }
 
-async fn lockfile_drift(path: &std::path::Path, desired: &str) -> Result<Vec<SyncDrift>> {
+async fn read_optional_lockfile(path: &std::path::Path) -> Result<Option<String>> {
     match tokio::fs::read_to_string(path).await {
-        Ok(existing) if existing == desired => Ok(Vec::new()),
-        Ok(_) => Ok(vec![SyncDrift::LockfileOutdated]),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            Ok(vec![SyncDrift::LockfileMissing])
-        }
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn lockfile_drift(existing: Option<&str>, desired: &str) -> Vec<SyncDrift> {
+    match existing {
+        Some(existing) if existing == desired => Vec::new(),
+        Some(_) => vec![SyncDrift::LockfileOutdated],
+        None => vec![SyncDrift::LockfileMissing],
     }
 }
 
