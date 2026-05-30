@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use crate::actions::sync::SyncItem;
 use crate::platform::current_platform;
+use crate::specs::item::ItemKind;
+use crate::system::System;
+use crate::utils::paths::PathOps;
 
 /// Project lockfile name written next to `still.toml`.
 pub const LOCKFILE_NAME: &str = "still.lock.toml";
@@ -33,9 +36,23 @@ pub fn render_lockfile(items: &[SyncItem]) -> String {
         if let Some(backend) = &item.spec.backend {
             output.push_str(&format!("backend = \"{}\"\n", backend));
         }
+        output.push_str(&format!(
+            "outputs = [\"{}\"]\n",
+            expected_output_path(item).display()
+        ));
+        output.push_str("linked_executables = []\n");
         output.push('\n');
     }
     output
+}
+
+fn expected_output_path(item: &SyncItem) -> PathBuf {
+    let root = match item.kind {
+        ItemKind::Tool => System::tool_dir(),
+        ItemKind::Package => System::root_dir().join("packages"),
+        ItemKind::App => System::apps_dir(),
+    };
+    root.join(&item.spec.name).join(item.spec.version.as_str())
 }
 
 #[cfg(test)]
@@ -55,6 +72,8 @@ mod tests {
         assert!(output.contains("name = \"rust\""));
         assert!(output.contains(&format!("platform = \"{}\"", current_platform())));
         assert!(output.contains("backend = \"rustup\""));
+        assert!(output.contains("outputs = ["));
+        assert!(output.contains("linked_executables = []"));
         assert!(output.contains("kind = \"package\""));
     }
 
