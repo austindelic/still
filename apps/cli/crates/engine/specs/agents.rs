@@ -42,7 +42,7 @@ pub enum NormalizedSkillSource {
 pub fn managed_skills_gitignore(skills: &[NormalizedSkill]) -> EngineResult<String> {
     let mut names = skills
         .iter()
-        .map(|skill| validated_skill_dir_name(&skill.name))
+        .map(|skill| managed_skill_dir_name(&skill.name))
         .collect::<EngineResult<Vec<_>>>()?;
     names.sort();
     names.dedup();
@@ -54,6 +54,26 @@ pub fn managed_skills_gitignore(skills: &[NormalizedSkill]) -> EngineResult<Stri
         output.push_str("/\n");
     }
     Ok(output)
+}
+
+/// Validates and returns the directory name for a managed skill.
+pub fn managed_skill_dir_name(name: &str) -> EngineResult<String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('*')
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("invalid managed skill directory name \"{name}\""),
+        });
+    }
+
+    Ok(name.to_string())
 }
 
 /// Converts parsed `[agents]` config into command/planner friendly data.
@@ -176,22 +196,6 @@ fn parse_specs(label: &str, values: Vec<String>) -> EngineResult<Vec<ItemSpec>> 
                 })
         })
         .collect()
-}
-
-fn validated_skill_dir_name(name: &str) -> EngineResult<String> {
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains('*')
-    {
-        return Err(EngineError::InvalidConfig {
-            reason: format!("invalid managed skill directory name \"{name}\""),
-        });
-    }
-
-    Ok(name.to_string())
 }
 
 #[cfg(test)]
