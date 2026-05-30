@@ -16,6 +16,7 @@ use crate::specs::agents::{
 };
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageMap, StillConfig, parse_still_toml};
+use crate::trust::assert_config_trusted;
 
 const MANAGED_MARKER: &str = ".still-managed";
 const SOURCE_METADATA: &str = "source.toml";
@@ -69,6 +70,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
     let mut auto_added = Vec::new();
     let mut missing_dependencies = missing_skill_dependencies(&agents.skills, &config, false);
     let gitignore_path = if request.operation == AgentsOperation::Sync {
+        assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
         auto_added = auto_dependency_items(&agents.skills, &config);
         if !auto_added.is_empty() {
             let updated = add_install_items(&content, &auto_added)?;
@@ -375,6 +377,8 @@ fn spec_strings(specs: &[crate::specs::item::ItemSpec]) -> Vec<String> {
 mod tests {
     use std::fs;
 
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
     use super::*;
 
     #[tokio::test]
@@ -411,14 +415,13 @@ mod tests {
     #[tokio::test]
     async fn agents_sync_writes_managed_skill_gitignore() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            r#"
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
             [agents]
             skills = ["rust-review"]
-            "#,
-        )
-        .unwrap();
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
@@ -444,14 +447,13 @@ mod tests {
     #[tokio::test]
     async fn agents_sync_refuses_unmarked_custom_skill_directory() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            r#"
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
             [agents]
             skills = ["custom"]
-            "#,
-        )
-        .unwrap();
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
         fs::create_dir_all(temp.path().join(".agents/skills/custom")).unwrap();
         fs::write(
             temp.path().join(".agents/skills/custom/SKILL.md"),
@@ -474,9 +476,8 @@ mod tests {
     #[tokio::test]
     async fn agents_sync_auto_adds_missing_inline_skill_dependencies() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            r#"
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
             [tools]
             rust = { version = "stable", backend = "rustup" }
 
@@ -487,9 +488,9 @@ mod tests {
 
             [agents.skills]
             rust-review = { auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }
-            "#,
-        )
-        .unwrap();
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
@@ -554,19 +555,18 @@ mod tests {
         fs::create_dir_all(source.join("nested")).unwrap();
         fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
         fs::write(source.join("nested/config.toml"), "ok = true\n").unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            format!(
-                r#"
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
                 [agents]
 
                 [agents.skills]
                 local-skill = "file://{}"
                 "#,
-                source.display()
-            ),
-        )
-        .unwrap();
+            source.display()
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
 
         run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
@@ -585,5 +585,43 @@ mod tests {
             fs::read_to_string(content.join("nested/config.toml")).unwrap(),
             "ok = true\n"
         );
+    }
+
+    #[tokio::test]
+    async fn agents_sync_requires_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents]
+            skills = ["rust-review"]
+            "#,
+        )
+        .unwrap();
+
+        let err = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("not trusted"));
+        assert!(err.to_string().contains("agent sync"));
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
     }
 }
