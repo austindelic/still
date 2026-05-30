@@ -25,6 +25,9 @@
     },
     "tasks": {
       "$ref": "#/$defs/taskMap"
+    },
+    "agents": {
+      "$ref": "#/$defs/agents"
     }
   },
   "$defs": {
@@ -321,6 +324,89 @@
           "$ref": "#/$defs/stringList"
         }
       }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/agentTarget"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 1
+        },
+        "skills": {
+          "$ref": "#/$defs/agentSkillList"
+        }
+      }
+    },
+    "agentTarget": {
+      "type": "string",
+      "enum": ["claude", "codex"]
+    },
+    "agentSkillList": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/stringList"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/skillSource"
+          }
+        }
+      ]
+    },
+    "skillSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": ["source"]
+            },
+            {
+              "required": ["url"]
+            }
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "$ref": "#/$defs/version"
+            },
+            "auto": {
+              "type": "boolean"
+            },
+            "tools": {
+              "$ref": "#/$defs/stringList"
+            },
+            "packages": {
+              "$ref": "#/$defs/stringList"
+            },
+            "apps": {
+              "$ref": "#/$defs/stringList"
+            }
+          }
+        }
+      ]
     }
   }
 }
