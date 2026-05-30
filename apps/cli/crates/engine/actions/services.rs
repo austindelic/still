@@ -211,6 +211,7 @@ struct NormalizedService {
     check: Option<ActionCommand>,
 }
 
+#[derive(Debug, Clone)]
 enum ActionCommand {
     Command(String),
     Task(String),
@@ -229,10 +230,12 @@ fn normalize_service(service: ServiceEntry) -> NormalizedService {
 }
 
 fn normalize_expanded_service(service: ExpandedService) -> NormalizedService {
+    let preset = service.preset.as_deref().and_then(service_preset);
     let start = service
         .start
         .map(action_command)
-        .or_else(|| service.task.map(ActionCommand::Task));
+        .or_else(|| service.task.map(ActionCommand::Task))
+        .or_else(|| preset.as_ref().and_then(|preset| preset.start.clone()));
     let detail = service
         .preset
         .clone()
@@ -248,8 +251,48 @@ fn normalize_expanded_service(service: ExpandedService) -> NormalizedService {
     NormalizedService {
         detail,
         start,
-        stop: service.stop.map(action_command),
-        check: service.check.map(action_command),
+        stop: service
+            .stop
+            .map(action_command)
+            .or_else(|| preset.as_ref().and_then(|preset| preset.stop.clone())),
+        check: service
+            .check
+            .map(action_command)
+            .or_else(|| preset.and_then(|preset| preset.check)),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ServicePreset {
+    start: Option<ActionCommand>,
+    stop: Option<ActionCommand>,
+    check: Option<ActionCommand>,
+}
+
+fn service_preset(name: &str) -> Option<ServicePreset> {
+    let command = |value: &str| Some(ActionCommand::Command(value.to_string()));
+    match name {
+        "docker" => Some(ServicePreset {
+            start: None,
+            stop: None,
+            check: command("docker info"),
+        }),
+        "docker-compose" | "compose" => Some(ServicePreset {
+            start: command("docker compose up -d"),
+            stop: command("docker compose down"),
+            check: command("docker compose ps"),
+        }),
+        "postgres" | "postgresql" => Some(ServicePreset {
+            start: None,
+            stop: None,
+            check: command("pg_isready"),
+        }),
+        "redis" => Some(ServicePreset {
+            start: None,
+            stop: None,
+            check: command("redis-cli ping"),
+        }),
+        _ => None,
     }
 }
 
@@ -437,6 +480,43 @@ mod tests {
 
         let execution = result.services[0].execution.as_ref().unwrap();
         assert_eq!(execution.stdout.trim(), "service-env");
+    }
+
+    #[test]
+    fn built_in_presets_supply_common_service_actions() {
+        let normalized = normalize_expanded_service(ExpandedService {
+            preset: Some("docker-compose".to_string()),
+            ..ExpandedService::default()
+        });
+
+        assert!(matches!(
+            normalized.start,
+            Some(ActionCommand::Command(ref command)) if command == "docker compose up -d"
+        ));
+        assert!(matches!(
+            normalized.stop,
+            Some(ActionCommand::Command(ref command)) if command == "docker compose down"
+        ));
+        assert!(matches!(
+            normalized.check,
+            Some(ActionCommand::Command(ref command)) if command == "docker compose ps"
+        ));
+    }
+
+    #[test]
+    fn explicit_service_actions_override_presets() {
+        let normalized = normalize_expanded_service(ExpandedService {
+            preset: Some("docker-compose".to_string()),
+            check: Some(ServiceAction::Command {
+                command: "custom check".to_string(),
+            }),
+            ..ExpandedService::default()
+        });
+
+        assert!(matches!(
+            normalized.check,
+            Some(ActionCommand::Command(ref command)) if command == "custom check"
+        ));
     }
 
     #[tokio::test]
