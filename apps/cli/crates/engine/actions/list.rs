@@ -41,6 +41,8 @@ pub struct ListItem {
     pub name: String,
     pub version: String,
     pub backend: Option<String>,
+    pub outputs: Vec<String>,
+    pub linked_executables: Vec<String>,
     pub configured: bool,
     pub project: bool,
     pub global: bool,
@@ -53,6 +55,10 @@ struct InstallMarker {
     name: String,
     version: String,
     backend: Option<String>,
+    #[serde(default)]
+    outputs: Vec<String>,
+    #[serde(default)]
+    linked_executables: Vec<String>,
 }
 
 /// Reads selected config and returns configured items.
@@ -128,6 +134,8 @@ fn tool_items(tools: BTreeMap<String, ToolEntry>, scope: ConfigScope) -> Vec<Lis
                 name,
                 version,
                 backend: None,
+                outputs: Vec::new(),
+                linked_executables: Vec::new(),
                 configured: true,
                 project: scope == ConfigScope::Project,
                 global: scope == ConfigScope::Global,
@@ -141,6 +149,8 @@ fn tool_items(tools: BTreeMap<String, ToolEntry>, scope: ConfigScope) -> Vec<Lis
                     tool.version
                 },
                 backend: tool.backend,
+                outputs: Vec::new(),
+                linked_executables: Vec::new(),
                 configured: true,
                 project: scope == ConfigScope::Project,
                 global: scope == ConfigScope::Global,
@@ -159,6 +169,8 @@ fn package_items(map: PackageMap, scope: ConfigScope) -> Vec<ListItem> {
                 name,
                 version: "latest".to_string(),
                 backend: None,
+                outputs: Vec::new(),
+                linked_executables: Vec::new(),
                 configured: true,
                 project: scope == ConfigScope::Project,
                 global: scope == ConfigScope::Global,
@@ -175,6 +187,8 @@ fn package_items(map: PackageMap, scope: ConfigScope) -> Vec<ListItem> {
                 name,
                 version: package.version.unwrap_or_else(|| "latest".to_string()),
                 backend: package.backend,
+                outputs: Vec::new(),
+                linked_executables: Vec::new(),
                 configured: true,
                 project: scope == ConfigScope::Project,
                 global: scope == ConfigScope::Global,
@@ -273,6 +287,8 @@ async fn read_marker_item(kind: ItemKind, path: PathBuf) -> Result<Option<ListIt
         name: marker.name,
         version: marker.version,
         backend: marker.backend,
+        outputs: marker.outputs,
+        linked_executables: marker.linked_executables,
         configured: false,
         project: false,
         global: false,
@@ -320,6 +336,8 @@ fn merge_installed_items(sections: &mut [ListSection], installed_sections: Vec<L
                     && item.backend == installed_item.backend
             }) {
                 existing.installed = true;
+                existing.outputs = installed_item.outputs;
+                existing.linked_executables = installed_item.linked_executables;
             } else {
                 section.items.push(installed_item);
             }
@@ -445,21 +463,37 @@ mod tests {
             "homebrew-cask",
         );
 
-        let sections = discover_installed_items_from_roots(tools, packages, apps)
-            .await
-            .unwrap();
+        let sections =
+            discover_installed_items_from_roots(tools.clone(), packages.clone(), apps.clone())
+                .await
+                .unwrap();
 
         assert_eq!(
             sections[0].items,
-            [installed_item("ripgrep", "14.1.1", Some("homebrew"))]
+            [installed_item_with_output(
+                "ripgrep",
+                "14.1.1",
+                Some("homebrew"),
+                &tools.join("ripgrep/14.1.1")
+            )]
         );
         assert_eq!(
             sections[1].items,
-            [installed_item("openssl", "3.4.0", Some("homebrew"))]
+            [installed_item_with_output(
+                "openssl",
+                "3.4.0",
+                Some("homebrew"),
+                &packages.join("openssl/3.4.0")
+            )]
         );
         assert_eq!(
             sections[2].items,
-            [installed_item("zed", "latest", Some("homebrew-cask"))]
+            [installed_item_with_output(
+                "zed",
+                "latest",
+                Some("homebrew-cask"),
+                &apps.join("zed/latest")
+            )]
         );
     }
 
@@ -489,6 +523,8 @@ mod tests {
                     name: "ripgrep".to_string(),
                     version: "14.1.1".to_string(),
                     backend: Some("homebrew".to_string()),
+                    outputs: Vec::new(),
+                    linked_executables: Vec::new(),
                     configured: true,
                     project: true,
                     global: false,
@@ -549,6 +585,8 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            outputs: Vec::new(),
+            linked_executables: Vec::new(),
             configured: true,
             project: true,
             global: false,
@@ -561,6 +599,8 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            outputs: Vec::new(),
+            linked_executables: Vec::new(),
             configured: true,
             project: false,
             global: true,
@@ -573,6 +613,8 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            outputs: Vec::new(),
+            linked_executables: Vec::new(),
             configured: false,
             project: false,
             global: false,
@@ -580,12 +622,25 @@ mod tests {
         }
     }
 
+    fn installed_item_with_output(
+        name: &str,
+        version: &str,
+        backend: Option<&str>,
+        output: &std::path::Path,
+    ) -> ListItem {
+        ListItem {
+            outputs: vec![output.display().to_string()],
+            ..installed_item(name, version, backend)
+        }
+    }
+
     fn write_marker(path: PathBuf, kind: &str, name: &str, version: &str, backend: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let output = path.parent().unwrap().display().to_string();
         fs::write(
             path,
             format!(
-                "kind = \"{kind}\"\nname = \"{name}\"\nversion = \"{version}\"\nbackend = \"{backend}\"\n"
+                "kind = \"{kind}\"\nname = \"{name}\"\nversion = \"{version}\"\nbackend = \"{backend}\"\noutputs = [\"{output}\"]\nlinked_executables = []\n"
             ),
         )
         .unwrap();

@@ -11,6 +11,7 @@ use crate::utils::link::SymlinkOps;
 use crate::utils::net::NetUtils;
 use crate::utils::paths::PathOps;
 use anyhow::{Context, Result};
+use serde::Serialize;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -77,6 +78,10 @@ pub struct InstallResult {
     pub install_path: PathBuf,
     /// Linked executable discovered during install, if any.
     pub binary_path: Option<PathBuf>,
+    /// Filesystem outputs created or tracked for this install.
+    pub outputs: Vec<PathBuf>,
+    /// Executable links created in Still's bin directory.
+    pub linked_executables: Vec<PathBuf>,
 }
 
 /// Installs one requested item into Still-managed storage and links its executable when found.
@@ -140,13 +145,26 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     reinstall_to_path(&bottle_data, &install_path).await?;
 
     let binary_path = System::find_binary_recursive(&install_path, &formula.name).await?;
-    maybe_link_binary(&binary_path).await?;
+    let linked_executables = link_binary(&binary_path)
+        .await?
+        .into_iter()
+        .collect::<Vec<_>>();
+    write_install_marker(
+        &install_path,
+        item,
+        "homebrew",
+        &[install_path.clone()],
+        &linked_executables,
+    )
+    .await?;
 
     Ok(InstallResult {
         tool_name: formula.name.clone(),
         version: formula.versions.stable.clone(),
-        install_path,
+        install_path: install_path.clone(),
         binary_path,
+        outputs: vec![install_path],
+        linked_executables,
     })
 }
 
@@ -171,13 +189,22 @@ async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
         .join("packages")
         .join(&item.spec.name)
         .join(item.spec.version.as_str());
-    write_install_marker(&install_path, item, &command.backend).await?;
+    write_install_marker(
+        &install_path,
+        item,
+        &command.backend,
+        &[install_path.clone()],
+        &[],
+    )
+    .await?;
 
     Ok(InstallResult {
         tool_name: item.spec.name.clone(),
         version: item.spec.version.to_string(),
-        install_path,
+        install_path: install_path.clone(),
         binary_path: None,
+        outputs: vec![install_path],
+        linked_executables: Vec::new(),
     })
 }
 
@@ -294,13 +321,22 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
     let install_path = System::apps_dir()
         .join(&item.spec.name)
         .join(item.spec.version.as_str());
-    write_install_marker(&install_path, item, &command.backend).await?;
+    write_install_marker(
+        &install_path,
+        item,
+        &command.backend,
+        &[install_path.clone()],
+        &[],
+    )
+    .await?;
 
     Ok(InstallResult {
         tool_name: item.spec.name.clone(),
         version: item.spec.version.to_string(),
-        install_path,
+        install_path: install_path.clone(),
         binary_path: None,
+        outputs: vec![install_path],
+        linked_executables: Vec::new(),
     })
 }
 
@@ -442,17 +478,44 @@ async fn write_install_marker(
     install_path: &Path,
     item: &InstallItemRequest,
     backend: &str,
+    outputs: &[PathBuf],
+    linked_executables: &[PathBuf],
 ) -> Result<()> {
     tokio::fs::create_dir_all(install_path).await?;
-    tokio::fs::write(
-        install_path.join("install.toml"),
-        format!(
-            "kind = \"{}\"\nname = \"{}\"\nversion = \"{}\"\nbackend = \"{}\"\n",
-            item.kind, item.spec.name, item.spec.version, backend
-        ),
-    )
-    .await?;
+    let marker_path = install_path.join("install.toml");
+    let output_paths = paths_to_strings(outputs);
+    let linked_paths = paths_to_strings(linked_executables);
+    let install_path = install_path.display().to_string();
+    let marker = InstallMarker {
+        kind: item.kind.to_string(),
+        name: item.spec.name.as_str(),
+        version: item.spec.version.as_str(),
+        backend,
+        install_path: &install_path,
+        outputs: &output_paths,
+        linked_executables: &linked_paths,
+    };
+    let content = toml_edit::ser::to_string(&marker)?;
+    tokio::fs::write(marker_path, content).await?;
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct InstallMarker<'a> {
+    kind: String,
+    name: &'a str,
+    version: &'a str,
+    backend: &'a str,
+    install_path: &'a str,
+    outputs: &'a [String],
+    linked_executables: &'a [String],
+}
+
+fn paths_to_strings(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect()
 }
 
 /* ----------------------------- small helpers ----------------------------- */
@@ -561,9 +624,9 @@ async fn reinstall_to_path(bottle_data: &[u8], install_path: &Path) -> Result<()
     Ok(())
 }
 
-async fn maybe_link_binary(binary_path: &Option<PathBuf>) -> Result<()> {
+async fn link_binary(binary_path: &Option<PathBuf>) -> Result<Option<PathBuf>> {
     let Some(binary) = binary_path.as_ref() else {
-        return Ok(());
+        return Ok(None);
     };
 
     let system_bin_dir = System::bin_dir();
@@ -584,7 +647,7 @@ async fn maybe_link_binary(binary_path: &Option<PathBuf>) -> Result<()> {
         symlink_path.display(),
         binary.display()
     );
-    Ok(())
+    Ok(Some(symlink_path))
 }
 
 /* -------------------------- network + verification -------------------------- */
@@ -922,5 +985,34 @@ mod tests {
         let err = package_install_command(&item).unwrap_err();
 
         assert!(err.to_string().contains("package backend unknown-backend"));
+    }
+
+    #[tokio::test]
+    async fn install_marker_records_outputs_and_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_path = temp.path().join("tools/ripgrep/14.1.1");
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "ripgrep@14.1.1@homebrew".parse::<ItemSpec>().unwrap(),
+        };
+
+        write_install_marker(
+            &install_path,
+            &item,
+            "homebrew",
+            std::slice::from_ref(&install_path),
+            &[temp.path().join("bin/rg")],
+        )
+        .await
+        .unwrap();
+
+        let marker = tokio::fs::read_to_string(install_path.join("install.toml"))
+            .await
+            .unwrap();
+
+        assert!(marker.contains("kind = \"tool\""));
+        assert!(marker.contains("outputs = ["));
+        assert!(marker.contains("linked_executables = ["));
+        assert!(marker.contains("bin/rg"));
     }
 }

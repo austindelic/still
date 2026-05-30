@@ -128,6 +128,12 @@ where
                             "  {}@{}{}{}",
                             item.name, item.version, backend, status
                         ));
+                        for output_path in item.outputs {
+                            output.info(&format!("    output: {output_path}"));
+                        }
+                        for linked in item.linked_executables {
+                            output.info(&format!("    linked: {linked}"));
+                        }
                     }
                 }
                 0
@@ -936,6 +942,7 @@ Packages:
 Apps:
   firefox@latest
   zed@latest@homebrew-cask (installed)
+    output: /opt/still/apps/zed/latest
 "###);
         assert_eq!(output.stderr, "");
     }
@@ -1869,6 +1876,8 @@ Removed artifact /opt/still/packages/openssl
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            outputs: Vec::new(),
+            linked_executables: Vec::new(),
             configured: true,
             project: true,
             global: false,
@@ -1881,6 +1890,8 @@ Removed artifact /opt/still/packages/openssl
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            outputs: vec![format!("/opt/still/apps/{name}/{version}")],
+            linked_executables: Vec::new(),
             configured: false,
             project: false,
             global: false,
@@ -1893,6 +1904,8 @@ Removed artifact /opt/still/packages/openssl
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            outputs: Vec::new(),
+            linked_executables: Vec::new(),
             configured: true,
             project: false,
             global: true,

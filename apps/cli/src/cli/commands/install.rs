@@ -216,6 +216,8 @@ mod tests {
                 version: "14.1.1".to_string(),
                 install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
                 binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
+                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
+                linked_executables: vec![PathBuf::from("/opt/still/bin/rg")],
             })),
             ..FakeRuntime::default()
         };
@@ -250,6 +252,8 @@ Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
                 version: "14.1.1".to_string(),
                 install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
                 binary_path: None,
+                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
+                linked_executables: Vec::new(),
             })),
             ..FakeRuntime::default()
         };
@@ -294,6 +298,8 @@ install failed: formula.json not found
                 version: "14.1.1".to_string(),
                 install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
                 binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
+                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
+                linked_executables: vec![PathBuf::from("/opt/still/bin/rg")],
             })),
             ..FakeRuntime::default()
         };
@@ -320,6 +326,8 @@ install failed: formula.json not found
                 version: "latest".to_string(),
                 install_path: PathBuf::from("/opt/still/apps/firefox/latest"),
                 binary_path: None,
+                outputs: vec![PathBuf::from("/opt/still/apps/firefox/latest")],
+                linked_executables: Vec::new(),
             })),
             ..FakeRuntime::default()
         };
