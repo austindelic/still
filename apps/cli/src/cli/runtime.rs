@@ -287,5 +287,7 @@ fn record_install_items(request: InstallRequest, global: bool) -> anyhow::Result
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&resolved.path, updated)?;
+    let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    runtime.block_on(engine::actions::sync::refresh_lockfile(&resolved.path))?;
     Ok(())
 }

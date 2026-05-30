@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::remove_item;
 use crate::error::EngineError;
@@ -60,6 +61,7 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
     tokio::fs::write(&resolved.path, updated)
         .await
         .with_context(|| format!("failed to write {}", resolved.path.display()))?;
+    refresh_lockfile(&resolved.path).await?;
 
     Ok(UninstallResult {
         path: resolved.path,
@@ -93,6 +95,9 @@ mod tests {
         assert_eq!(result.kind, ItemKind::Package);
         let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(config.packages.latest, ["llvm"]);
+        let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
+        assert!(lockfile.contains("name = \"llvm\""));
+        assert!(!lockfile.contains("name = \"openssl\""));
     }
 
     #[tokio::test]

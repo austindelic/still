@@ -1,6 +1,6 @@
 //! Engine action for planning config synchronization.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -91,6 +91,18 @@ pub async fn run_with_installer(
     Ok(result)
 }
 
+/// Rewrites the lockfile next to `config_path` from the current desired state.
+/// # Errors
+/// Fails when the config cannot be read, parsed, normalized, or written.
+pub async fn refresh_lockfile(config_path: &Path) -> Result<PathBuf> {
+    let items = sync_items_for_path(config_path).await?;
+    let path = lockfile_path(config_path);
+    tokio::fs::write(&path, render_lockfile(&items))
+        .await
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(path)
+}
+
 /// Reads config, writes a lockfile, and returns desired install state.
 /// # Errors
 /// Fails when config cannot be found, read, parsed, or normalized.
@@ -103,11 +115,7 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
             for_write: false,
         },
     )?;
-    let content = tokio::fs::read_to_string(&resolved.path)
-        .await
-        .with_context(|| format!("failed to read {}", resolved.path.display()))?;
-    let config = parse_still_toml(&content)?;
-    let items = sync_items(config)?;
+    let items = sync_items_for_path(&resolved.path).await?;
     let lockfile_path = lockfile_path(&resolved.path);
     let rendered_lockfile = render_lockfile(&items);
     let drift = lockfile_drift(&lockfile_path, &rendered_lockfile).await?;
@@ -124,6 +132,14 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         missing,
         installed: Vec::new(),
     })
+}
+
+async fn sync_items_for_path(config_path: &Path) -> Result<Vec<SyncItem>> {
+    let content = tokio::fs::read_to_string(config_path)
+        .await
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let config = parse_still_toml(&content)?;
+    sync_items(config)
 }
 
 fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
