@@ -2,6 +2,8 @@
 
 /// Homebrew formula and cask JSON models.
 pub mod brew;
+/// Shared item request models.
+pub mod item;
 /// Still TOML config model.
 pub mod toml;
 /// User-facing tool spec parser.

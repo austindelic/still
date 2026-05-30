@@ -143,7 +143,7 @@ mod tests {
         };
 
         insta::assert_snapshot!(err.to_string(), @r###"
-error: invalid value 'bad/tool' for '<TOOL@VERSION>': Invalid tool name "bad/tool": tool name contains invalid character '/'. Tool names must match: [a-zA-Z][a-zA-Z0-9_-]*
+error: invalid value 'bad/tool' for '<TOOL@VERSION>': Invalid tool spec: item name contains invalid character '/'. Examples: bun@1.3.5, bun@latest, bun@latest@aqua, rust@stable@rustup, bun
 
 For more information, try '--help'.
 "###);
