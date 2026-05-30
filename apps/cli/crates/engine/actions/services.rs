@@ -11,6 +11,7 @@ use crate::error::EngineError;
 use crate::specs::toml::{
     ExpandedService, ServiceAction, ServiceEntry, TaskEntry, TaskRun, parse_still_toml,
 };
+use crate::trust::assert_config_trusted;
 
 /// Service operation requested by a caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +89,9 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
     let config = parse_still_toml(&content)?;
     let tasks = config.tasks;
     let services = select_services(config.services, request.name.as_deref())?;
+    if request.operation != ServicesOperation::Status {
+        assert_config_trusted(&resolved.path, content.as_bytes(), "service actions").await?;
+    }
     let reports = services
         .into_iter()
         .map(|(name, service)| {
@@ -297,6 +301,8 @@ fn shell_command(command: &str) -> Command {
 mod tests {
     use std::fs;
 
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
     use super::*;
 
     #[tokio::test]
@@ -354,17 +360,16 @@ mod tests {
     #[tokio::test]
     async fn services_start_runs_task_backed_action() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            r#"
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
             [services]
             web = { task = "web:start" }
 
             [tasks]
             "web:start" = "echo web"
-            "#,
-        )
-        .unwrap();
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
@@ -378,5 +383,41 @@ mod tests {
         let execution = result.services[0].execution.as_ref().unwrap();
         assert_eq!(execution.command, "echo web");
         assert_eq!(execution.stdout, "web\n");
+    }
+
+    #[tokio::test]
+    async fn service_actions_require_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[services]\nweb = \"echo web\"\n",
+        )
+        .unwrap();
+
+        let err = run(ServicesRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: ServicesOperation::Start,
+            name: Some("web".to_string()),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("not trusted"));
+        assert!(err.to_string().contains("service actions"));
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
     }
 }

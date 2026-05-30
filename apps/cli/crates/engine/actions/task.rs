@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::{ExpandedTask, TaskEntry, TaskRun, parse_still_toml};
+use crate::trust::assert_config_trusted;
 
 /// Request to list or run configured tasks.
 #[derive(Debug, Clone)]
@@ -77,6 +78,13 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
             status: 0,
         });
     };
+    if !tasks.contains_key(&name) {
+        return Err(EngineError::Conflict {
+            message: format!("unknown task \"{name}\""),
+        }
+        .into());
+    }
+    assert_config_trusted(&resolved.path, content.as_bytes(), "task execution").await?;
 
     let mut executions = Vec::new();
     let mut visited = BTreeSet::new();
@@ -205,6 +213,8 @@ fn shell_command(command: &str) -> Command {
 mod tests {
     use std::fs;
 
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
     use super::*;
 
     #[tokio::test]
@@ -262,5 +272,60 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("unknown task"));
+    }
+
+    #[tokio::test]
+    async fn task_execution_requires_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tasks]\ntest = \"echo ok\"\n",
+        )
+        .unwrap();
+
+        let err = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("not trusted"));
+        assert!(err.to_string().contains("task execution"));
+    }
+
+    #[tokio::test]
+    async fn trusted_task_executes_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = "[tasks]\ntest = \"echo ok\"\n";
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.status, 0);
+        assert_eq!(result.executions[0].stdout, "ok\n");
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
     }
 }

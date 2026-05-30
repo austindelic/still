@@ -22,5 +22,7 @@ pub mod registries;
 pub mod specs;
 /// Platform abstraction for host-specific behavior.
 pub mod system;
+/// Project trust marker verification.
+pub mod trust;
 /// Filesystem, network, archive, hashing, and path utilities.
 pub mod utils;

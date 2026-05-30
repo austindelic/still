@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::trust::{config_fingerprint, trust_marker_path};
 
 /// Request to mark the current project config trusted.
 #[derive(Debug, Clone)]
@@ -37,13 +37,8 @@ pub async fn run(request: TrustRequest) -> Result<TrustResult> {
     let content = tokio::fs::read(&resolved.path)
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
-    let fingerprint = fingerprint(&content);
-    let trust_path = resolved
-        .path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join(".still")
-        .join("trust.toml");
+    let fingerprint = config_fingerprint(&content);
+    let trust_path = trust_marker_path(&resolved.path);
 
     if let Some(parent) = trust_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -64,10 +59,6 @@ pub async fn run(request: TrustRequest) -> Result<TrustResult> {
         trust_path,
         fingerprint,
     })
-}
-
-fn fingerprint(content: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(content))
 }
 
 #[cfg(test)]

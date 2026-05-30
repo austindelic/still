@@ -22,6 +22,13 @@ pub enum EngineError {
     InvalidConfig { reason: String },
     #[error("install request must include at least one item")]
     EmptyInstallRequest,
+    #[error(
+        "project config is not trusted for {behavior}; review {config_path} then run `still trust`"
+    )]
+    UntrustedProjectConfig {
+        config_path: PathBuf,
+        behavior: String,
+    },
     #[error("{feature} is not implemented yet")]
     NotImplemented { feature: String },
     #[error("{feature} is not supported on {platform}")]

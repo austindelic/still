@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::config::PROJECT_CONFIG_FILE;
 use crate::error::EngineError;
+use crate::trust::{config_fingerprint, trust_marker_path};
 
 const STARTER_CONFIG: &str = r#"[tools]
 
@@ -44,7 +45,7 @@ pub struct InitResult {
 /// Fails if the file exists and `force` is false, or if the file cannot be
 /// written.
 /// # Side Effects
-/// Writes `still.toml`.
+/// Writes `still.toml` and a matching project trust marker.
 pub async fn run(request: InitRequest) -> Result<InitResult> {
     let path = request.start_dir.join(PROJECT_CONFIG_FILE);
     if path.exists() && !request.force {
@@ -54,6 +55,20 @@ pub async fn run(request: InitRequest) -> Result<InitResult> {
     tokio::fs::write(&path, STARTER_CONFIG)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
+    let trust_path = trust_marker_path(&path);
+    if let Some(parent) = trust_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(
+        &trust_path,
+        format!(
+            "config = \"{}\"\nfingerprint = \"{}\"\n",
+            path.display(),
+            config_fingerprint(STARTER_CONFIG.as_bytes())
+        ),
+    )
+    .await
+    .with_context(|| format!("failed to write {}", trust_path.display()))?;
 
     Ok(InitResult { path })
 }
@@ -79,6 +94,9 @@ mod tests {
         let content = fs::read_to_string(result.path).unwrap();
         assert!(content.contains("[tools]"));
         assert!(content.contains("[agents]"));
+        let marker = fs::read_to_string(temp.path().join(".still/trust.toml")).unwrap();
+        assert!(marker.contains("fingerprint"));
+        assert!(marker.contains("still.toml"));
     }
 
     #[tokio::test]

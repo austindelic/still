@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::parse_still_toml;
+use crate::trust::assert_config_trusted;
 
 /// Request to run a child command with configured environment values.
 #[derive(Debug, Clone)]
@@ -79,6 +80,9 @@ async fn resolve_env(start_dir: &Path, home_dir: &Path) -> Result<ResolvedRunEnv
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
+    if !config.env.files.is_empty() {
+        assert_config_trusted(&resolved.path, content.as_bytes(), "env file loading").await?;
+    }
     let mut vars = BTreeMap::new();
 
     for file in config.env.files {
@@ -138,21 +142,22 @@ fn unquote_env_value(value: &str) -> String {
 mod tests {
     use std::fs;
 
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
     use super::*;
 
     #[tokio::test]
     async fn resolves_env_files_then_config_vars() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            r#"
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
             [env]
             files = [".env", ".env.local"]
             SHARED = "config"
             INLINE = "yes"
-            "#,
-        )
-        .unwrap();
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
         fs::write(temp.path().join(".env"), "SHARED=file\nFROM_FILE=one\n").unwrap();
         fs::write(
             temp.path().join(".env.local"),
@@ -189,5 +194,38 @@ mod tests {
         let err = parse_env_file("ok=yes\ninvalid\n").unwrap_err();
 
         assert!(err.to_string().contains("line 2"));
+    }
+
+    #[tokio::test]
+    async fn env_file_loading_requires_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(temp.path().join(".env"), "TOKEN=secret\n").unwrap();
+
+        let err = resolve_env(temp.path(), temp.path()).await.unwrap_err();
+
+        assert!(err.to_string().contains("not trusted"));
+        assert!(err.to_string().contains("env file loading"));
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
     }
 }
