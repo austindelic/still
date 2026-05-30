@@ -342,12 +342,9 @@ Rules:
 - `depends` names other tasks that must run before the current task.
 - `requires` names services that must be available for the task.
 - `task` with no name should list available tasks.
-
-Open decisions:
-
-- Whether list-form `run` stops on first failure.
-- Whether `depends` tasks run once per invocation or once per graph node.
-- Whether task output should be grouped or streamed directly.
+- List-form `run` stops on the first failing command and returns that status.
+- Dependency tasks run at most once per invocation, even when multiple graph paths require the same task.
+- Task execution output is captured per command and returned as structured execution records for CLI/TUI formatting.
 
 ### Agents
 

@@ -315,6 +315,66 @@ mod tests {
         assert_eq!(result.executions[0].stdout, "ok\n");
     }
 
+    #[tokio::test]
+    async fn list_form_task_stops_on_first_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [tasks.test]
+            run = ["echo before", "exit 7", "echo after"]
+        "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.status, 7);
+        assert_eq!(result.executions.len(), 2);
+        assert_eq!(result.executions[0].command, "echo before");
+        assert_eq!(result.executions[1].command, "exit 7");
+    }
+
+    #[tokio::test]
+    async fn dependency_tasks_run_once_per_invocation() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [tasks]
+            setup = "echo setup"
+
+            [tasks.build]
+            depends = ["setup"]
+            run = "echo build"
+
+            [tasks.ci]
+            depends = ["setup", "build"]
+            run = "echo ci"
+        "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("ci".to_string()),
+        })
+        .await
+        .unwrap();
+
+        let executed: Vec<_> = result
+            .executions
+            .iter()
+            .map(|execution| execution.task.as_str())
+            .collect();
+        assert_eq!(executed, ["setup", "build", "ci"]);
+    }
+
     fn write_trust_marker(config_path: &Path, content: &[u8]) {
         let marker_path = trust_marker_path(config_path);
         fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
