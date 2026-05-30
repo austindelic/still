@@ -19,11 +19,17 @@ where
     R: CliRuntime,
     O: Output,
 {
+    let global = args.global;
+    let items = match install_items(args) {
+        Ok(items) => items,
+        Err(e) => {
+            output.error(&format!("install failed: {e}"));
+            return 1;
+        }
+    };
     let install_request = InstallCommandRequest {
-        global: args.global,
-        install: InstallRequest {
-            items: install_items(args),
-        },
+        global,
+        install: InstallRequest { items },
     };
 
     match runtime.install(install_request) {
@@ -52,12 +58,16 @@ where
     }
 }
 
-fn install_items(args: InstallArgs) -> Vec<InstallItemRequest> {
+fn install_items(args: InstallArgs) -> anyhow::Result<Vec<InstallItemRequest>> {
     let mut items = Vec::new();
     push_items(&mut items, ItemKind::Tool, args.tools);
     push_items(&mut items, ItemKind::Package, args.packages);
     push_items(&mut items, ItemKind::App, args.apps);
-    items
+    for spec in args.items {
+        let kind = infer_item_kind(&spec)?;
+        push_items(&mut items, kind, vec![spec]);
+    }
+    Ok(items)
 }
 
 fn push_items(items: &mut Vec<InstallItemRequest>, kind: ItemKind, specs: Vec<ToolSpec>) {
@@ -69,6 +79,28 @@ fn push_items(items: &mut Vec<InstallItemRequest>, kind: ItemKind, specs: Vec<To
             backend: spec.backend,
         },
     }));
+}
+
+fn infer_item_kind(spec: &ToolSpec) -> anyhow::Result<ItemKind> {
+    let Some(backend) = &spec.backend else {
+        anyhow::bail!(
+            "cannot infer whether {} is a tool, package, or app; use --tool, --package, or --app",
+            spec.name
+        );
+    };
+    match backend.as_str() {
+        "rustup" | "mise" | "asdf" | "aqua" | "npm" | "pnpm" | "yarn" | "cargo" | "go" | "pipx" => {
+            Ok(ItemKind::Tool)
+        }
+        "homebrew" | "brew" | "apt" | "dnf" | "pacman" | "nix" => Ok(ItemKind::Package),
+        "homebrew-cask" | "brew-cask" | "flatpak" | "snap" | "mas" => Ok(ItemKind::App),
+        backend => anyhow::bail!(
+            "cannot infer whether {}@{}@{} is a tool, package, or app; use --tool, --package, or --app",
+            spec.name,
+            spec.version,
+            backend
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -273,12 +305,78 @@ install failed: formula.json not found
         assert_eq!(runtime.install_globals, [true]);
     }
 
+    #[test]
+    fn install_infers_unclassified_items_from_backend() {
+        let mut args = install_args("jq");
+        args.tools.clear();
+        args.items = vec![
+            "rust@stable@rustup".parse().unwrap(),
+            "openssl@latest@homebrew".parse().unwrap(),
+            "firefox@latest@homebrew-cask".parse().unwrap(),
+        ];
+        let mut runtime = FakeRuntime {
+            install_result: Some(Ok(InstallResult {
+                tool_name: "firefox".to_string(),
+                version: "latest".to_string(),
+                install_path: PathBuf::from("/opt/still/apps/firefox/latest"),
+                binary_path: None,
+            })),
+            ..FakeRuntime::default()
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run(args, &mut runtime, &mut output);
+
+        assert_eq!(code, 0);
+        assert_eq!(
+            runtime.install_requests,
+            [
+                (
+                    ItemKind::Tool,
+                    "rust".to_string(),
+                    "stable".to_string(),
+                    Some("rustup".to_string())
+                ),
+                (
+                    ItemKind::Package,
+                    "openssl".to_string(),
+                    "latest".to_string(),
+                    Some("homebrew".to_string())
+                ),
+                (
+                    ItemKind::App,
+                    "firefox".to_string(),
+                    "latest".to_string(),
+                    Some("homebrew-cask".to_string())
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn install_errors_when_unclassified_item_is_ambiguous() {
+        let mut args = install_args("jq");
+        args.tools.clear();
+        args.items = vec!["jq".parse().unwrap()];
+        let mut runtime = FakeRuntime::default();
+        let mut output = BufferedOutput::default();
+
+        let code = run(args, &mut runtime, &mut output);
+
+        assert_eq!(code, 1);
+        assert!(runtime.install_requests.is_empty());
+        insta::assert_snapshot!(output.stderr, @r###"
+install failed: cannot infer whether jq is a tool, package, or app; use --tool, --package, or --app
+"###);
+    }
+
     fn install_args(tool: &str) -> InstallArgs {
         InstallArgs {
             global: false,
             tools: vec![tool.parse().expect("test tool spec should parse")],
             packages: Vec::new(),
             apps: Vec::new(),
+            items: Vec::new(),
         }
     }
 }

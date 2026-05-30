@@ -77,6 +77,9 @@ pub struct InstallArgs {
     /// Requested apps in `name`, `name@version`, or `name@version@backend` form.
     #[arg(short = 'a', long = "app", value_name = "APP", num_args = 1..)]
     pub apps: Vec<ToolSpec>,
+    /// Unclassified items. Still infers the type only when the backend makes it obvious.
+    #[arg(value_name = "ITEM")]
+    pub items: Vec<ToolSpec>,
 }
 
 /// Arguments for uninstalling one requested tool/package/app spec.
@@ -246,6 +249,7 @@ For more information, try '--help'.
         assert_eq!(names(&args.tools), ["jq", "ripgrep", "fd"]);
         assert_eq!(names(&args.packages), ["openssl", "llvm"]);
         assert_eq!(names(&args.apps), ["zed", "firefox"]);
+        assert!(args.items.is_empty());
     }
 
     #[test]
@@ -277,6 +281,27 @@ For more information, try '--help'.
             args.apps[0].backend.as_ref().unwrap().as_str(),
             "homebrew-cask"
         );
+        assert!(args.items.is_empty());
+    }
+
+    #[test]
+    fn install_accepts_unclassified_items() {
+        let cli = Cli::try_parse_from([
+            "still",
+            "install",
+            "rust@stable@rustup",
+            "firefox@latest@homebrew-cask",
+        ])
+        .expect("unclassified install args should parse");
+
+        let Some(Command::Install(args)) = cli.command else {
+            panic!("expected install command");
+        };
+
+        assert!(args.tools.is_empty());
+        assert!(args.packages.is_empty());
+        assert!(args.apps.is_empty());
+        assert_eq!(names(&args.items), ["rust", "firefox"]);
     }
 
     #[test]
