@@ -4,15 +4,17 @@ use crate::error::EngineError;
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
-use crate::system::{MacOS, System};
+use crate::system::{Linux, MacOS, System, Windows};
 use crate::utils::archive::ArchiveExtractor;
 use crate::utils::hashing::Hashing;
 use crate::utils::link::SymlinkOps;
 use crate::utils::net::NetUtils;
 use crate::utils::paths::PathOps;
 use anyhow::{Context, Result};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Platform-specific install operations needed by the generic install flow.
 ///
@@ -102,11 +104,7 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
 
 async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     if item.kind == ItemKind::App {
-        return Err(EngineError::UnsupportedPlatform {
-            feature: "app install execution".to_string(),
-            platform: std::env::consts::OS.to_string(),
-        }
-        .into());
+        return install_app(item).await;
     }
 
     let tool = ToolSpec {
@@ -147,6 +145,146 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
         install_path,
         binary_path,
     })
+}
+
+async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
+    let command = app_install_command(item)?;
+    let output = Command::new(&command.program)
+        .args(&command.args)
+        .output()
+        .with_context(|| format!("failed to run app backend {}", command.backend))?;
+    if !output.status.success() {
+        return Err(EngineError::Conflict {
+            message: format!(
+                "app backend {} failed: {}",
+                command.backend,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        }
+        .into());
+    }
+
+    let install_path = System::apps_dir()
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str());
+    tokio::fs::create_dir_all(&install_path).await?;
+    tokio::fs::write(
+        install_path.join("install.toml"),
+        format!(
+            "name = \"{}\"\nversion = \"{}\"\nbackend = \"{}\"\n",
+            item.spec.name, item.spec.version, command.backend
+        ),
+    )
+    .await?;
+
+    Ok(InstallResult {
+        tool_name: item.spec.name.clone(),
+        version: item.spec.version.to_string(),
+        install_path,
+        binary_path: None,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppInstallCommand {
+    backend: String,
+    program: String,
+    args: Vec<String>,
+}
+
+fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
+    let backend = item
+        .spec
+        .backend
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(default_app_backend);
+    app_install_command_for_backend(&item.spec.name, &backend)
+}
+
+fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInstallCommand> {
+    let normalized = backend.trim();
+    #[cfg(target_os = "macos")]
+    {
+        match normalized {
+            "homebrew-cask" | "brew-cask" | "cask" => Ok(AppInstallCommand {
+                backend: "homebrew-cask".to_string(),
+                program: "brew".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    "--cask".to_string(),
+                    name.to_string(),
+                ],
+            }),
+            _ => unsupported_app_backend(normalized),
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        match normalized {
+            "flatpak" => Ok(AppInstallCommand {
+                backend: "flatpak".to_string(),
+                program: "flatpak".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    "-y".to_string(),
+                    "flathub".to_string(),
+                    name.to_string(),
+                ],
+            }),
+            "snap" => Ok(AppInstallCommand {
+                backend: "snap".to_string(),
+                program: "snap".to_string(),
+                args: vec!["install".to_string(), name.to_string()],
+            }),
+            _ => unsupported_app_backend(normalized),
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        match normalized {
+            "winget" => Ok(AppInstallCommand {
+                backend: "winget".to_string(),
+                program: "winget".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    "--id".to_string(),
+                    name.to_string(),
+                    "--accept-package-agreements".to_string(),
+                    "--accept-source-agreements".to_string(),
+                ],
+            }),
+            "chocolatey" | "choco" => Ok(AppInstallCommand {
+                backend: "chocolatey".to_string(),
+                program: "choco".to_string(),
+                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+            }),
+            _ => unsupported_app_backend(normalized),
+        }
+    }
+}
+
+fn default_app_backend() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "homebrew-cask".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "flatpak".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "winget".to_string()
+    }
+}
+
+fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
+    Err(EngineError::UnsupportedPlatform {
+        feature: format!("app backend {backend}"),
+        platform: std::env::consts::OS.to_string(),
+    }
+    .into())
 }
 
 /* ----------------------------- small helpers ----------------------------- */
@@ -429,7 +567,7 @@ impl InstallOps for MacOS {
                 let path = entry.path();
                 if path.is_file() {
                     let metadata = tokio::fs::metadata(&path).await?;
-                    if metadata.permissions().mode() & 0o111 != 0 {
+                    if is_executable(&metadata) {
                         return Ok(Some(path));
                     }
                 }
@@ -449,7 +587,7 @@ impl InstallOps for MacOS {
                             let bin_path = bin_entry.path();
                             if bin_path.is_file() {
                                 let metadata = tokio::fs::metadata(&bin_path).await?;
-                                if metadata.permissions().mode() & 0o111 != 0 {
+                                if is_executable(&metadata) {
                                     return Ok(Some(bin_path));
                                 }
                             }
@@ -461,6 +599,50 @@ impl InstallOps for MacOS {
             }
         }
 
+        Ok(None)
+    }
+}
+
+#[cfg(unix)]
+fn is_executable(metadata: &std::fs::Metadata) -> bool {
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(windows)]
+fn is_executable(_metadata: &std::fs::Metadata) -> bool {
+    true
+}
+
+impl InstallOps for Linux {
+    fn select_bottle_file(_bottle: &BottleSpec) -> Result<BottleFileSpec> {
+        Err(EngineError::UnsupportedPlatform {
+            feature: "homebrew bottle installs".to_string(),
+            platform: "linux".to_string(),
+        }
+        .into())
+    }
+
+    async fn find_binary_recursive(
+        _install_path: &Path,
+        _formula_name: &str,
+    ) -> Result<Option<PathBuf>> {
+        Ok(None)
+    }
+}
+
+impl InstallOps for Windows {
+    fn select_bottle_file(_bottle: &BottleSpec) -> Result<BottleFileSpec> {
+        Err(EngineError::UnsupportedPlatform {
+            feature: "homebrew bottle installs".to_string(),
+            platform: "windows".to_string(),
+        }
+        .into())
+    }
+
+    async fn find_binary_recursive(
+        _install_path: &Path,
+        _formula_name: &str,
+    ) -> Result<Option<PathBuf>> {
         Ok(None)
     }
 }
@@ -478,17 +660,34 @@ mod tests {
         assert!(err.to_string().contains("at least one item"));
     }
 
-    #[tokio::test]
-    async fn install_reports_app_execution_as_unsupported() {
-        let err = run(InstallRequest {
-            items: vec![InstallItemRequest {
-                kind: ItemKind::App,
-                spec: "firefox".parse::<ItemSpec>().unwrap(),
-            }],
-        })
-        .await
-        .unwrap_err();
+    #[test]
+    fn app_install_command_uses_platform_default_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox".parse::<ItemSpec>().unwrap(),
+        };
 
-        assert!(err.to_string().contains("app install execution"));
+        let command = app_install_command(&item).unwrap();
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(command.program, "brew");
+        #[cfg(target_os = "linux")]
+        assert_eq!(command.program, "flatpak");
+        #[cfg(target_os = "windows")]
+        assert_eq!(command.program, "winget");
+    }
+
+    #[test]
+    fn app_install_command_rejects_unknown_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox@latest@unknown-backend"
+                .parse::<ItemSpec>()
+                .unwrap(),
+        };
+
+        let err = app_install_command(&item).unwrap_err();
+
+        assert!(err.to_string().contains("app backend unknown-backend"));
     }
 }

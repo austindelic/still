@@ -2,7 +2,7 @@
 
 use dirs::home_dir;
 
-use crate::system::MacOS;
+use crate::system::{Linux, MacOS, Windows};
 use std::path::PathBuf;
 
 /// Path locations required by engine actions on a host platform.
@@ -59,5 +59,86 @@ impl PathOps for MacOS {
 
     fn home_dir() -> PathBuf {
         dirs::home_dir().expect("error fetching home_dir with dirs::home_dir on macos")
+    }
+}
+
+impl PathOps for Linux {
+    fn root_dir() -> PathBuf {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local")
+            .join("share")
+            .join("still")
+    }
+
+    fn cache_dir() -> PathBuf {
+        dirs::cache_dir().unwrap_or_else(Self::root_dir)
+    }
+
+    fn bin_dir() -> PathBuf {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local")
+            .join("bin")
+    }
+
+    fn config_dir() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| Self::home_dir().join(".config"))
+            .join("still")
+    }
+
+    fn config_file() -> PathBuf {
+        Self::config_dir().join("config.toml")
+    }
+
+    fn apps_dir() -> PathBuf {
+        Self::root_dir().join("apps")
+    }
+
+    fn home_dir() -> PathBuf {
+        home_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn tool_dir() -> PathBuf {
+        Self::root_dir().join("tools")
+    }
+}
+
+impl PathOps for Windows {
+    fn root_dir() -> PathBuf {
+        dirs::data_local_dir()
+            .unwrap_or_else(Self::home_dir)
+            .join("still")
+    }
+
+    fn cache_dir() -> PathBuf {
+        dirs::cache_dir().unwrap_or_else(|| Self::root_dir().join("cache"))
+    }
+
+    fn bin_dir() -> PathBuf {
+        Self::root_dir().join("bin")
+    }
+
+    fn config_dir() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(Self::home_dir)
+            .join("still")
+    }
+
+    fn config_file() -> PathBuf {
+        Self::config_dir().join("config.toml")
+    }
+
+    fn apps_dir() -> PathBuf {
+        Self::root_dir().join("apps")
+    }
+
+    fn home_dir() -> PathBuf {
+        home_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn tool_dir() -> PathBuf {
+        Self::root_dir().join("tools")
     }
 }

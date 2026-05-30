@@ -22,8 +22,8 @@ pub struct Windows;
 /// install, uninstall, and path behavior together.
 pub trait SystemOps: InstallOps + UninstallOps + PathOps {}
 impl SystemOps for MacOS {}
-// impl SystemOps for Linux {}
-// impl SystemOps for Windows {}
+impl SystemOps for Linux {}
+impl SystemOps for Windows {}
 
 /// Platform type alias for macOS builds.
 #[cfg(target_os = "macos")]

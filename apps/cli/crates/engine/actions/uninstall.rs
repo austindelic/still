@@ -8,13 +8,15 @@ use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::remove_item;
 use crate::error::EngineError;
 use crate::specs::item::ItemKind;
-use crate::system::MacOS;
+use crate::system::{Linux, MacOS, Windows};
 
 /// Platform-specific uninstall operations.
 pub trait UninstallOps {}
 
 // macOS currently uses the marker trait until backend removal behavior exists.
 impl UninstallOps for MacOS {}
+impl UninstallOps for Linux {}
+impl UninstallOps for Windows {}
 
 /// Request to remove one configured item.
 #[derive(Debug, Clone)]
