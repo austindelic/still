@@ -6,6 +6,8 @@
 pub mod actions;
 /// Config discovery and filesystem locations.
 pub mod config;
+/// Platform identifiers and filters.
+pub mod platform;
 /// Package registry integrations and re-exports.
 pub mod registries;
 /// Typed models for external and Still-owned specs.
