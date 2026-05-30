@@ -361,7 +361,7 @@ Rules:
 - `instructions` points to the shared project instruction file.
 - `skills` lists skills by source shorthand.
 - `skills` can be either an array or an `[agents.skills]` table, but not both in the same TOML document.
-- Bare skill names such as `rust-review` resolve from the future official Still public skill source.
+- Bare skill names such as `rust-review` resolve as official Still skill names. The official namespace is recorded as source metadata; remote registry fetching for official names is a backend detail that can be wired without changing config.
 - `owner/name` skill names resolve from a GitHub-owned skill source.
 - URL strings resolve external skills.
 - URL strings may include a version suffix as `<URL>:<VERSION>`.
@@ -399,14 +399,10 @@ Auto dependency behavior:
 - Auto-added dependencies use the same config write rules as `still install`: latest shorthand where possible, keyed entries for pinned versions or explicit backends.
 - Auto-added dependencies should be visible in review output before writing.
 - Removing a skill should not automatically remove tools/packages/apps unless a future garbage-collection command can prove nothing else needs them.
-
-Open decisions:
-
-- Where official Still public skills are hosted and how names are resolved.
-- Whether skills are installed into `.agents/skills`, tool-specific directories, or generated target directories.
-- Whether agent targets can have per-target settings later.
-- Whether skill versions are semver, tags, commits, or opaque source versions.
-- Whether auto-added dependencies should be annotated in config or only tracked in the lockfile.
+- In v0.1, Still materializes all managed skills under `.agents/skills`; target-specific directories can be generated from that source later.
+- `targets` has no per-target settings in v0.1. Future per-target settings should be added under target-specific tables without changing the shared skill source model.
+- Skill versions are opaque source versions. They may be semver, tags, commits, or provider-specific identifiers, and Still records them exactly as supplied.
+- Auto-added dependencies are written as normal desired state in `still.toml`; they are not specially annotated in config in v0.1.
 
 ## Install And Add
 
