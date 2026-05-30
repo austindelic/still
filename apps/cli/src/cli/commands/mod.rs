@@ -183,10 +183,16 @@ where
                 1
             }
         },
-        Command::Activate(args) => {
-            output.info(&format!("Activate command: {:?}", args));
-            0
-        }
+        Command::Activate(args) => match runtime.activate(args.shell) {
+            Ok(result) => {
+                output.info(&result.code);
+                0
+            }
+            Err(e) => {
+                output.error(&format!("activate failed: {e}"));
+                1
+            }
+        },
     }
 }
 
@@ -271,6 +277,7 @@ mod tests {
 
     use anyhow::anyhow;
     use engine::actions::{
+        activate::{ActivateResult, ShellKind},
         agents::{AgentsOperation, AgentsResult},
         config::CheckConfigResult,
         env::EnvResult,
@@ -303,6 +310,8 @@ mod tests {
         run_commands: Vec<Vec<String>>,
         task_result: Option<anyhow::Result<TaskResult>>,
         task_names: Vec<Option<String>>,
+        activate_result: Option<anyhow::Result<ActivateResult>>,
+        activate_shells: Vec<Option<String>>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -361,6 +370,13 @@ mod tests {
                 .take()
                 .expect("test runtime task result was not configured")
         }
+
+        fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult> {
+            self.activate_shells.push(shell);
+            self.activate_result
+                .take()
+                .expect("test runtime activate result was not configured")
+        }
     }
 
     #[test]
@@ -383,6 +399,8 @@ mod tests {
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -420,6 +438,8 @@ mod tests {
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -459,6 +479,8 @@ config check failed: failed to parse still.toml
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -493,6 +515,8 @@ config check failed: failed to parse still.toml
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -531,6 +555,8 @@ init failed: still.toml already exists
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -567,6 +593,8 @@ RUST_LOG=debug
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -614,6 +642,8 @@ env failed: failed to read still.toml
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -655,6 +685,8 @@ Apps:
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -698,6 +730,8 @@ list failed: failed to read still.toml
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -743,6 +777,8 @@ Skills:
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -793,6 +829,8 @@ warn
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -832,6 +870,8 @@ run failed: failed to run cargo
             run_commands: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -890,6 +930,8 @@ run failed: failed to run cargo
                 status: 0,
             })),
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -938,6 +980,8 @@ Tasks:
                 status: 2,
             })),
             task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -957,6 +1001,84 @@ running tests
 "###);
         insta::assert_snapshot!(output.stderr, @r###"
 failed
+"###);
+    }
+
+    #[test]
+    fn activate_prints_shell_code() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: Some(Ok(ActivateResult {
+                shell: ShellKind::Posix,
+                code: "export PATH=\"/opt/still/bin:$PATH\"".to_string(),
+            })),
+            activate_shells: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Activate(crate::cli::args::ActivateArgs {
+                shell: Some("zsh".to_string()),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.activate_shells, [Some("zsh".to_string())]);
+        insta::assert_snapshot!(output.stdout, @r###"
+export PATH="/opt/still/bin:$PATH"
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn activate_formats_errors() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: Some(Err(anyhow!("unsupported shell"))),
+            activate_shells: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Activate(crate::cli::args::ActivateArgs {
+                shell: Some("bad".to_string()),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+activate failed: unsupported shell
 "###);
     }
 

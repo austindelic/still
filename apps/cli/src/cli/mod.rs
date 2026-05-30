@@ -120,6 +120,7 @@ mod tests {
         runtime::CliRuntime,
     };
     use engine::actions::{
+        activate::ActivateResult,
         agents::{AgentsOperation, AgentsResult},
         config::CheckConfigResult,
         env::EnvResult,
@@ -166,6 +167,10 @@ mod tests {
 
         fn task(&mut self, _name: Option<String>) -> anyhow::Result<TaskResult> {
             panic!("task should not run in these routing tests");
+        }
+
+        fn activate(&mut self, _shell: Option<String>) -> anyhow::Result<ActivateResult> {
+            panic!("activate should not run in these routing tests");
         }
     }
 

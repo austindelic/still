@@ -1,6 +1,7 @@
 //! Runtime boundary between CLI handlers and engine actions.
 
 use engine::actions::{
+    activate::{ActivateRequest, ActivateResult},
     agents::{AgentsOperation, AgentsRequest, AgentsResult},
     config::{CheckConfigRequest, CheckConfigResult},
     env::{EnvRequest, EnvResult},
@@ -53,6 +54,9 @@ pub trait CliRuntime {
 
     /// Lists or runs configured tasks.
     fn task(&mut self, name: Option<String>) -> anyhow::Result<TaskResult>;
+
+    /// Generates shell activation code.
+    fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -155,6 +159,15 @@ impl CliRuntime for RealRuntime {
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::task::run(request))
+    }
+
+    fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult> {
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        Ok(engine::actions::activate::run(ActivateRequest {
+            home_dir,
+            shell,
+        })?)
     }
 }
 
