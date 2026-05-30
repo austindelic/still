@@ -120,7 +120,11 @@ mod tests {
         runtime::CliRuntime,
     };
     use engine::actions::{
-        config::CheckConfigResult, env::EnvResult, init::InitResult, list::ListResult,
+        agents::{AgentsOperation, AgentsResult},
+        config::CheckConfigResult,
+        env::EnvResult,
+        init::InitResult,
+        list::ListResult,
     };
 
     #[derive(Debug, Default)]
@@ -148,6 +152,10 @@ mod tests {
 
         fn list(&mut self, _all: bool) -> anyhow::Result<ListResult> {
             panic!("list should not run in these routing tests");
+        }
+
+        fn agents(&mut self, _operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+            panic!("agents should not run in these routing tests");
         }
     }
 

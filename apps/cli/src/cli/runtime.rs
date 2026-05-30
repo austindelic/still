@@ -1,6 +1,7 @@
 //! Runtime boundary between CLI handlers and engine actions.
 
 use engine::actions::{
+    agents::{AgentsOperation, AgentsRequest, AgentsResult},
     config::{CheckConfigRequest, CheckConfigResult},
     env::{EnvRequest, EnvResult},
     init::{InitRequest, InitResult},
@@ -41,6 +42,9 @@ pub trait CliRuntime {
 
     /// Lists configured desired-state items.
     fn list(&mut self, all: bool) -> anyhow::Result<ListResult>;
+
+    /// Inspects or syncs configured agent state.
+    fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -104,6 +108,19 @@ impl CliRuntime for RealRuntime {
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::list::inspect(request))
+    }
+
+    fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+        let start_dir = std::env::current_dir()?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        let request = AgentsRequest {
+            start_dir,
+            home_dir,
+            operation,
+        };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::agents::run(request))
     }
 }
 

@@ -1,5 +1,7 @@
 //! Engine actions that mutate or inspect Still-managed state.
 
+/// Agent action implementation.
+pub mod agents;
 /// Config validation actions.
 pub mod config;
 /// Environment inspection actions.

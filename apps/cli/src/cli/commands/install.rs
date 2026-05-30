@@ -76,6 +76,7 @@ mod tests {
     use std::path::PathBuf;
 
     use anyhow::anyhow;
+    use engine::actions::agents::{AgentsOperation, AgentsResult};
     use engine::actions::config::CheckConfigResult;
     use engine::actions::env::EnvResult;
     use engine::actions::init::InitResult;
@@ -123,6 +124,10 @@ mod tests {
 
         fn list(&mut self, _all: bool) -> anyhow::Result<ListResult> {
             panic!("list should not run in install tests");
+        }
+
+        fn agents(&mut self, _operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+            panic!("agents should not run in install tests");
         }
     }
 

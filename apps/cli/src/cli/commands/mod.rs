@@ -3,7 +3,7 @@
 /// Install command handler.
 pub mod install;
 
-use crate::cli::args::{Cli, Command, ConfigCommand};
+use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand};
 use crate::cli::output::Output;
 use crate::cli::runtime::CliRuntime;
 use clap::CommandFactory;
@@ -83,8 +83,39 @@ where
             0
         }
         Command::Agents(args) => {
-            output.info(&format!("Agents command: {:?}", args));
-            0
+            let operation = match args.command.unwrap_or(AgentsCommand::List) {
+                AgentsCommand::List => engine::actions::agents::AgentsOperation::List,
+                AgentsCommand::Check => engine::actions::agents::AgentsOperation::Check,
+                AgentsCommand::Sync => engine::actions::agents::AgentsOperation::Sync,
+            };
+            match runtime.agents(operation) {
+                Ok(result) => {
+                    output.info(&format!("Config: {}", result.path.display()));
+                    if result.agents.targets.is_empty() {
+                        output.info("Targets: (none)");
+                    } else {
+                        output.info(&format!("Targets: {}", result.agents.targets.join(", ")));
+                    }
+                    if let Some(instructions) = result.agents.instructions {
+                        output.info(&format!("Instructions: {instructions}"));
+                    }
+                    output.info("Skills:");
+                    if result.agents.skills.is_empty() {
+                        output.info("  (none)");
+                    }
+                    for skill in result.agents.skills {
+                        output.info(&format!("  {}", skill.name));
+                    }
+                    if let Some(path) = result.gitignore_path {
+                        output.success(&format!("Updated {}", path.display()));
+                    }
+                    0
+                }
+                Err(e) => {
+                    output.error(&format!("agents failed: {e}"));
+                    1
+                }
+            }
         }
         Command::Config(args) => match args.command {
             ConfigCommand::Check => match runtime.config_check(args.global) {
@@ -182,12 +213,14 @@ mod tests {
 
     use anyhow::anyhow;
     use engine::actions::{
+        agents::{AgentsOperation, AgentsResult},
         config::CheckConfigResult,
         env::EnvResult,
         init::InitResult,
         install::InstallResult,
         list::{ListItem, ListResult, ListSection},
     };
+    use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
     use engine::specs::item::ItemKind;
     use engine::specs::toml::StillConfig;
 
@@ -204,6 +237,8 @@ mod tests {
         env_globals: Vec<bool>,
         list_result: Option<anyhow::Result<ListResult>>,
         list_alls: Vec<bool>,
+        agents_result: Option<anyhow::Result<AgentsResult>>,
+        agents_operations: Vec<AgentsOperation>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -241,6 +276,13 @@ mod tests {
                 .take()
                 .expect("test runtime list result was not configured")
         }
+
+        fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+            self.agents_operations.push(operation);
+            self.agents_result
+                .take()
+                .expect("test runtime agents result was not configured")
+        }
     }
 
     #[test]
@@ -257,6 +299,8 @@ mod tests {
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -288,6 +332,8 @@ mod tests {
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -321,6 +367,8 @@ config check failed: failed to parse still.toml
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -349,6 +397,8 @@ config check failed: failed to parse still.toml
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -381,6 +431,8 @@ init failed: still.toml already exists
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -411,6 +463,8 @@ RUST_LOG=debug
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -452,6 +506,8 @@ env failed: failed to read still.toml
                 ],
             })),
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -487,6 +543,8 @@ Apps:
             env_globals: Vec::new(),
             list_result: Some(Err(anyhow!("failed to read still.toml"))),
             list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -504,6 +562,52 @@ list failed: failed to read still.toml
 "###);
     }
 
+    #[test]
+    fn agents_sync_formats_config_and_written_gitignore() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: Some(Ok(AgentsResult {
+                path: PathBuf::from("/repo/still.toml"),
+                agents: NormalizedAgents {
+                    targets: vec!["claude".to_string(), "codex".to_string()],
+                    instructions: Some("AGENTS.md".to_string()),
+                    skills: vec![normalized_skill("rust-review")],
+                },
+                gitignore: "# still-managed skills\n/rust-review/\n".to_string(),
+                gitignore_path: Some(PathBuf::from("/repo/.agents/skills/.gitignore")),
+            })),
+            agents_operations: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Agents(crate::cli::args::AgentsArgs {
+                command: Some(AgentsCommand::Sync),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.agents_operations, [AgentsOperation::Sync]);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Targets: claude, codex
+Instructions: AGENTS.md
+Skills:
+  rust-review
+✓ Updated /repo/.agents/skills/.gitignore
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
     fn section<const N: usize>(kind: ItemKind, items: [ListItem; N]) -> ListSection {
         ListSection {
             kind,
@@ -516,6 +620,19 @@ list failed: failed to read still.toml
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+        }
+    }
+
+    fn normalized_skill(name: &str) -> NormalizedSkill {
+        NormalizedSkill {
+            name: name.to_string(),
+            source: NormalizedSkillSource::Official {
+                name: name.to_string(),
+            },
+            auto: false,
+            tools: Vec::new(),
+            packages: Vec::new(),
+            apps: Vec::new(),
         }
     }
 }
