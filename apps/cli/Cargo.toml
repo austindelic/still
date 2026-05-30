@@ -4,11 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "still_s"
+name = "still"
 path = "src/main.rs"
 
 [workspace]
-members = ["crates/engine", "crates/ui"]
+members = ["crates/engine", "crates/tui"]
 resolver = "2"
 
 [workspace.package]
@@ -17,16 +17,18 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.53", features = ["derive"] }
 engine = { path = "crates/engine" }
-ui = { path = "crates/ui", default-features = false }
+still_tui = { package = "still-tui", path = "crates/tui", optional = true }
+tokio = { version = "1.48.0", features = ["full"] }
 
 [dev-dependencies]
-clap = { version = "4.5.53", features = ["derive"] }
 insta = "1.44.1"
 
 [features]
 default = []
-tui = ["ui/tui"]
+tui = ["dep:still_tui"]
 
 [profile.release]
 strip = true

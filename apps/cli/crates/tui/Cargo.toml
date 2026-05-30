@@ -1,0 +1,15 @@
+[package]
+name = "still-tui"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "still_tui"
+path = "lib.rs"
+
+[dependencies]
+engine = { path = "../engine" }
+crossterm = "0.29.0"
+fuzzy-matcher = "0.3.7"
+ratatui = "0.30.0"
+serde_json = "1.0.148"

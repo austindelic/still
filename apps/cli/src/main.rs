@@ -1,5 +1,3 @@
-use ui::cli;
-
 fn main() {
-    cli::entry();
+    still::cli::entry();
 }
