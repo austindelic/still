@@ -39,10 +39,33 @@ where
             output.info(&format!("Sync command: {:?}", args));
             0
         }
-        Command::List(args) => {
-            output.info(&format!("List command: {:?}", args));
-            0
-        }
+        Command::List(args) => match runtime.list(args.all) {
+            Ok(result) => {
+                output.info(&format!("Config: {}", result.path.display()));
+                for section in result.sections {
+                    output.info(match section.kind {
+                        engine::specs::item::ItemKind::Tool => "Tools:",
+                        engine::specs::item::ItemKind::Package => "Packages:",
+                        engine::specs::item::ItemKind::App => "Apps:",
+                    });
+                    if section.items.is_empty() {
+                        output.info("  (none)");
+                    }
+                    for item in section.items {
+                        let backend = item
+                            .backend
+                            .map(|backend| format!("@{backend}"))
+                            .unwrap_or_default();
+                        output.info(&format!("  {}@{}{}", item.name, item.version, backend));
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                output.error(&format!("list failed: {e}"));
+                1
+            }
+        },
         Command::Uninstall(args) => {
             output.info(&format!("Uninstall command: {:?}", args));
             0
@@ -159,8 +182,13 @@ mod tests {
 
     use anyhow::anyhow;
     use engine::actions::{
-        config::CheckConfigResult, env::EnvResult, init::InitResult, install::InstallResult,
+        config::CheckConfigResult,
+        env::EnvResult,
+        init::InitResult,
+        install::InstallResult,
+        list::{ListItem, ListResult, ListSection},
     };
+    use engine::specs::item::ItemKind;
     use engine::specs::toml::StillConfig;
 
     use super::*;
@@ -174,6 +202,8 @@ mod tests {
         init_forces: Vec<bool>,
         env_result: Option<anyhow::Result<EnvResult>>,
         env_globals: Vec<bool>,
+        list_result: Option<anyhow::Result<ListResult>>,
+        list_alls: Vec<bool>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -204,6 +234,13 @@ mod tests {
                 .take()
                 .expect("test runtime env result was not configured")
         }
+
+        fn list(&mut self, all: bool) -> anyhow::Result<ListResult> {
+            self.list_alls.push(all);
+            self.list_result
+                .take()
+                .expect("test runtime list result was not configured")
+        }
     }
 
     #[test]
@@ -218,6 +255,8 @@ mod tests {
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -247,6 +286,8 @@ mod tests {
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -278,6 +319,8 @@ config check failed: failed to parse still.toml
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -304,6 +347,8 @@ config check failed: failed to parse still.toml
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -334,6 +379,8 @@ init failed: still.toml already exists
                 vars: vec![("RUST_LOG".to_string(), "debug".to_string())],
             })),
             env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -362,6 +409,8 @@ RUST_LOG=debug
             init_forces: Vec::new(),
             env_result: Some(Err(anyhow!("failed to read still.toml"))),
             env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -377,5 +426,96 @@ RUST_LOG=debug
         insta::assert_snapshot!(output.stderr, @r###"
 env failed: failed to read still.toml
 "###);
+    }
+
+    #[test]
+    fn list_formats_configured_items() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: Some(Ok(ListResult {
+                path: PathBuf::from("/repo/still.toml"),
+                sections: vec![
+                    section(ItemKind::Tool, [item("jq", "latest", None)]),
+                    section(
+                        ItemKind::Package,
+                        [
+                            item("llvm", "18", Some("homebrew")),
+                            item("openssl", "latest", None),
+                        ],
+                    ),
+                    section(ItemKind::App, [item("firefox", "latest", None)]),
+                ],
+            })),
+            list_alls: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::List(crate::cli::args::ListArgs { all: true }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.list_alls, [true]);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Tools:
+  jq@latest
+Packages:
+  llvm@18@homebrew
+  openssl@latest
+Apps:
+  firefox@latest
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn list_formats_errors() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: Some(Err(anyhow!("failed to read still.toml"))),
+            list_alls: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::List(crate::cli::args::ListArgs { all: false }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(runtime.list_alls, [false]);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+list failed: failed to read still.toml
+"###);
+    }
+
+    fn section<const N: usize>(kind: ItemKind, items: [ListItem; N]) -> ListSection {
+        ListSection {
+            kind,
+            items: items.into(),
+        }
+    }
+
+    fn item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
+        ListItem {
+            name: name.to_string(),
+            version: version.to_string(),
+            backend: backend.map(str::to_string),
+        }
     }
 }

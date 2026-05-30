@@ -80,6 +80,7 @@ mod tests {
     use engine::actions::env::EnvResult;
     use engine::actions::init::InitResult;
     use engine::actions::install::InstallResult;
+    use engine::actions::list::ListResult;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -118,6 +119,10 @@ mod tests {
 
         fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
             panic!("env should not run in install tests");
+        }
+
+        fn list(&mut self, _all: bool) -> anyhow::Result<ListResult> {
+            panic!("list should not run in install tests");
         }
     }
 

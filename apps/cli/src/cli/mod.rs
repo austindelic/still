@@ -119,7 +119,9 @@ mod tests {
         output::BufferedOutput,
         runtime::CliRuntime,
     };
-    use engine::actions::{config::CheckConfigResult, env::EnvResult, init::InitResult};
+    use engine::actions::{
+        config::CheckConfigResult, env::EnvResult, init::InitResult, list::ListResult,
+    };
 
     #[derive(Debug, Default)]
     struct FakeRuntime;
@@ -142,6 +144,10 @@ mod tests {
 
         fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
             panic!("env should not run in these routing tests");
+        }
+
+        fn list(&mut self, _all: bool) -> anyhow::Result<ListResult> {
+            panic!("list should not run in these routing tests");
         }
     }
 

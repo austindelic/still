@@ -8,5 +8,7 @@ pub mod env;
 pub mod init;
 /// Install action implementation.
 pub mod install;
+/// List action implementation.
+pub mod list;
 /// Uninstall action implementation.
 pub mod uninstall;

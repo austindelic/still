@@ -5,6 +5,7 @@ use engine::actions::{
     env::{EnvRequest, EnvResult},
     init::{InitRequest, InitResult},
     install::{InstallRequest, InstallResult},
+    list::{ListRequest, ListResult},
 };
 use engine::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use engine::config_edit::add_install_items;
@@ -37,6 +38,9 @@ pub trait CliRuntime {
 
     /// Reads configured environment values.
     fn env(&mut self, global: bool) -> anyhow::Result<EnvResult>;
+
+    /// Lists configured desired-state items.
+    fn list(&mut self, all: bool) -> anyhow::Result<ListResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -86,6 +90,20 @@ impl CliRuntime for RealRuntime {
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::env::inspect(request))
+    }
+
+    fn list(&mut self, all: bool) -> anyhow::Result<ListResult> {
+        let start_dir = std::env::current_dir()?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        let request = ListRequest {
+            start_dir,
+            home_dir,
+            global: false,
+            all,
+        };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::list::inspect(request))
     }
 }
 
