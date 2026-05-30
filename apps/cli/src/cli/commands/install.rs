@@ -82,6 +82,7 @@ mod tests {
     use engine::actions::init::InitResult;
     use engine::actions::install::InstallResult;
     use engine::actions::list::ListResult;
+    use engine::actions::run::RunResult;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -128,6 +129,10 @@ mod tests {
 
         fn agents(&mut self, _operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
             panic!("agents should not run in install tests");
+        }
+
+        fn run_command(&mut self, _command: Vec<String>) -> anyhow::Result<RunResult> {
+            panic!("run_command should not run in install tests");
         }
     }
 

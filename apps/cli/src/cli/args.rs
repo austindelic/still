@@ -121,6 +121,7 @@ pub struct DoctorArgs {}
 #[derive(clap::Args, Debug, Clone)]
 pub struct RunArgs {
     /// Child command and arguments to execute.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
     pub command: Vec<String>,
 }
 
@@ -276,6 +277,18 @@ For more information, try '--help'.
             args.apps[0].backend.as_ref().unwrap().as_str(),
             "homebrew-cask"
         );
+    }
+
+    #[test]
+    fn run_accepts_child_flags_after_command() {
+        let cli = Cli::try_parse_from(["still", "run", "cargo", "test", "--", "--quiet"])
+            .expect("run args should parse child flags");
+
+        let Some(Command::Run(args)) = cli.command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(args.command, ["cargo", "test", "--", "--quiet"]);
     }
 
     fn names(items: &[ToolSpec]) -> Vec<&str> {

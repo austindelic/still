@@ -70,10 +70,17 @@ where
             output.info(&format!("Uninstall command: {:?}", args));
             0
         }
-        Command::Run(args) => {
-            output.info(&format!("Run command: {:?}", args));
-            0
-        }
+        Command::Run(args) => match runtime.run_command(normalize_child_command(args.command)) {
+            Ok(result) => {
+                write_child_output(output, &result.stdout, false);
+                write_child_output(output, &result.stderr, true);
+                result.status
+            }
+            Err(e) => {
+                output.error(&format!("run failed: {e}"));
+                1
+            }
+        },
         Command::Task(args) => {
             output.info(&format!("Task command: {:?}", args));
             0
@@ -156,6 +163,30 @@ where
     }
 }
 
+fn write_child_output<O: Output>(output: &mut O, content: &str, stderr: bool) {
+    for line in content.lines() {
+        if stderr {
+            output.error(line);
+        } else {
+            output.info(line);
+        }
+    }
+}
+
+fn normalize_child_command(command: Vec<String>) -> Vec<String> {
+    let mut removed_separator = false;
+    command
+        .into_iter()
+        .filter(|arg| {
+            if !removed_separator && arg == "--" {
+                removed_separator = true;
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
 /// Dispatches a parsed top-level CLI value using command-module help behavior.
 ///
 /// `cli` is parsed input that may or may not contain a subcommand. `runtime` and
@@ -219,6 +250,7 @@ mod tests {
         init::InitResult,
         install::InstallResult,
         list::{ListItem, ListResult, ListSection},
+        run::RunResult,
     };
     use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
     use engine::specs::item::ItemKind;
@@ -239,6 +271,8 @@ mod tests {
         list_alls: Vec<bool>,
         agents_result: Option<anyhow::Result<AgentsResult>>,
         agents_operations: Vec<AgentsOperation>,
+        run_result: Option<anyhow::Result<RunResult>>,
+        run_commands: Vec<Vec<String>>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -283,6 +317,13 @@ mod tests {
                 .take()
                 .expect("test runtime agents result was not configured")
         }
+
+        fn run_command(&mut self, command: Vec<String>) -> anyhow::Result<RunResult> {
+            self.run_commands.push(command);
+            self.run_result
+                .take()
+                .expect("test runtime run result was not configured")
+        }
     }
 
     #[test]
@@ -301,6 +342,8 @@ mod tests {
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -334,6 +377,8 @@ mod tests {
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -369,6 +414,8 @@ config check failed: failed to parse still.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -399,6 +446,8 @@ config check failed: failed to parse still.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -433,6 +482,8 @@ init failed: still.toml already exists
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -465,6 +516,8 @@ RUST_LOG=debug
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -508,6 +561,8 @@ env failed: failed to read still.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -545,6 +600,8 @@ Apps:
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -584,6 +641,8 @@ list failed: failed to read still.toml
                 gitignore_path: Some(PathBuf::from("/repo/.agents/skills/.gitignore")),
             })),
             agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -606,6 +665,137 @@ Skills:
 ✓ Updated /repo/.agents/skills/.gitignore
 "###);
         assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn run_formats_child_output_and_returns_child_status() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: Some(Ok(RunResult {
+                status: 7,
+                stdout: "hello\nworld\n".to_string(),
+                stderr: "warn\n".to_string(),
+            })),
+            run_commands: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Run(crate::cli::args::RunArgs {
+                command: vec![
+                    "cargo".to_string(),
+                    "test".to_string(),
+                    "--quiet".to_string(),
+                ],
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 7);
+        assert_eq!(
+            runtime.run_commands,
+            [vec![
+                "cargo".to_string(),
+                "test".to_string(),
+                "--quiet".to_string()
+            ]]
+        );
+        insta::assert_snapshot!(output.stdout, @r###"
+hello
+world
+"###);
+        insta::assert_snapshot!(output.stderr, @r###"
+warn
+"###);
+    }
+
+    #[test]
+    fn run_formats_runtime_errors() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: Some(Err(anyhow!("failed to run cargo"))),
+            run_commands: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Run(crate::cli::args::RunArgs {
+                command: vec!["cargo".to_string()],
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+run failed: failed to run cargo
+"###);
+    }
+
+    #[test]
+    fn run_strips_argument_separator_before_runtime() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: Some(Ok(RunResult {
+                status: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            })),
+            run_commands: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Run(crate::cli::args::RunArgs {
+                command: vec![
+                    "cargo".to_string(),
+                    "test".to_string(),
+                    "--".to_string(),
+                    "--quiet".to_string(),
+                ],
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(
+            runtime.run_commands,
+            [vec![
+                "cargo".to_string(),
+                "test".to_string(),
+                "--quiet".to_string()
+            ]]
+        );
     }
 
     fn section<const N: usize>(kind: ItemKind, items: [ListItem; N]) -> ListSection {

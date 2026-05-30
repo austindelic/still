@@ -125,6 +125,7 @@ mod tests {
         env::EnvResult,
         init::InitResult,
         list::ListResult,
+        run::RunResult,
     };
 
     #[derive(Debug, Default)]
@@ -156,6 +157,10 @@ mod tests {
 
         fn agents(&mut self, _operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
             panic!("agents should not run in these routing tests");
+        }
+
+        fn run_command(&mut self, _command: Vec<String>) -> anyhow::Result<RunResult> {
+            panic!("run_command should not run in these routing tests");
         }
     }
 

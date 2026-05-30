@@ -12,5 +12,7 @@ pub mod init;
 pub mod install;
 /// List action implementation.
 pub mod list;
+/// Run action implementation.
+pub mod run;
 /// Uninstall action implementation.
 pub mod uninstall;
