@@ -128,6 +128,7 @@ mod tests {
         init::InitResult,
         list::ListResult,
         run::RunResult,
+        services::{ServicesOperation, ServicesResult},
         sync::SyncResult,
         task::TaskResult,
     };
@@ -187,6 +188,14 @@ mod tests {
 
         fn sync(&mut self) -> anyhow::Result<SyncResult> {
             panic!("sync should not run in these routing tests");
+        }
+
+        fn services(
+            &mut self,
+            _operation: ServicesOperation,
+            _name: Option<String>,
+        ) -> anyhow::Result<ServicesResult> {
+            panic!("services should not run in these routing tests");
         }
     }
 

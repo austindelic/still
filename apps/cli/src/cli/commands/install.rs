@@ -85,6 +85,7 @@ mod tests {
     use engine::actions::install::InstallResult;
     use engine::actions::list::ListResult;
     use engine::actions::run::RunResult;
+    use engine::actions::services::{ServicesOperation, ServicesResult};
     use engine::actions::sync::SyncResult;
     use engine::actions::task::TaskResult;
 
@@ -153,6 +154,14 @@ mod tests {
 
         fn sync(&mut self) -> anyhow::Result<SyncResult> {
             panic!("sync should not run in install tests");
+        }
+
+        fn services(
+            &mut self,
+            _operation: ServicesOperation,
+            _name: Option<String>,
+        ) -> anyhow::Result<ServicesResult> {
+            panic!("services should not run in install tests");
         }
     }
 

@@ -3,7 +3,7 @@
 /// Install command handler.
 pub mod install;
 
-use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand};
+use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand, ServicesCommand};
 use crate::cli::output::Output;
 use crate::cli::runtime::CliRuntime;
 use clap::CommandFactory;
@@ -135,8 +135,46 @@ where
             }
         },
         Command::Services(args) => {
-            output.info(&format!("Services command: {:?}", args));
-            0
+            let (operation, name) = match args
+                .command
+                .unwrap_or(ServicesCommand::Status { name: None })
+            {
+                ServicesCommand::Status { name } => {
+                    (engine::actions::services::ServicesOperation::Status, name)
+                }
+                ServicesCommand::Start { name } => {
+                    (engine::actions::services::ServicesOperation::Start, name)
+                }
+                ServicesCommand::Stop { name } => {
+                    (engine::actions::services::ServicesOperation::Stop, name)
+                }
+                ServicesCommand::Check { name } => {
+                    (engine::actions::services::ServicesOperation::Check, name)
+                }
+            };
+            match runtime.services(operation, name) {
+                Ok(result) => {
+                    output.info(&format!("Config: {}", result.path.display()));
+                    for service in result.services {
+                        output.info(&format!(
+                            "{}: {} - {}",
+                            service.name,
+                            service_status_label(service.status),
+                            service.detail
+                        ));
+                        if let Some(execution) = service.execution {
+                            output.info(&format!("command: {}", execution.command));
+                            write_child_output(output, &execution.stdout, false);
+                            write_child_output(output, &execution.stderr, true);
+                        }
+                    }
+                    0
+                }
+                Err(e) => {
+                    output.error(&format!("services failed: {e}"));
+                    1
+                }
+            }
         }
         Command::Agents(args) => {
             let operation = match args.command.unwrap_or(AgentsCommand::List) {
@@ -231,6 +269,15 @@ where
     }
 }
 
+fn service_status_label(status: engine::actions::services::ServiceStatus) -> &'static str {
+    match status {
+        engine::actions::services::ServiceStatus::Configured => "configured",
+        engine::actions::services::ServiceStatus::Skipped => "skipped",
+        engine::actions::services::ServiceStatus::Ok => "ok",
+        engine::actions::services::ServiceStatus::Failed => "failed",
+    }
+}
+
 fn write_child_output<O: Output>(output: &mut O, content: &str, stderr: bool) {
     for line in content.lines() {
         if stderr {
@@ -321,6 +368,7 @@ mod tests {
         install::InstallResult,
         list::{ListItem, ListResult, ListSection},
         run::RunResult,
+        services::{ServiceReport, ServiceStatus, ServicesOperation, ServicesResult},
         sync::{SyncItem, SyncResult},
         task::{TaskExecution, TaskResult, TaskSummary},
     };
@@ -351,6 +399,8 @@ mod tests {
         activate_shells: Vec<Option<String>>,
         doctor_result: Option<anyhow::Result<DoctorResult>>,
         sync_result: Option<anyhow::Result<SyncResult>>,
+        services_result: Option<anyhow::Result<ServicesResult>>,
+        services_requests: Vec<(ServicesOperation, Option<String>)>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -428,6 +478,17 @@ mod tests {
                 .take()
                 .expect("test runtime sync result was not configured")
         }
+
+        fn services(
+            &mut self,
+            operation: ServicesOperation,
+            name: Option<String>,
+        ) -> anyhow::Result<ServicesResult> {
+            self.services_requests.push((operation, name));
+            self.services_result
+                .take()
+                .expect("test runtime services result was not configured")
+        }
     }
 
     #[test]
@@ -454,6 +515,8 @@ mod tests {
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -495,6 +558,8 @@ mod tests {
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -538,6 +603,8 @@ config check failed: failed to parse still.toml
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -576,6 +643,8 @@ config check failed: failed to parse still.toml
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -618,6 +687,8 @@ init failed: still.toml already exists
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -658,6 +729,8 @@ RUST_LOG=debug
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -709,6 +782,8 @@ env failed: failed to read still.toml
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -754,6 +829,8 @@ Apps:
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -801,6 +878,8 @@ list failed: failed to read still.toml
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -850,6 +929,8 @@ Skills:
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -904,6 +985,8 @@ warn
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -947,6 +1030,8 @@ run failed: failed to run cargo
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1009,6 +1094,8 @@ run failed: failed to run cargo
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1061,6 +1148,8 @@ Tasks:
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1107,6 +1196,8 @@ failed
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1147,6 +1238,8 @@ export PATH="/opt/still/bin:$PATH"
             activate_shells: Vec::new(),
             doctor_result: None,
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1199,6 +1292,8 @@ activate failed: unsupported shell
                 ],
             })),
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1237,6 +1332,8 @@ activate failed: unsupported shell
             activate_shells: Vec::new(),
             doctor_result: Some(Err(anyhow!("home directory missing"))),
             sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1281,6 +1378,8 @@ doctor failed: home directory missing
                     sync_item(ItemKind::App, "firefox@latest@homebrew-cask"),
                 ],
             })),
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1325,6 +1424,8 @@ Sync plan:
                 path: PathBuf::from("/repo/still.toml"),
                 items: Vec::new(),
             })),
+            services_result: None,
+            services_requests: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -1340,6 +1441,125 @@ Config: /repo/still.toml
 Sync plan:
   (nothing to sync)
 "###);
+    }
+
+    #[test]
+    fn services_status_formats_reports() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: Some(Ok(ServicesResult {
+                path: PathBuf::from("/repo/still.toml"),
+                services: vec![ServiceReport {
+                    name: "web".to_string(),
+                    status: ServiceStatus::Configured,
+                    detail: "echo web".to_string(),
+                    execution: None,
+                }],
+            })),
+            services_requests: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Services(crate::cli::args::ServicesArgs {
+                command: Some(ServicesCommand::Status {
+                    name: Some("web".to_string()),
+                }),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(
+            runtime.services_requests,
+            [(ServicesOperation::Status, Some("web".to_string()))]
+        );
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+web: configured - echo web
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn services_start_formats_execution_output() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: Some(Ok(ServicesResult {
+                path: PathBuf::from("/repo/still.toml"),
+                services: vec![ServiceReport {
+                    name: "web".to_string(),
+                    status: ServiceStatus::Ok,
+                    detail: "start".to_string(),
+                    execution: Some(engine::actions::services::ServiceExecution {
+                        command: "echo web".to_string(),
+                        status: 0,
+                        stdout: "web\n".to_string(),
+                        stderr: String::new(),
+                    }),
+                }],
+            })),
+            services_requests: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Services(crate::cli::args::ServicesArgs {
+                command: Some(ServicesCommand::Start {
+                    name: Some("web".to_string()),
+                }),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(
+            runtime.services_requests,
+            [(ServicesOperation::Start, Some("web".to_string()))]
+        );
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+web: ok - start
+command: echo web
+web
+"###);
+        assert_eq!(output.stderr, "");
     }
 
     fn section<const N: usize>(kind: ItemKind, items: [ListItem; N]) -> ListSection {

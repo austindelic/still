@@ -18,6 +18,8 @@ pub mod install;
 pub mod list;
 /// Run action implementation.
 pub mod run;
+/// Services action implementation.
+pub mod services;
 /// Sync action implementation.
 pub mod sync;
 /// Task action implementation.

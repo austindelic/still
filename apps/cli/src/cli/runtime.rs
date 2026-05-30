@@ -10,6 +10,7 @@ use engine::actions::{
     install::{InstallRequest, InstallResult},
     list::{ListRequest, ListResult},
     run::{RunRequest, RunResult},
+    services::{ServicesOperation, ServicesRequest, ServicesResult},
     sync::{SyncRequest, SyncResult},
     task::{TaskRequest, TaskResult},
 };
@@ -65,6 +66,13 @@ pub trait CliRuntime {
 
     /// Plans synchronization against configured desired state.
     fn sync(&mut self) -> anyhow::Result<SyncResult>;
+
+    /// Inspects or runs configured service actions.
+    fn services(
+        &mut self,
+        operation: ServicesOperation,
+        name: Option<String>,
+    ) -> anyhow::Result<ServicesResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -198,6 +206,24 @@ impl CliRuntime for RealRuntime {
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::sync::plan(request))
+    }
+
+    fn services(
+        &mut self,
+        operation: ServicesOperation,
+        name: Option<String>,
+    ) -> anyhow::Result<ServicesResult> {
+        let start_dir = std::env::current_dir()?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        let request = ServicesRequest {
+            start_dir,
+            home_dir,
+            operation,
+            name,
+        };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::services::run(request))
     }
 }
 
