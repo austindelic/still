@@ -9,7 +9,9 @@ use anyhow::{Context, Result};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::parse_still_toml;
+use crate::system::System;
 use crate::trust::assert_config_trusted;
+use crate::utils::paths::PathOps;
 
 /// Request to run a child command with configured environment values.
 #[derive(Debug, Clone)]
@@ -57,12 +59,12 @@ pub async fn run(request: RunRequest) -> Result<RunResult> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ResolvedRunEnv {
-    working_dir: PathBuf,
-    vars: BTreeMap<String, String>,
+pub(crate) struct ResolvedRunEnv {
+    pub(crate) working_dir: PathBuf,
+    pub(crate) vars: BTreeMap<String, String>,
 }
 
-async fn resolve_env(start_dir: &Path, home_dir: &Path) -> Result<ResolvedRunEnv> {
+pub(crate) async fn resolve_env(start_dir: &Path, home_dir: &Path) -> Result<ResolvedRunEnv> {
     let resolved = resolve_config_path(
         start_dir,
         home_dir,
@@ -93,11 +95,23 @@ async fn resolve_env(start_dir: &Path, home_dir: &Path) -> Result<ResolvedRunEnv
         vars.extend(parse_env_file(&content)?);
     }
     vars.extend(config.env.vars);
+    vars.insert("PATH".to_string(), managed_path());
 
     Ok(ResolvedRunEnv {
         working_dir: config_dir,
         vars,
     })
+}
+
+fn managed_path() -> String {
+    let mut paths = vec![System::bin_dir()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(paths)
+        .unwrap_or_else(|_| System::bin_dir().into_os_string())
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn parse_env_file(input: &str) -> Result<BTreeMap<String, String>> {
@@ -172,6 +186,18 @@ mod tests {
         assert_eq!(result.vars["INLINE"], "yes");
         assert_eq!(result.vars["FROM_FILE"], "override");
         assert_eq!(result.vars["FROM_LOCAL"], "two");
+    }
+
+    #[tokio::test]
+    async fn run_env_prepends_still_bin_to_path() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("still.toml"), "[env]\n").unwrap();
+
+        let result = resolve_env(temp.path(), temp.path()).await.unwrap();
+        let path = result.vars.get("PATH").unwrap();
+        let paths = std::env::split_paths(path).collect::<Vec<_>>();
+
+        assert_eq!(paths.first(), Some(&System::bin_dir()));
     }
 
     #[tokio::test]

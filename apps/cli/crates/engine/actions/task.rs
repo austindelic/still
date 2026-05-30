@@ -6,6 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+use crate::actions::run::resolve_env;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::{ExpandedTask, ServiceEntry, TaskEntry, TaskRun, parse_still_toml};
@@ -62,11 +63,6 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let working_dir = resolved
-        .path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
     let tasks = config.tasks;
     let services = config.services;
     let summaries = task_summaries(&tasks);
@@ -86,6 +82,7 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         .into());
     }
     assert_config_trusted(&resolved.path, content.as_bytes(), "task execution").await?;
+    let resolved_env = resolve_env(&request.start_dir, &request.home_dir).await?;
 
     let mut executions = Vec::new();
     let mut visited = BTreeSet::new();
@@ -93,7 +90,8 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         &tasks,
         &services,
         &name,
-        &working_dir,
+        &resolved_env.working_dir,
+        &resolved_env.vars,
         &mut visited,
         &mut executions,
     )?;
@@ -128,6 +126,7 @@ fn run_task_graph(
     services: &BTreeMap<String, ServiceEntry>,
     name: &str,
     working_dir: &Path,
+    env: &BTreeMap<String, String>,
     visited: &mut BTreeSet<String>,
     executions: &mut Vec<TaskExecution>,
 ) -> Result<()> {
@@ -145,6 +144,7 @@ fn run_task_graph(
             services,
             &dependency,
             working_dir,
+            env,
             visited,
             executions,
         )?;
@@ -168,6 +168,7 @@ fn run_task_graph(
     for command in normalized.commands {
         let output = shell_command(&command)
             .current_dir(working_dir)
+            .envs(env)
             .output()
             .with_context(|| format!("failed to run task {name}"))?;
         let status = output.status.code().unwrap_or(1);
@@ -344,6 +345,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_execution_uses_configured_env() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
+            [env]
+            INLINE = "task-env"
+
+            [tasks]
+            test = "{}"
+            "#,
+            env_echo_command("INLINE")
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.status, 0);
+        assert_eq!(result.executions[0].stdout.trim(), "task-env");
+    }
+
+    #[tokio::test]
     async fn list_form_task_stops_on_first_failure() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
@@ -468,5 +498,13 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    fn env_echo_command(name: &str) -> String {
+        if cfg!(windows) {
+            format!("echo %{name}%")
+        } else {
+            format!("printf \\\"${name}\\\"")
+        }
     }
 }

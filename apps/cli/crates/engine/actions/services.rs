@@ -6,6 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+use crate::actions::run::resolve_env;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::{
@@ -92,10 +93,31 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
     if request.operation != ServicesOperation::Status {
         assert_config_trusted(&resolved.path, content.as_bytes(), "service actions").await?;
     }
+    let resolved_env = if request.operation == ServicesOperation::Status {
+        None
+    } else {
+        Some(resolve_env(&request.start_dir, &request.home_dir).await?)
+    };
+    let empty_env = BTreeMap::new();
     let reports = services
         .into_iter()
         .map(|(name, service)| {
-            service_report(name, service, request.operation, &working_dir, &tasks)
+            let command_dir = resolved_env
+                .as_ref()
+                .map(|env| env.working_dir.as_path())
+                .unwrap_or(&working_dir);
+            let command_env = resolved_env
+                .as_ref()
+                .map(|env| &env.vars)
+                .unwrap_or(&empty_env);
+            service_report(
+                name,
+                service,
+                request.operation,
+                command_dir,
+                command_env,
+                &tasks,
+            )
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -125,6 +147,7 @@ fn service_report(
     service: ServiceEntry,
     operation: ServicesOperation,
     working_dir: &Path,
+    env: &BTreeMap<String, String>,
     tasks: &BTreeMap<String, TaskEntry>,
 ) -> Result<ServiceReport> {
     let normalized = normalize_service(service);
@@ -159,6 +182,7 @@ fn service_report(
 
     let output = shell_command(&command)
         .current_dir(working_dir)
+        .envs(env)
         .output()
         .with_context(|| format!("failed to run service {name}"))?;
     let status = output.status.code().unwrap_or(1);
@@ -386,6 +410,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn service_actions_use_configured_env() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
+            [env]
+            INLINE = "service-env"
+
+            [services]
+            web = "{}"
+            "#,
+            env_echo_command("INLINE")
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(ServicesRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: ServicesOperation::Start,
+            name: Some("web".to_string()),
+        })
+        .await
+        .unwrap();
+
+        let execution = result.services[0].execution.as_ref().unwrap();
+        assert_eq!(execution.stdout.trim(), "service-env");
+    }
+
+    #[tokio::test]
     async fn service_actions_require_trust() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
@@ -419,5 +473,13 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    fn env_echo_command(name: &str) -> String {
+        if cfg!(windows) {
+            format!("echo %{name}%")
+        } else {
+            format!("printf \\\"${name}\\\"")
+        }
     }
 }
