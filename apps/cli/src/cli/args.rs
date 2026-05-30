@@ -68,6 +68,9 @@ pub struct InstallArgs {
     /// Record the requested items in the global Still config.
     #[arg(short = 'g', long)]
     pub global: bool,
+    /// Update an existing config entry when the requested version or backend differs.
+    #[arg(short = 'f', long)]
+    pub force: bool,
     /// Requested tools in `name`, `name@version`, or `name@version@backend` form.
     #[arg(short = 't', long = "tool", value_name = "TOOL", num_args = 1..)]
     pub tools: Vec<ToolSpec>,

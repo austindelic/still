@@ -17,13 +17,13 @@ use engine::actions::{
     uninstall::{UninstallRequest, UninstallResult},
 };
 use engine::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use engine::config_edit::add_install_items;
 
 /// CLI install request plus desired-state write scope.
 #[derive(Debug, Clone)]
 pub struct InstallCommandRequest {
     pub install: InstallRequest,
     pub global: bool,
+    pub force: bool,
 }
 
 /// Operations command handlers need from the engine layer.
@@ -95,7 +95,7 @@ impl CliRuntime for RealRuntime {
         let install_request = request.install.clone();
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         let result = runtime.block_on(engine::actions::install::run(request.install))?;
-        record_install_items(install_request, request.global)?;
+        record_install_items(install_request, request.global, request.force)?;
         Ok(result)
     }
 
@@ -260,7 +260,7 @@ impl CliRuntime for RealRuntime {
     }
 }
 
-fn record_install_items(request: InstallRequest, global: bool) -> anyhow::Result<()> {
+fn record_install_items(request: InstallRequest, global: bool, force: bool) -> anyhow::Result<()> {
     let start_dir = std::env::current_dir()?;
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
@@ -282,7 +282,8 @@ fn record_install_items(request: InstallRequest, global: bool) -> anyhow::Result
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(err) => return Err(err.into()),
     };
-    let updated = add_install_items(&content, &request.items)?;
+    let updated =
+        engine::config_edit::add_install_items_with_force(&content, &request.items, force)?;
     if let Some(parent) = resolved.path.parent() {
         std::fs::create_dir_all(parent)?;
     }

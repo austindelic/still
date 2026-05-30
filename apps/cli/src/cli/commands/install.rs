@@ -20,6 +20,7 @@ where
     O: Output,
 {
     let global = args.global;
+    let force = args.force;
     let items = match install_items(args) {
         Ok(items) => items,
         Err(e) => {
@@ -29,6 +30,7 @@ where
     };
     let install_request = InstallCommandRequest {
         global,
+        force,
         install: InstallRequest { items },
     };
 
@@ -131,11 +133,13 @@ mod tests {
         install_result: Option<anyhow::Result<InstallResult>>,
         install_requests: Vec<(ItemKind, String, String, Option<String>)>,
         install_globals: Vec<bool>,
+        install_forces: Vec<bool>,
     }
 
     impl CliRuntime for FakeRuntime {
         fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult> {
             self.install_globals.push(request.global);
+            self.install_forces.push(request.force);
             self.install_requests
                 .extend(request.install.items.into_iter().map(|item| {
                     (
@@ -236,6 +240,7 @@ mod tests {
             )]
         );
         assert_eq!(runtime.install_globals, [false]);
+        assert_eq!(runtime.install_forces, [false]);
         insta::assert_snapshot!(output.stdout, @r###"
 Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
 ✓ Successfully installed ripgrep@14.1.1 to /opt/still/tools/ripgrep/14.1.1
@@ -309,6 +314,30 @@ install failed: formula.json not found
 
         assert_eq!(code, 0);
         assert_eq!(runtime.install_globals, [true]);
+        assert_eq!(runtime.install_forces, [false]);
+    }
+
+    #[test]
+    fn install_passes_force_to_runtime() {
+        let mut args = install_args("ripgrep");
+        args.force = true;
+        let mut runtime = FakeRuntime {
+            install_result: Some(Ok(InstallResult {
+                tool_name: "ripgrep".to_string(),
+                version: "14.1.1".to_string(),
+                install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
+                binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
+                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
+                linked_executables: vec![PathBuf::from("/opt/still/bin/rg")],
+            })),
+            ..FakeRuntime::default()
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run(args, &mut runtime, &mut output);
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.install_forces, [true]);
     }
 
     #[test]
@@ -381,6 +410,7 @@ install failed: cannot infer whether jq is a tool, package, or app; use --tool, 
     fn install_args(tool: &str) -> InstallArgs {
         InstallArgs {
             global: false,
+            force: false,
             tools: vec![tool.parse().expect("test tool spec should parse")],
             packages: Vec::new(),
             apps: Vec::new(),

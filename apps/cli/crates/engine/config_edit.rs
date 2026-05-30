@@ -8,6 +8,15 @@ use crate::specs::item::{ItemKind, ItemSpec};
 
 /// Adds install requests to a Still TOML document.
 pub fn add_install_items(input: &str, items: &[InstallItemRequest]) -> EngineResult<String> {
+    add_install_items_with_force(input, items, false)
+}
+
+/// Adds install requests, optionally allowing changed existing entries.
+pub fn add_install_items_with_force(
+    input: &str,
+    items: &[InstallItemRequest],
+    force: bool,
+) -> EngineResult<String> {
     if items.is_empty() {
         return Err(EngineError::EmptyInstallRequest);
     }
@@ -17,6 +26,14 @@ pub fn add_install_items(input: &str, items: &[InstallItemRequest]) -> EngineRes
         .map_err(|err| EngineError::InvalidConfig {
             reason: err.to_string(),
         })?;
+    let config =
+        crate::specs::toml::parse_still_toml(input).map_err(|err| EngineError::InvalidConfig {
+            reason: err.to_string(),
+        })?;
+
+    if !force {
+        reject_conflicting_install_items(&config, items)?;
+    }
 
     for item in items {
         match item.kind {
@@ -27,6 +44,73 @@ pub fn add_install_items(input: &str, items: &[InstallItemRequest]) -> EngineRes
     }
 
     Ok(doc.to_string())
+}
+
+fn reject_conflicting_install_items(
+    config: &crate::specs::toml::StillConfig,
+    items: &[InstallItemRequest],
+) -> EngineResult<()> {
+    for item in items {
+        if existing_item_matches(config, item) != Some(false) {
+            continue;
+        }
+        return Err(EngineError::Conflict {
+            message: format!(
+                "{} {} is already configured with a different version or backend; pass --force to update it",
+                item.kind, item.spec.name
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn existing_item_matches(
+    config: &crate::specs::toml::StillConfig,
+    item: &InstallItemRequest,
+) -> Option<bool> {
+    match item.kind {
+        ItemKind::Tool => config
+            .tools
+            .get(&item.spec.name)
+            .map(|entry| tool_entry_matches(entry, &item.spec)),
+        ItemKind::Package => package_entry_matches(&config.packages, &item.spec),
+        ItemKind::App => package_entry_matches(&config.apps, &item.spec),
+    }
+}
+
+fn tool_entry_matches(entry: &crate::specs::toml::ToolEntry, spec: &ItemSpec) -> bool {
+    match entry {
+        crate::specs::toml::ToolEntry::Version(version) => {
+            spec.backend.is_none() && version == spec.version.as_str()
+        }
+        crate::specs::toml::ToolEntry::Expanded(tool) => {
+            let version = if tool.version.is_empty() {
+                "latest"
+            } else {
+                tool.version.as_str()
+            };
+            version == spec.version.as_str()
+                && tool.backend.as_deref() == spec.backend.as_ref().map(|backend| backend.as_str())
+        }
+    }
+}
+
+fn package_entry_matches(map: &crate::specs::toml::PackageMap, spec: &ItemSpec) -> Option<bool> {
+    if let Some(entry) = map.entries.get(&spec.name) {
+        let crate::specs::toml::PackageEntry::Expanded(package) = entry;
+        let version = package.version.as_deref().unwrap_or("latest");
+        return Some(
+            version == spec.version.as_str()
+                && package.backend.as_deref()
+                    == spec.backend.as_ref().map(|backend| backend.as_str()),
+        );
+    }
+
+    if map.latest.iter().any(|name| name == &spec.name) {
+        return Some(spec.version.is_latest() && spec.backend.is_none());
+    }
+
+    None
 }
 
 /// Removes one named item from tools, packages, or apps.
@@ -219,6 +303,70 @@ mod tests {
         assert_eq!(config.env.vars["RUST_LOG"], "debug");
         assert!(config.tasks.contains_key("test"));
         assert!(config.tools.contains_key("ripgrep"));
+    }
+
+    #[test]
+    fn rejects_changed_existing_entries_without_force() {
+        let err = add_install_items(
+            r#"
+            [tools]
+            rust = { version = "stable", backend = "rustup" }
+
+            [packages]
+            llvm = { version = "18", backend = "homebrew" }
+            "#,
+            &[
+                item(ItemKind::Tool, "rust@stable@mise"),
+                item(ItemKind::Package, "llvm@19@homebrew"),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("--force"));
+    }
+
+    #[test]
+    fn force_allows_changed_existing_entries() {
+        let output = add_install_items_with_force(
+            r#"
+            [tools]
+            rust = { version = "stable", backend = "rustup" }
+            "#,
+            &[item(ItemKind::Tool, "rust@stable@mise")],
+            true,
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        let ToolEntry::Expanded(rust) = &config.tools["rust"] else {
+            panic!("rust should be expanded");
+        };
+        assert_eq!(rust.backend.as_deref(), Some("mise"));
+    }
+
+    #[test]
+    fn identical_existing_entries_remain_noops() {
+        let output = add_install_items(
+            r#"
+            [tools]
+            rust = { version = "stable", backend = "rustup" }
+
+            [packages]
+            latest = ["openssl"]
+            "#,
+            &[
+                item(ItemKind::Tool, "rust@stable@rustup"),
+                item(ItemKind::Package, "openssl"),
+            ],
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(config.packages.latest, ["openssl"]);
+        let ToolEntry::Expanded(rust) = &config.tools["rust"] else {
+            panic!("rust should be expanded");
+        };
+        assert_eq!(rust.backend.as_deref(), Some("rustup"));
     }
 
     #[test]
