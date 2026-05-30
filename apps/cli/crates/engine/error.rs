@@ -18,6 +18,8 @@ pub enum EngineError {
     UnknownItemKind { kind: String },
     #[error("invalid item spec: {reason}")]
     InvalidItemSpec { reason: String },
+    #[error("invalid config: {reason}")]
+    InvalidConfig { reason: String },
     #[error("install request must include at least one item")]
     EmptyInstallRequest,
     #[error("{feature} is not implemented yet")]
