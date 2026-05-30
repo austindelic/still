@@ -185,7 +185,11 @@ pub enum ConfigCommand {
 
 /// Arguments for resolved environment output.
 #[derive(clap::Args, Debug, Clone)]
-pub struct EnvArgs {}
+pub struct EnvArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
+}
 
 /// Arguments for shell activation.
 #[derive(clap::Args, Debug, Clone)]

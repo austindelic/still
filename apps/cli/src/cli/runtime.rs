@@ -2,6 +2,7 @@
 
 use engine::actions::{
     config::{CheckConfigRequest, CheckConfigResult},
+    env::{EnvRequest, EnvResult},
     init::{InitRequest, InitResult},
     install::{InstallRequest, InstallResult},
 };
@@ -24,6 +25,9 @@ pub trait CliRuntime {
 
     /// Initializes a starter config in the current project directory.
     fn init(&mut self, force: bool) -> anyhow::Result<InitResult>;
+
+    /// Reads configured environment values.
+    fn env(&mut self, global: bool) -> anyhow::Result<EnvResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -57,5 +61,18 @@ impl CliRuntime for RealRuntime {
         let request = InitRequest { start_dir, force };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::init::run(request))
+    }
+
+    fn env(&mut self, global: bool) -> anyhow::Result<EnvResult> {
+        let start_dir = std::env::current_dir()?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+        let request = EnvRequest {
+            start_dir,
+            home_dir,
+            global,
+        };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::env::inspect(request))
     }
 }

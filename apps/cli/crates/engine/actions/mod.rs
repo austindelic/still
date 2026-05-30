@@ -2,6 +2,8 @@
 
 /// Config validation actions.
 pub mod config;
+/// Environment inspection actions.
+pub mod env;
 /// Init action implementation.
 pub mod init;
 /// Install action implementation.

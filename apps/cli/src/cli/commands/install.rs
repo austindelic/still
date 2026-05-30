@@ -74,6 +74,7 @@ mod tests {
 
     use anyhow::anyhow;
     use engine::actions::config::CheckConfigResult;
+    use engine::actions::env::EnvResult;
     use engine::actions::init::InitResult;
     use engine::actions::install::{InstallRequest, InstallResult};
 
@@ -108,6 +109,10 @@ mod tests {
 
         fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
             panic!("init should not run in install tests");
+        }
+
+        fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
+            panic!("env should not run in install tests");
         }
     }
 

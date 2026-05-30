@@ -79,10 +79,22 @@ where
             output.info(&format!("Doctor command: {:?}", args));
             0
         }
-        Command::Env(args) => {
-            output.info(&format!("Env command: {:?}", args));
-            0
-        }
+        Command::Env(args) => match runtime.env(args.global) {
+            Ok(result) => {
+                output.info(&format!("Config: {}", result.path.display()));
+                for file in result.files {
+                    output.info(&format!("env file: {file}"));
+                }
+                for (key, value) in result.vars {
+                    output.info(&format!("{key}={value}"));
+                }
+                0
+            }
+            Err(e) => {
+                output.error(&format!("env failed: {e}"));
+                1
+            }
+        },
         Command::Activate(args) => {
             output.info(&format!("Activate command: {:?}", args));
             0
@@ -148,6 +160,7 @@ mod tests {
     use anyhow::anyhow;
     use engine::actions::{
         config::CheckConfigResult,
+        env::EnvResult,
         init::InitResult,
         install::{InstallRequest, InstallResult},
     };
@@ -162,6 +175,8 @@ mod tests {
         config_check_globals: Vec<bool>,
         init_result: Option<anyhow::Result<InitResult>>,
         init_forces: Vec<bool>,
+        env_result: Option<anyhow::Result<EnvResult>>,
+        env_globals: Vec<bool>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -182,6 +197,13 @@ mod tests {
                 .take()
                 .expect("test runtime init result was not configured")
         }
+
+        fn env(&mut self, global: bool) -> anyhow::Result<EnvResult> {
+            self.env_globals.push(global);
+            self.env_result
+                .take()
+                .expect("test runtime env result was not configured")
+        }
     }
 
     #[test]
@@ -194,6 +216,8 @@ mod tests {
             config_check_globals: Vec::new(),
             init_result: None,
             init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -221,6 +245,8 @@ mod tests {
             config_check_globals: Vec::new(),
             init_result: None,
             init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -250,6 +276,8 @@ config check failed: failed to parse still.toml
                 path: PathBuf::from("/repo/still.toml"),
             })),
             init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -274,6 +302,8 @@ config check failed: failed to parse still.toml
             config_check_globals: Vec::new(),
             init_result: Some(Err(anyhow!("still.toml already exists"))),
             init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
         };
         let mut output = BufferedOutput::default();
 
@@ -288,6 +318,64 @@ config check failed: failed to parse still.toml
         assert_eq!(output.stdout, "");
         insta::assert_snapshot!(output.stderr, @r###"
 init failed: still.toml already exists
+"###);
+    }
+
+    #[test]
+    fn env_formats_values_and_files() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: Some(Ok(EnvResult {
+                path: PathBuf::from("/repo/still.toml"),
+                files: vec![".env".to_string()],
+                vars: vec![("RUST_LOG".to_string(), "debug".to_string())],
+            })),
+            env_globals: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Env(crate::cli::args::EnvArgs { global: true }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.env_globals, [true]);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+env file: .env
+RUST_LOG=debug
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn env_formats_error() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: Some(Err(anyhow!("failed to read still.toml"))),
+            env_globals: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Env(crate::cli::args::EnvArgs { global: false }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(runtime.env_globals, [false]);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+env failed: failed to read still.toml
 "###);
     }
 }
