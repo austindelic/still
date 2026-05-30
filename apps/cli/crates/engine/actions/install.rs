@@ -43,7 +43,7 @@ pub trait InstallOps {
 ///
 /// Build this after CLI/config parsing has classified the item as a tool,
 /// package, or app. Resolution may still choose the final backend.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallItemRequest {
     pub kind: ItemKind,
     pub spec: ItemSpec,

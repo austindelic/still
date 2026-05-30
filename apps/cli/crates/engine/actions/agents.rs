@@ -5,13 +5,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
+use crate::actions::install::InstallItemRequest;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config_edit::add_install_items;
 use crate::error::EngineError;
 use crate::specs::agents::{
     NormalizedAgents, NormalizedSkill, NormalizedSkillSource, managed_skill_dir_name,
     managed_skills_gitignore, normalize_agents,
 };
-use crate::specs::toml::parse_still_toml;
+use crate::specs::item::{ItemKind, ItemSpec};
+use crate::specs::toml::{PackageMap, StillConfig, parse_still_toml};
 
 const MANAGED_MARKER: &str = ".still-managed";
 const SOURCE_METADATA: &str = "source.toml";
@@ -39,6 +42,7 @@ pub struct AgentsResult {
     pub agents: NormalizedAgents,
     pub gitignore: String,
     pub gitignore_path: Option<PathBuf>,
+    pub auto_added: Vec<InstallItemRequest>,
 }
 
 /// Reads selected config, normalizes agent skills, and optionally writes ignore metadata.
@@ -57,9 +61,17 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let agents = normalize_agents(config.agents.unwrap_or_default())?;
+    let agents = normalize_agents(config.agents.clone().unwrap_or_default())?;
     let gitignore = managed_skills_gitignore(&agents.skills)?;
+    let mut auto_added = Vec::new();
     let gitignore_path = if request.operation == AgentsOperation::Sync {
+        auto_added = auto_dependency_items(&agents.skills, &config);
+        if !auto_added.is_empty() {
+            let updated = add_install_items(&content, &auto_added)?;
+            tokio::fs::write(&resolved.path, updated)
+                .await
+                .with_context(|| format!("failed to write {}", resolved.path.display()))?;
+        }
         let skills_dir = resolved
             .path
             .parent()
@@ -82,7 +94,51 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
         agents,
         gitignore,
         gitignore_path,
+        auto_added,
     })
+}
+
+fn auto_dependency_items(
+    skills: &[NormalizedSkill],
+    config: &StillConfig,
+) -> Vec<InstallItemRequest> {
+    let mut items = Vec::new();
+    for skill in skills.iter().filter(|skill| skill.auto) {
+        extend_missing(&mut items, ItemKind::Tool, &skill.tools, |spec| {
+            !config.tools.contains_key(&spec.name)
+        });
+        extend_missing(&mut items, ItemKind::Package, &skill.packages, |spec| {
+            !package_map_contains(&config.packages, &spec.name)
+        });
+        extend_missing(&mut items, ItemKind::App, &skill.apps, |spec| {
+            !package_map_contains(&config.apps, &spec.name)
+        });
+    }
+    items
+}
+
+fn extend_missing(
+    items: &mut Vec<InstallItemRequest>,
+    kind: ItemKind,
+    specs: &[ItemSpec],
+    is_missing: impl Fn(&ItemSpec) -> bool,
+) {
+    for spec in specs {
+        if is_missing(spec)
+            && !items
+                .iter()
+                .any(|item| item.kind == kind && item.spec.name == spec.name)
+        {
+            items.push(InstallItemRequest {
+                kind,
+                spec: spec.clone(),
+            });
+        }
+    }
+}
+
+fn package_map_contains(map: &PackageMap, name: &str) -> bool {
+    map.latest.iter().any(|item| item == name) || map.entries.contains_key(name)
 }
 
 async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<()> {
@@ -283,5 +339,47 @@ mod tests {
 
         assert!(err.to_string().contains("refusing to overwrite"));
         assert!(temp.path().join(".agents/skills/custom/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn agents_sync_auto_adds_missing_inline_skill_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools]
+            rust = { version = "stable", backend = "rustup" }
+
+            [packages]
+            latest = ["openssl"]
+
+            [agents]
+
+            [agents.skills]
+            rust-review = { auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added.len(), 3);
+        assert!(
+            result
+                .auto_added
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+        );
+        let updated = fs::read_to_string(temp.path().join("still.toml")).unwrap();
+        let config = parse_still_toml(&updated).unwrap();
+        assert!(config.tools.contains_key("cargo-nextest"));
+        assert!(config.packages.latest.contains(&"llvm".to_string()));
+        assert!(config.apps.latest.contains(&"zed".to_string()));
     }
 }

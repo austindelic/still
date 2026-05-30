@@ -219,6 +219,12 @@ where
                     for skill in result.agents.skills {
                         output.info(&format!("  {}", skill.name));
                     }
+                    if !result.auto_added.is_empty() {
+                        output.info("Auto-added dependencies:");
+                        for item in result.auto_added {
+                            output.info(&format!("  {} {}", item.kind, item.spec.name));
+                        }
+                    }
                     if let Some(path) = result.gitignore_path {
                         output.success(&format!("Updated {}", path.display()));
                     }
@@ -929,6 +935,7 @@ list failed: failed to read still.toml
                 },
                 gitignore: "# still-managed skills\n/rust-review/\n".to_string(),
                 gitignore_path: Some(PathBuf::from("/repo/.agents/skills/.gitignore")),
+                auto_added: Vec::new(),
             })),
             agents_operations: Vec::new(),
             run_result: None,
