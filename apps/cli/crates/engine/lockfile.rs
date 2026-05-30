@@ -6,6 +6,7 @@ use crate::actions::sync::SyncItem;
 use crate::platform::current_platform;
 use crate::specs::item::ItemKind;
 use crate::system::System;
+use crate::utils::hashing::Hashing;
 use crate::utils::paths::PathOps;
 
 /// Project lockfile name written next to `still.toml`.
@@ -28,14 +29,21 @@ pub fn render_lockfile(items: &[SyncItem]) -> String {
     }
 
     for item in items {
+        let platform = current_platform();
+        let source = source_identity(item);
         output.push_str("[[items]]\n");
         output.push_str(&format!("kind = \"{}\"\n", item.kind));
         output.push_str(&format!("name = \"{}\"\n", item.spec.name));
-        output.push_str(&format!("platform = \"{}\"\n", current_platform()));
+        output.push_str(&format!("platform = \"{}\"\n", platform));
         output.push_str(&format!("version = \"{}\"\n", item.spec.version));
         if let Some(backend) = &item.spec.backend {
             output.push_str(&format!("backend = \"{}\"\n", backend));
         }
+        output.push_str(&format!("source = \"{}\"\n", source));
+        output.push_str(&format!(
+            "checksum = \"{}\"\n",
+            desired_state_checksum(item, &source)
+        ));
         output.push_str(&format!(
             "outputs = [\"{}\"]\n",
             expected_output_path(item).display()
@@ -55,6 +63,33 @@ fn expected_output_path(item: &SyncItem) -> PathBuf {
     root.join(&item.spec.name).join(item.spec.version.as_str())
 }
 
+fn source_identity(item: &SyncItem) -> String {
+    item.spec
+        .backend
+        .as_ref()
+        .map(|backend| format!("backend:{backend}"))
+        .unwrap_or_else(|| "backend:auto".to_string())
+}
+
+fn desired_state_checksum(item: &SyncItem, source: &str) -> String {
+    let backend = item
+        .spec
+        .backend
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "auto".to_string());
+    let identity = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n",
+        item.kind,
+        item.spec.name,
+        current_platform(),
+        item.spec.version,
+        backend,
+        source
+    );
+    Hashing::sha256(identity.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::specs::item::ItemKind;
@@ -72,9 +107,22 @@ mod tests {
         assert!(output.contains("name = \"rust\""));
         assert!(output.contains(&format!("platform = \"{}\"", current_platform())));
         assert!(output.contains("backend = \"rustup\""));
+        assert!(output.contains("source = \"backend:rustup\""));
+        assert!(output.contains("checksum = \""));
         assert!(output.contains("outputs = ["));
         assert!(output.contains("linked_executables = []"));
         assert!(output.contains("kind = \"package\""));
+    }
+
+    #[test]
+    fn checksum_changes_when_backend_changes() {
+        let rustup = item(ItemKind::Tool, "rust@stable@rustup");
+        let mise = item(ItemKind::Tool, "rust@stable@mise");
+
+        assert_ne!(
+            desired_state_checksum(&rustup, &source_identity(&rustup)),
+            desired_state_checksum(&mise, &source_identity(&mise))
+        );
     }
 
     fn item(kind: ItemKind, spec: &str) -> SyncItem {
