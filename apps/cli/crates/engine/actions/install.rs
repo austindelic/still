@@ -106,6 +106,9 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     if item.kind == ItemKind::App {
         return install_app(item).await;
     }
+    if item.kind == ItemKind::Package {
+        return install_package(item).await;
+    }
 
     let tool = ToolSpec {
         name: item.spec.name.clone(),
@@ -147,6 +150,130 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     })
 }
 
+async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
+    let command = package_install_command(item)?;
+    let output = Command::new(&command.program)
+        .args(&command.args)
+        .output()
+        .with_context(|| format!("failed to run package backend {}", command.backend))?;
+    if !output.status.success() {
+        return Err(EngineError::Conflict {
+            message: format!(
+                "package backend {} failed: {}",
+                command.backend,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        }
+        .into());
+    }
+
+    let install_path = System::root_dir()
+        .join("packages")
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str());
+    write_install_marker(&install_path, item, &command.backend).await?;
+
+    Ok(InstallResult {
+        tool_name: item.spec.name.clone(),
+        version: item.spec.version.to_string(),
+        install_path,
+        binary_path: None,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackageInstallCommand {
+    backend: String,
+    program: String,
+    args: Vec<String>,
+}
+
+fn package_install_command(item: &InstallItemRequest) -> Result<PackageInstallCommand> {
+    let backend = item
+        .spec
+        .backend
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(default_package_backend);
+    package_install_command_for_backend(&item.spec.name, &backend)
+}
+
+fn package_install_command_for_backend(name: &str, backend: &str) -> Result<PackageInstallCommand> {
+    let normalized = normalize_auto_backend(backend, default_package_backend);
+    #[cfg(target_os = "macos")]
+    {
+        match normalized.as_str() {
+            "homebrew" | "brew" => Ok(PackageInstallCommand {
+                backend: "homebrew".to_string(),
+                program: "brew".to_string(),
+                args: vec!["install".to_string(), name.to_string()],
+            }),
+            _ => unsupported_package_backend(&normalized),
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        match normalized.as_str() {
+            "apt" | "apt-get" => Ok(PackageInstallCommand {
+                backend: "apt".to_string(),
+                program: "apt-get".to_string(),
+                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+            }),
+            "dnf" => Ok(PackageInstallCommand {
+                backend: "dnf".to_string(),
+                program: "dnf".to_string(),
+                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+            }),
+            "pacman" => Ok(PackageInstallCommand {
+                backend: "pacman".to_string(),
+                program: "pacman".to_string(),
+                args: vec![
+                    "-S".to_string(),
+                    "--noconfirm".to_string(),
+                    name.to_string(),
+                ],
+            }),
+            "nix" => Ok(PackageInstallCommand {
+                backend: "nix".to_string(),
+                program: "nix".to_string(),
+                args: vec![
+                    "profile".to_string(),
+                    "install".to_string(),
+                    format!("nixpkgs#{name}"),
+                ],
+            }),
+            _ => unsupported_package_backend(&normalized),
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        match normalized.as_str() {
+            "winget" => Ok(PackageInstallCommand {
+                backend: "winget".to_string(),
+                program: "winget".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    "--id".to_string(),
+                    name.to_string(),
+                    "--accept-package-agreements".to_string(),
+                    "--accept-source-agreements".to_string(),
+                ],
+            }),
+            "chocolatey" | "choco" => Ok(PackageInstallCommand {
+                backend: "chocolatey".to_string(),
+                program: "choco".to_string(),
+                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+            }),
+            "scoop" => Ok(PackageInstallCommand {
+                backend: "scoop".to_string(),
+                program: "scoop".to_string(),
+                args: vec!["install".to_string(), name.to_string()],
+            }),
+            _ => unsupported_package_backend(&normalized),
+        }
+    }
+}
+
 async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
     let command = app_install_command(item)?;
     let output = Command::new(&command.program)
@@ -167,15 +294,7 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
     let install_path = System::apps_dir()
         .join(&item.spec.name)
         .join(item.spec.version.as_str());
-    tokio::fs::create_dir_all(&install_path).await?;
-    tokio::fs::write(
-        install_path.join("install.toml"),
-        format!(
-            "name = \"{}\"\nversion = \"{}\"\nbackend = \"{}\"\n",
-            item.spec.name, item.spec.version, command.backend
-        ),
-    )
-    .await?;
+    write_install_marker(&install_path, item, &command.backend).await?;
 
     Ok(InstallResult {
         tool_name: item.spec.name.clone(),
@@ -203,10 +322,10 @@ fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
 }
 
 fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInstallCommand> {
-    let normalized = backend.trim();
+    let normalized = normalize_auto_backend(backend, default_app_backend);
     #[cfg(target_os = "macos")]
     {
-        match normalized {
+        match normalized.as_str() {
             "homebrew-cask" | "brew-cask" | "cask" => Ok(AppInstallCommand {
                 backend: "homebrew-cask".to_string(),
                 program: "brew".to_string(),
@@ -216,12 +335,12 @@ fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInsta
                     name.to_string(),
                 ],
             }),
-            _ => unsupported_app_backend(normalized),
+            _ => unsupported_app_backend(&normalized),
         }
     }
     #[cfg(target_os = "linux")]
     {
-        match normalized {
+        match normalized.as_str() {
             "flatpak" => Ok(AppInstallCommand {
                 backend: "flatpak".to_string(),
                 program: "flatpak".to_string(),
@@ -237,12 +356,12 @@ fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInsta
                 program: "snap".to_string(),
                 args: vec!["install".to_string(), name.to_string()],
             }),
-            _ => unsupported_app_backend(normalized),
+            _ => unsupported_app_backend(&normalized),
         }
     }
     #[cfg(target_os = "windows")]
     {
-        match normalized {
+        match normalized.as_str() {
             "winget" => Ok(AppInstallCommand {
                 backend: "winget".to_string(),
                 program: "winget".to_string(),
@@ -259,8 +378,17 @@ fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInsta
                 program: "choco".to_string(),
                 args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
             }),
-            _ => unsupported_app_backend(normalized),
+            _ => unsupported_app_backend(&normalized),
         }
+    }
+}
+
+fn normalize_auto_backend(backend: &str, default_backend: impl FnOnce() -> String) -> String {
+    let trimmed = backend.trim();
+    if trimmed.is_empty() || trimmed == "auto" {
+        default_backend()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -285,6 +413,46 @@ fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
         platform: std::env::consts::OS.to_string(),
     }
     .into())
+}
+
+fn default_package_backend() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "homebrew".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "apt".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "winget".to_string()
+    }
+}
+
+fn unsupported_package_backend(backend: &str) -> Result<PackageInstallCommand> {
+    Err(EngineError::UnsupportedPlatform {
+        feature: format!("package backend {backend}"),
+        platform: std::env::consts::OS.to_string(),
+    }
+    .into())
+}
+
+async fn write_install_marker(
+    install_path: &Path,
+    item: &InstallItemRequest,
+    backend: &str,
+) -> Result<()> {
+    tokio::fs::create_dir_all(install_path).await?;
+    tokio::fs::write(
+        install_path.join("install.toml"),
+        format!(
+            "kind = \"{}\"\nname = \"{}\"\nversion = \"{}\"\nbackend = \"{}\"\n",
+            item.kind, item.spec.name, item.spec.version, backend
+        ),
+    )
+    .await?;
+    Ok(())
 }
 
 /* ----------------------------- small helpers ----------------------------- */
@@ -678,6 +846,23 @@ mod tests {
     }
 
     #[test]
+    fn app_install_command_treats_auto_as_platform_default_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox@latest@auto".parse::<ItemSpec>().unwrap(),
+        };
+
+        let command = app_install_command(&item).unwrap();
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(command.backend, "homebrew-cask");
+        #[cfg(target_os = "linux")]
+        assert_eq!(command.backend, "flatpak");
+        #[cfg(target_os = "windows")]
+        assert_eq!(command.backend, "winget");
+    }
+
+    #[test]
     fn app_install_command_rejects_unknown_backend() {
         let item = InstallItemRequest {
             kind: ItemKind::App,
@@ -689,5 +874,53 @@ mod tests {
         let err = app_install_command(&item).unwrap_err();
 
         assert!(err.to_string().contains("app backend unknown-backend"));
+    }
+
+    #[test]
+    fn package_install_command_uses_platform_default_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl".parse::<ItemSpec>().unwrap(),
+        };
+
+        let command = package_install_command(&item).unwrap();
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(command.program, "brew");
+        #[cfg(target_os = "linux")]
+        assert_eq!(command.program, "apt-get");
+        #[cfg(target_os = "windows")]
+        assert_eq!(command.program, "winget");
+    }
+
+    #[test]
+    fn package_install_command_treats_auto_as_platform_default_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@latest@auto".parse::<ItemSpec>().unwrap(),
+        };
+
+        let command = package_install_command(&item).unwrap();
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(command.backend, "homebrew");
+        #[cfg(target_os = "linux")]
+        assert_eq!(command.backend, "apt");
+        #[cfg(target_os = "windows")]
+        assert_eq!(command.backend, "winget");
+    }
+
+    #[test]
+    fn package_install_command_rejects_unknown_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@latest@unknown-backend"
+                .parse::<ItemSpec>()
+                .unwrap(),
+        };
+
+        let err = package_install_command(&item).unwrap_err();
+
+        assert!(err.to_string().contains("package backend unknown-backend"));
     }
 }
