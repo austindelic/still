@@ -46,6 +46,14 @@ where
             Ok(result) => {
                 output.info(&format!("Config: {}", result.path.display()));
                 output.info(&format!("Lockfile: {}", result.lockfile_path.display()));
+                if result.drift.is_empty() {
+                    output.info("Drift: none");
+                } else {
+                    output.info("Drift:");
+                    for drift in result.drift {
+                        output.info(&format!("  {}", sync_drift_label(drift)));
+                    }
+                }
                 output.info("Sync plan:");
                 if result.items.is_empty() {
                     output.info("  (nothing to sync)");
@@ -303,6 +311,13 @@ fn service_status_label(status: engine::actions::services::ServiceStatus) -> &'s
     }
 }
 
+fn sync_drift_label(drift: engine::actions::sync::SyncDrift) -> &'static str {
+    match drift {
+        engine::actions::sync::SyncDrift::LockfileMissing => "lockfile missing",
+        engine::actions::sync::SyncDrift::LockfileOutdated => "lockfile outdated",
+    }
+}
+
 fn write_child_output<O: Output>(output: &mut O, content: &str, stderr: bool) {
     for line in content.lines() {
         if stderr {
@@ -394,7 +409,7 @@ mod tests {
         list::{ListItem, ListResult, ListSection},
         run::RunResult,
         services::{ServiceReport, ServiceStatus, ServicesOperation, ServicesResult},
-        sync::{SyncItem, SyncResult},
+        sync::{SyncDrift, SyncItem, SyncResult},
         task::{TaskExecution, TaskResult, TaskSummary},
         trust::TrustResult,
         uninstall::UninstallResult,
@@ -1471,6 +1486,7 @@ doctor failed: home directory missing
             sync_result: Some(Ok(SyncResult {
                 path: PathBuf::from("/repo/still.toml"),
                 lockfile_path: PathBuf::from("/repo/still.lock.toml"),
+                drift: vec![SyncDrift::LockfileOutdated],
                 items: vec![
                     sync_item(ItemKind::Tool, "rust@stable@rustup"),
                     sync_item(ItemKind::Package, "openssl"),
@@ -1495,6 +1511,8 @@ doctor failed: home directory missing
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Lockfile: /repo/still.lock.toml
+Drift:
+  lockfile outdated
 Sync plan:
   tool rust@stable@rustup
   package openssl@latest
@@ -1526,6 +1544,7 @@ Sync plan:
             sync_result: Some(Ok(SyncResult {
                 path: PathBuf::from("/repo/still.toml"),
                 lockfile_path: PathBuf::from("/repo/still.lock.toml"),
+                drift: Vec::new(),
                 items: Vec::new(),
             })),
             services_result: None,
@@ -1546,6 +1565,7 @@ Sync plan:
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Lockfile: /repo/still.lock.toml
+Drift: none
 Sync plan:
   (nothing to sync)
 "###);

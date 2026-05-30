@@ -23,6 +23,7 @@ pub struct SyncResult {
     pub path: PathBuf,
     pub lockfile_path: PathBuf,
     pub items: Vec<SyncItem>,
+    pub drift: Vec<SyncDrift>,
 }
 
 /// One desired item that sync should reconcile.
@@ -30,6 +31,13 @@ pub struct SyncResult {
 pub struct SyncItem {
     pub kind: ItemKind,
     pub spec: ItemSpec,
+}
+
+/// Drift detected before writing the new lockfile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncDrift {
+    LockfileMissing,
+    LockfileOutdated,
 }
 
 /// Reads config, writes a lockfile, and returns desired install state.
@@ -50,7 +58,9 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
     let config = parse_still_toml(&content)?;
     let items = sync_items(config)?;
     let lockfile_path = lockfile_path(&resolved.path);
-    tokio::fs::write(&lockfile_path, render_lockfile(&items))
+    let rendered_lockfile = render_lockfile(&items);
+    let drift = lockfile_drift(&lockfile_path, &rendered_lockfile).await?;
+    tokio::fs::write(&lockfile_path, rendered_lockfile)
         .await
         .with_context(|| format!("failed to write {}", lockfile_path.display()))?;
 
@@ -58,7 +68,19 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         path: resolved.path,
         lockfile_path,
         items,
+        drift,
     })
+}
+
+async fn lockfile_drift(path: &std::path::Path, desired: &str) -> Result<Vec<SyncDrift>> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(existing) if existing == desired => Ok(Vec::new()),
+        Ok(_) => Ok(vec![SyncDrift::LockfileOutdated]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Ok(vec![SyncDrift::LockfileMissing])
+        }
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
 }
 
 fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
@@ -173,6 +195,7 @@ mod tests {
 
         assert_eq!(result.path, temp.path().join("still.toml"));
         assert_eq!(result.lockfile_path, temp.path().join("still.lock.toml"));
+        assert_eq!(result.drift, [SyncDrift::LockfileMissing]);
         assert!(temp.path().join("still.lock.toml").is_file());
         assert!(
             result
@@ -222,6 +245,7 @@ mod tests {
         .unwrap();
 
         assert!(result.items.is_empty());
+        assert_eq!(result.drift, [SyncDrift::LockfileMissing]);
     }
 
     #[tokio::test]
@@ -243,5 +267,50 @@ mod tests {
         let lockfile = fs::read_to_string(result.lockfile_path).unwrap();
         assert!(lockfile.contains("name = \"rust\""));
         assert!(lockfile.contains("version = \"stable\""));
+    }
+
+    #[tokio::test]
+    async fn sync_reports_no_lockfile_drift_after_repeated_run() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nrust = \"stable\"\n",
+        )
+        .unwrap();
+
+        plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.drift.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_reports_outdated_lockfile_drift() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nrust = \"stable\"\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("still.lock.toml"), "old\n").unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.drift, [SyncDrift::LockfileOutdated]);
     }
 }
