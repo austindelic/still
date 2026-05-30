@@ -132,6 +132,9 @@ where
                     result.name,
                     result.path.display()
                 ));
+                for path in result.removed_paths {
+                    output.info(&format!("Removed artifact {}", path.display()));
+                }
                 0
             }
             Err(e) => {
@@ -1807,6 +1810,7 @@ Marker: /repo/.still/trust.toml
                 path: PathBuf::from("/repo/still.toml"),
                 kind: ItemKind::Package,
                 name: "openssl".to_string(),
+                removed_paths: vec![PathBuf::from("/opt/still/packages/openssl")],
             })),
             uninstall_names: Vec::new(),
         };
@@ -1824,6 +1828,7 @@ Marker: /repo/.still/trust.toml
         assert_eq!(runtime.uninstall_names, ["openssl"]);
         insta::assert_snapshot!(output.stdout, @r###"
 ✓ Removed package openssl from /repo/still.toml
+Removed artifact /opt/still/packages/openssl
 "###);
         assert_eq!(output.stderr, "");
     }

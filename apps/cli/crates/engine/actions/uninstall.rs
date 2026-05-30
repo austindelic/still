@@ -9,7 +9,8 @@ use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::remove_item;
 use crate::error::EngineError;
 use crate::specs::item::ItemKind;
-use crate::system::{Linux, MacOS, Windows};
+use crate::system::{Linux, MacOS, System, Windows};
+use crate::utils::paths::PathOps;
 
 /// Platform-specific uninstall operations.
 pub trait UninstallOps {}
@@ -33,6 +34,7 @@ pub struct UninstallResult {
     pub path: PathBuf,
     pub kind: ItemKind,
     pub name: String,
+    pub removed_paths: Vec<PathBuf>,
 }
 
 /// Removes an item from `still.toml`.
@@ -62,12 +64,49 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
         .await
         .with_context(|| format!("failed to write {}", resolved.path.display()))?;
     refresh_lockfile(&resolved.path).await?;
+    let removed_paths = remove_installed_artifacts(kind, &request.name).await?;
 
     Ok(UninstallResult {
         path: resolved.path,
         kind,
         name: request.name,
+        removed_paths,
     })
+}
+
+async fn remove_installed_artifacts(kind: ItemKind, name: &str) -> Result<Vec<PathBuf>> {
+    let mut removed = Vec::new();
+    for path in artifact_paths(kind, name) {
+        if tokio::fs::symlink_metadata(&path).await.is_err() {
+            continue;
+        }
+        remove_path(&path).await?;
+        removed.push(path);
+    }
+    Ok(removed)
+}
+
+fn artifact_paths(kind: ItemKind, name: &str) -> Vec<PathBuf> {
+    let install_root = match kind {
+        ItemKind::Tool => System::tool_dir(),
+        ItemKind::Package => System::root_dir().join("packages"),
+        ItemKind::App => System::apps_dir(),
+    };
+    let mut paths = vec![install_root.join(name)];
+    if matches!(kind, ItemKind::Tool | ItemKind::Package) {
+        paths.push(System::bin_dir().join(name));
+    }
+    paths
+}
+
+async fn remove_path(path: &PathBuf) -> Result<()> {
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    if metadata.is_dir() {
+        tokio::fs::remove_dir_all(path).await?;
+    } else {
+        tokio::fs::remove_file(path).await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -118,5 +157,16 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("not configured"));
+    }
+
+    #[test]
+    fn artifact_paths_stay_under_still_roots() {
+        let paths = artifact_paths(ItemKind::Package, "openssl");
+
+        assert!(
+            paths
+                .iter()
+                .any(|path| { path.ends_with(std::path::Path::new("packages").join("openssl")) })
+        );
     }
 }
