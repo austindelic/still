@@ -3,7 +3,9 @@
 use crate::cli::args::InstallArgs;
 use crate::cli::output::Output;
 use crate::cli::runtime::CliRuntime;
-use engine::actions::install::InstallRequest;
+use engine::actions::install::{InstallItemRequest, InstallRequest};
+use engine::registries::specs::tool::ToolSpec;
+use engine::specs::item::{ItemKind, ItemSpec};
 
 /// Runs the install command through the configured runtime.
 ///
@@ -17,7 +19,9 @@ where
     R: CliRuntime,
     O: Output,
 {
-    let install_request = InstallRequest { tool: args.tool };
+    let install_request = InstallRequest {
+        items: install_items(args),
+    };
 
     match runtime.install(install_request) {
         Ok(res) => {
@@ -45,6 +49,25 @@ where
     }
 }
 
+fn install_items(args: InstallArgs) -> Vec<InstallItemRequest> {
+    let mut items = Vec::new();
+    push_items(&mut items, ItemKind::Tool, args.tools);
+    push_items(&mut items, ItemKind::Package, args.packages);
+    push_items(&mut items, ItemKind::App, args.apps);
+    items
+}
+
+fn push_items(items: &mut Vec<InstallItemRequest>, kind: ItemKind, specs: Vec<ToolSpec>) {
+    items.extend(specs.into_iter().map(|spec| InstallItemRequest {
+        kind,
+        spec: ItemSpec {
+            name: spec.name,
+            version: spec.version.parse().expect("validated ToolSpec version"),
+            backend: spec.backend,
+        },
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -58,13 +81,20 @@ mod tests {
     #[derive(Default)]
     struct FakeRuntime {
         install_result: Option<anyhow::Result<InstallResult>>,
-        install_requests: Vec<(String, String)>,
+        install_requests: Vec<(ItemKind, String, String, Option<String>)>,
     }
 
     impl CliRuntime for FakeRuntime {
         fn install(&mut self, request: InstallRequest) -> anyhow::Result<InstallResult> {
             self.install_requests
-                .push((request.tool.name, request.tool.version));
+                .extend(request.items.into_iter().map(|item| {
+                    (
+                        item.kind,
+                        item.spec.name,
+                        item.spec.version.to_string(),
+                        item.spec.backend.map(|backend| backend.to_string()),
+                    )
+                }));
             self.install_result
                 .take()
                 .expect("test runtime install result was not configured")
@@ -90,7 +120,12 @@ mod tests {
         assert_eq!(code, 0);
         assert_eq!(
             runtime.install_requests,
-            vec![("ripgrep".to_string(), "latest".to_string())]
+            vec![(
+                ItemKind::Tool,
+                "ripgrep".to_string(),
+                "latest".to_string(),
+                None
+            )]
         );
         insta::assert_snapshot!(output.stdout, @r###"
 Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
@@ -144,7 +179,9 @@ install failed: formula.json not found
 
     fn install_args(tool: &str) -> InstallArgs {
         InstallArgs {
-            tool: tool.parse().expect("test tool spec should parse"),
+            tools: vec![tool.parse().expect("test tool spec should parse")],
+            packages: Vec::new(),
+            apps: Vec::new(),
         }
     }
 }

@@ -2,6 +2,7 @@
 
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
+use crate::specs::item::{ItemKind, ItemSpec};
 use crate::system::{MacOS, System};
 use crate::utils::archive::ArchiveExtractor;
 use crate::utils::hashing::Hashing;
@@ -37,14 +38,23 @@ pub trait InstallOps {
     ) -> Result<Option<PathBuf>>;
 }
 
-/// Request to install one parsed tool/package spec.
+/// One item requested for install.
 ///
-/// Build this at the boundary where user input or config has already been parsed
-/// into a `ToolSpec`. The install action owns resolution, download, verification,
-/// extraction, and linking from this point forward.
+/// Build this after CLI/config parsing has classified the item as a tool,
+/// package, or app. Resolution may still choose the final backend.
+pub struct InstallItemRequest {
+    pub kind: ItemKind,
+    pub spec: ItemSpec,
+}
+
+/// Request to install parsed tool/package/app specs.
+///
+/// Build this at the boundary where user input or config has already been
+/// validated. The install action owns resolution, download, verification,
+/// extraction, linking, and later config writes from this point forward.
 pub struct InstallRequest {
-    /// Parsed item requested by the caller.
-    pub tool: ToolSpec,
+    /// Parsed and classified items requested by the caller.
+    pub items: Vec<InstallItemRequest>,
 }
 
 /// Result of a completed install operation.
@@ -74,14 +84,30 @@ pub struct InstallResult {
 /// # Side Effects
 /// Downloads an archive, replaces the install directory, and may create a symlink.
 pub async fn run(request: InstallRequest) -> Result<InstallResult> {
+    let item = match request.items.as_slice() {
+        [item] => item,
+        [] => anyhow::bail!("install request must include at least one item"),
+        _ => anyhow::bail!("multi-item install execution is not implemented yet"),
+    };
+
+    if item.kind == ItemKind::App {
+        anyhow::bail!("app install execution is not implemented yet");
+    }
+
+    let tool = ToolSpec {
+        name: item.spec.name.clone(),
+        version: item.spec.version.to_string(),
+        backend: item.spec.backend.clone(),
+    };
+
     let formula_path = formula_json_path();
     ensure_formula_json_exists(&formula_path)?;
 
     let formulas = load_formula_json_array(&formula_path).await?;
-    let formula = find_matching_formula(&formulas, &request.tool.name)
-        .with_context(|| format!("Formula '{}' not found in formula.json", request.tool.name))?;
+    let formula = find_matching_formula(&formulas, &tool.name)
+        .with_context(|| format!("Formula '{}' not found in formula.json", tool.name))?;
 
-    warn_if_version_mismatch(&request.tool, &formula);
+    warn_if_version_mismatch(&tool, &formula);
 
     let bottle_info = build_bottle_info(&formula)?;
     println!(

@@ -60,15 +60,22 @@ pub enum Command {
     PostInstall,
 }
 
-/// Arguments for installing one requested tool/package/app spec.
+/// Arguments for installing requested tool/package/app specs.
 ///
-/// `tool` is parsed before command dispatch, so invalid names or version syntax
-/// fail as Clap input errors instead of reaching the engine.
+/// Group flags classify following values until another flag appears. Each value
+/// is parsed before command dispatch, so invalid names, versions, or backend
+/// syntax fail as Clap input errors instead of reaching the engine.
 #[derive(clap::Args, Debug, Clone)]
 pub struct InstallArgs {
-    /// Requested item in `name`, `name@latest`, or `name@version` form.
-    #[arg(value_name = "TOOL@VERSION")]
-    pub tool: ToolSpec,
+    /// Requested tools in `name`, `name@version`, or `name@version@backend` form.
+    #[arg(short = 't', long = "tool", value_name = "TOOL", num_args = 1..)]
+    pub tools: Vec<ToolSpec>,
+    /// Requested packages in `name`, `name@version`, or `name@version@backend` form.
+    #[arg(short = 'p', long = "package", value_name = "PACKAGE", num_args = 1..)]
+    pub packages: Vec<ToolSpec>,
+    /// Requested apps in `name`, `name@version`, or `name@version@backend` form.
+    #[arg(short = 'a', long = "app", value_name = "APP", num_args = 1..)]
+    pub apps: Vec<ToolSpec>,
 }
 
 /// Arguments for uninstalling one requested tool/package/app spec.
@@ -137,15 +144,77 @@ mod tests {
 
     #[test]
     fn invalid_install_tool_spec_fails_during_parse() {
-        let err = match Cli::try_parse_from(["still", "install", "bad/tool"]) {
+        let err = match Cli::try_parse_from(["still", "install", "--tool", "bad/tool"]) {
             Ok(_) => panic!("invalid tool spec should fail to parse"),
             Err(err) => err,
         };
 
         insta::assert_snapshot!(err.to_string(), @r###"
-error: invalid value 'bad/tool' for '<TOOL@VERSION>': Invalid tool spec: item name contains invalid character '/'. Examples: bun@1.3.5, bun@latest, bun@latest@aqua, rust@stable@rustup, bun
+error: invalid value 'bad/tool' for '--tool <TOOL>...': Invalid tool spec: item name contains invalid character '/'. Examples: bun@1.3.5, bun@latest, bun@latest@aqua, rust@stable@rustup, bun
 
 For more information, try '--help'.
 "###);
+    }
+
+    #[test]
+    fn install_accepts_grouped_item_flags() {
+        let cli = Cli::try_parse_from([
+            "still",
+            "install",
+            "--tool",
+            "jq",
+            "ripgrep",
+            "fd",
+            "--package",
+            "openssl",
+            "llvm",
+            "--app",
+            "zed",
+            "firefox",
+        ])
+        .expect("grouped install args should parse");
+
+        let Some(Command::Install(args)) = cli.command else {
+            panic!("expected install command");
+        };
+
+        assert_eq!(names(&args.tools), ["jq", "ripgrep", "fd"]);
+        assert_eq!(names(&args.packages), ["openssl", "llvm"]);
+        assert_eq!(names(&args.apps), ["zed", "firefox"]);
+    }
+
+    #[test]
+    fn install_accepts_short_group_flags_and_backend_specs() {
+        let cli = Cli::try_parse_from([
+            "still",
+            "install",
+            "-t",
+            "rust@stable@rustup",
+            "-p",
+            "ripgrep@1.0.0@homebrew",
+            "-a",
+            "firefox@latest@homebrew-cask",
+        ])
+        .expect("short grouped install args should parse");
+
+        let Some(Command::Install(args)) = cli.command else {
+            panic!("expected install command");
+        };
+
+        assert_eq!(args.tools[0].name, "rust");
+        assert_eq!(args.tools[0].version, "stable");
+        assert_eq!(args.tools[0].backend.as_ref().unwrap().as_str(), "rustup");
+        assert_eq!(
+            args.packages[0].backend.as_ref().unwrap().as_str(),
+            "homebrew"
+        );
+        assert_eq!(
+            args.apps[0].backend.as_ref().unwrap().as_str(),
+            "homebrew-cask"
+        );
+    }
+
+    fn names(items: &[ToolSpec]) -> Vec<&str> {
+        items.iter().map(|item| item.name.as_str()).collect()
     }
 }
