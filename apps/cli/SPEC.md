@@ -57,10 +57,7 @@ still task lint
 - If no project config exists, commands that write desired state use the global config unless the command explicitly requires project scope.
 - When project and global config both define an item, the project config is the active source; `list --all` still shows global-only entries.
 - No floating installs are allowed. Every installed tool, package, or app must be attached to either a project config or the global config.
-
-Open decisions:
-
-- Whether config writes should support a mode that creates a local `still.toml` instead of using global fallback when no project config exists.
+- Creating a local project config is explicit through `still init`; install-style add commands do not silently create `still.toml`.
 
 ## Platform Model
 
