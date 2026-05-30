@@ -9,6 +9,8 @@ use crate::lockfile::{lockfile_path, render_lockfile};
 use crate::platform::{PlatformFilter, PlatformId};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
+use crate::system::System;
+use crate::utils::paths::PathOps;
 
 /// Request to synchronize installed state with config.
 #[derive(Debug, Clone)]
@@ -24,6 +26,7 @@ pub struct SyncResult {
     pub lockfile_path: PathBuf,
     pub items: Vec<SyncItem>,
     pub drift: Vec<SyncDrift>,
+    pub missing: Vec<SyncItem>,
 }
 
 /// One desired item that sync should reconcile.
@@ -60,6 +63,7 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
     let lockfile_path = lockfile_path(&resolved.path);
     let rendered_lockfile = render_lockfile(&items);
     let drift = lockfile_drift(&lockfile_path, &rendered_lockfile).await?;
+    let missing = missing_items(&items).await?;
     tokio::fs::write(&lockfile_path, rendered_lockfile)
         .await
         .with_context(|| format!("failed to write {}", lockfile_path.display()))?;
@@ -69,6 +73,7 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         lockfile_path,
         items,
         drift,
+        missing,
     })
 }
 
@@ -81,6 +86,24 @@ async fn lockfile_drift(path: &std::path::Path, desired: &str) -> Result<Vec<Syn
         }
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
+}
+
+async fn missing_items(items: &[SyncItem]) -> Result<Vec<SyncItem>> {
+    let mut missing = Vec::new();
+    for item in items {
+        if tokio::fs::metadata(installed_path(item)).await.is_err() {
+            missing.push(item.clone());
+        }
+    }
+    Ok(missing)
+}
+
+fn installed_path(item: &SyncItem) -> PathBuf {
+    let root = match item.kind {
+        ItemKind::Tool | ItemKind::Package => System::tool_dir(),
+        ItemKind::App => System::apps_dir(),
+    };
+    root.join(&item.spec.name).join(item.spec.version.as_str())
 }
 
 fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
@@ -267,6 +290,26 @@ mod tests {
         let lockfile = fs::read_to_string(result.lockfile_path).unwrap();
         assert!(lockfile.contains("name = \"rust\""));
         assert!(lockfile.contains("version = \"stable\""));
+    }
+
+    #[tokio::test]
+    async fn sync_reports_missing_desired_items() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nstill-test-definitely-missing = \"0.0.1\"\n",
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.missing.len(), 1);
+        assert_eq!(result.missing[0].spec.name, "still-test-definitely-missing");
     }
 
     #[tokio::test]

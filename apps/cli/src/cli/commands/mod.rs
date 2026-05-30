@@ -54,6 +54,17 @@ where
                         output.info(&format!("  {}", sync_drift_label(drift)));
                     }
                 }
+                if result.missing.is_empty() {
+                    output.info("Missing: none");
+                } else {
+                    output.info("Missing:");
+                    for item in &result.missing {
+                        output.info(&format!(
+                            "  {} {}@{}",
+                            item.kind, item.spec.name, item.spec.version
+                        ));
+                    }
+                }
                 output.info("Sync plan:");
                 if result.items.is_empty() {
                     output.info("  (nothing to sync)");
@@ -1492,6 +1503,7 @@ doctor failed: home directory missing
                     sync_item(ItemKind::Package, "openssl"),
                     sync_item(ItemKind::App, "firefox@latest@homebrew-cask"),
                 ],
+                missing: vec![sync_item(ItemKind::Package, "openssl")],
             })),
             services_result: None,
             services_requests: Vec::new(),
@@ -1513,6 +1525,8 @@ Config: /repo/still.toml
 Lockfile: /repo/still.lock.toml
 Drift:
   lockfile outdated
+Missing:
+  package openssl@latest
 Sync plan:
   tool rust@stable@rustup
   package openssl@latest
@@ -1546,6 +1560,7 @@ Sync plan:
                 lockfile_path: PathBuf::from("/repo/still.lock.toml"),
                 drift: Vec::new(),
                 items: Vec::new(),
+                missing: Vec::new(),
             })),
             services_result: None,
             services_requests: Vec::new(),
@@ -1566,6 +1581,7 @@ Sync plan:
 Config: /repo/still.toml
 Lockfile: /repo/still.lock.toml
 Drift: none
+Missing: none
 Sync plan:
   (nothing to sync)
 "###);
