@@ -38,6 +38,24 @@ pub enum NormalizedSkillSource {
     },
 }
 
+/// Builds `.agents/skills/.gitignore` content for Still-managed skill folders.
+pub fn managed_skills_gitignore(skills: &[NormalizedSkill]) -> EngineResult<String> {
+    let mut names = skills
+        .iter()
+        .map(|skill| validated_skill_dir_name(&skill.name))
+        .collect::<EngineResult<Vec<_>>>()?;
+    names.sort();
+    names.dedup();
+
+    let mut output = String::from("# still-managed skills\n");
+    for name in names {
+        output.push('/');
+        output.push_str(&name);
+        output.push_str("/\n");
+    }
+    Ok(output)
+}
+
 /// Converts parsed `[agents]` config into command/planner friendly data.
 pub fn normalize_agents(config: AgentsConfig) -> EngineResult<NormalizedAgents> {
     let skills = match config.skills {
@@ -160,6 +178,22 @@ fn parse_specs(label: &str, values: Vec<String>) -> EngineResult<Vec<ItemSpec>> 
         .collect()
 }
 
+fn validated_skill_dir_name(name: &str) -> EngineResult<String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('*')
+    {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("invalid managed skill directory name \"{name}\""),
+        });
+    }
+
+    Ok(name.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -256,5 +290,45 @@ mod tests {
         let err = normalize_agents(config).unwrap_err();
 
         assert!(err.to_string().contains("cannot set both source and url"));
+    }
+
+    #[test]
+    fn generates_anchored_gitignore_for_managed_skills() {
+        let skills = vec![
+            normalized_skill("repo-auditor"),
+            normalized_skill("rust-review"),
+            normalized_skill("repo-auditor"),
+        ];
+
+        let output = managed_skills_gitignore(&skills).unwrap();
+
+        assert_eq!(
+            output,
+            "# still-managed skills\n/repo-auditor/\n/rust-review/\n"
+        );
+        assert!(!output.contains('*'));
+    }
+
+    #[test]
+    fn rejects_unsafe_managed_skill_directory_names() {
+        let err = managed_skills_gitignore(&[normalized_skill("../custom")]).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("invalid managed skill directory name")
+        );
+    }
+
+    fn normalized_skill(name: &str) -> NormalizedSkill {
+        NormalizedSkill {
+            name: name.to_string(),
+            source: NormalizedSkillSource::Official {
+                name: name.to_string(),
+            },
+            auto: false,
+            tools: Vec::new(),
+            packages: Vec::new(),
+            apps: Vec::new(),
+        }
     }
 }
