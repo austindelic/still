@@ -1,21 +1,27 @@
+//! Archive extraction utilities used by install actions.
+
 use flate2::read::GzDecoder;
-use serde_json::ser::Formatter;
 use std::io::Read;
 use std::path::Path;
 use tar::Archive;
 use tokio::fs;
 
-/// Archive extraction utilities
+/// Extracts compressed archives into Still-managed install directories.
+///
+/// The current implementation is tuned for Homebrew bottle archives and strips a
+/// single top-level directory when present so files land directly in the target
+/// install directory.
 pub struct ArchiveExtractor;
 
 impl ArchiveExtractor {
-    /// Extract a gzip-compressed tar archive, handling top-level directory stripping
-    /// This is common in Homebrew bottles which have a structure like:
-    ///   tool/version/
-    ///     bin/
-    ///     share/
-    ///   ...
-    /// We want to extract directly to the install path without the top-level directory
+    /// Extracts gzip-compressed tar data into an install directory.
+    ///
+    /// `data` is the full `.tar.gz` payload already loaded into memory.
+    /// `install_path` is created if needed and receives the archive contents.
+    /// When the archive contains a single top-level directory, that directory is
+    /// stripped so nested `bin`, `share`, and similar paths move directly under
+    /// `install_path`. Returns filesystem, decompression, or tar errors when any
+    /// extraction step fails.
     pub async fn extract_tar_gz(
         data: &[u8],
         install_path: &Path,

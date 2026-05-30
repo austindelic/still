@@ -1,10 +1,15 @@
+//! Parser for user-facing `name@version` tool specifications.
+
 use std::{fmt, str::FromStr};
 
 use anyhow::{Context, Result, bail};
 
+/// Parsed tool request from CLI/config input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolSpec {
+    /// Tool or package name.
     pub name: String,
+    /// Requested version, or `latest` when no version was provided.
     pub version: String,
 }
 

@@ -1,7 +1,14 @@
+//! Core Still engine APIs shared by the CLI and optional TUI.
+
 #![allow(async_fn_in_trait)]
 
+/// Install, uninstall, and other state-changing actions.
 pub mod actions;
+/// Package registry integrations and re-exports.
 pub mod registries;
+/// Typed models for external and Still-owned specs.
 pub mod specs;
+/// Platform abstraction for host-specific behavior.
 pub mod system;
+/// Filesystem, network, archive, hashing, and path utilities.
 pub mod utils;

@@ -1,3 +1,5 @@
+//! Engine install action for resolving, downloading, verifying, extracting, and linking packages.
+
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::system::{MacOS, System};
@@ -10,25 +12,67 @@ use anyhow::{Context, Result};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// Platform-specific install operations needed by the generic install flow.
+///
+/// Implementors provide the host-specific pieces of an otherwise shared install:
+/// choosing the right Homebrew bottle file and discovering the executable after
+/// extraction. Keep network, archive, and CLI formatting code out of this trait.
 pub trait InstallOps {
+    /// Selects the best bottle file for the current platform.
+    ///
+    /// `bottle` is the parsed Homebrew bottle metadata for one formula version.
+    /// Implementations return the file matching the current OS/architecture or an
+    /// error explaining why no compatible bottle exists.
     fn select_bottle_file(bottle: &BottleSpec) -> Result<BottleFileSpec>;
+
+    /// Locates an executable inside an extracted install directory.
+    ///
+    /// `install_path` is the directory that just received the extracted archive.
+    /// `formula_name` is the expected executable name and should be preferred
+    /// over unrelated files. Returns `Ok(None)` when extraction succeeded but no
+    /// executable could be identified.
     async fn find_binary_recursive(
         install_path: &Path,
         formula_name: &str,
     ) -> Result<Option<PathBuf>>;
 }
 
+/// Request to install one parsed tool/package spec.
+///
+/// Build this at the boundary where user input or config has already been parsed
+/// into a `ToolSpec`. The install action owns resolution, download, verification,
+/// extraction, and linking from this point forward.
 pub struct InstallRequest {
+    /// Parsed item requested by the caller.
     pub tool: ToolSpec,
 }
 
+/// Result of a completed install operation.
+///
+/// The result is intentionally small and user-facing: it contains the canonical
+/// installed identity, the final install directory, and the linked executable
+/// when one was found.
 pub struct InstallResult {
+    /// Canonical installed tool name.
     pub tool_name: String,
+    /// Installed version.
     pub version: String,
+    /// Directory where the item was installed.
     pub install_path: PathBuf,
+    /// Linked executable discovered during install, if any.
     pub binary_path: Option<PathBuf>,
 }
 
+/// Installs one requested item into Still-managed storage and links its executable when found.
+/// # Arguments
+/// * `request` - Parsed package name and version request.
+/// # Returns
+/// The installed package identity, install path, and discovered executable path.
+/// # Errors
+/// Fails if registry lookup, bottle selection, download, checksum verification,
+/// extraction, or linking fails.
+/// # Side Effects
+/// Downloads an archive, replaces the install directory, and may create a symlink.
 pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     let formula_path = formula_json_path();
     ensure_formula_json_exists(&formula_path)?;
@@ -268,11 +312,17 @@ async fn download_bottle(url: &str, token: &str) -> Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-/// Information about a Homebrew bottle
+/// Information about a Homebrew bottle selected during install planning.
+///
+/// This groups the formula identity and bottle metadata so helper functions do
+/// not need to pass loosely related values separately.
 #[derive(Debug, Clone)]
 pub struct BottleInfo {
+    /// Formula name that owns this bottle.
     pub formula_name: String,
+    /// Formula version represented by this bottle.
     pub version: String,
+    /// Bottle metadata including per-platform downloadable files.
     pub bottle: BottleSpec,
 }
 
