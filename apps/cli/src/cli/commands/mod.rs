@@ -253,6 +253,12 @@ where
                             output.info(&format!("  {} {}", item.kind, item.spec.name));
                         }
                     }
+                    if !result.missing_dependencies.is_empty() {
+                        output.info("Missing skill dependencies:");
+                        for item in result.missing_dependencies {
+                            output.info(&format!("  {} {}", item.kind, item.spec.name));
+                        }
+                    }
                     if let Some(path) = result.gitignore_path {
                         output.success(&format!("Updated {}", path.display()));
                     }
@@ -971,6 +977,7 @@ list failed: failed to read still.toml
                 gitignore: "# still-managed skills\n/rust-review/\n".to_string(),
                 gitignore_path: Some(PathBuf::from("/repo/.agents/skills/.gitignore")),
                 auto_added: Vec::new(),
+                missing_dependencies: Vec::new(),
             })),
             agents_operations: Vec::new(),
             run_result: None,

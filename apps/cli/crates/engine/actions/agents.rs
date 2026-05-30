@@ -45,6 +45,7 @@ pub struct AgentsResult {
     pub gitignore: String,
     pub gitignore_path: Option<PathBuf>,
     pub auto_added: Vec<InstallItemRequest>,
+    pub missing_dependencies: Vec<InstallItemRequest>,
 }
 
 /// Reads selected config, normalizes agent skills, and optionally writes ignore metadata.
@@ -66,6 +67,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
     let agents = normalize_agents(config.agents.clone().unwrap_or_default())?;
     let gitignore = managed_skills_gitignore(&agents.skills)?;
     let mut auto_added = Vec::new();
+    let mut missing_dependencies = missing_skill_dependencies(&agents.skills, &config, false);
     let gitignore_path = if request.operation == AgentsOperation::Sync {
         auto_added = auto_dependency_items(&agents.skills, &config);
         if !auto_added.is_empty() {
@@ -73,6 +75,13 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
             tokio::fs::write(&resolved.path, updated)
                 .await
                 .with_context(|| format!("failed to write {}", resolved.path.display()))?;
+            let updated_config = parse_still_toml(
+                &tokio::fs::read_to_string(&resolved.path)
+                    .await
+                    .with_context(|| format!("failed to read {}", resolved.path.display()))?,
+            )?;
+            missing_dependencies =
+                missing_skill_dependencies(&agents.skills, &updated_config, false);
         }
         let skills_dir = resolved
             .path
@@ -97,15 +106,17 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
         gitignore,
         gitignore_path,
         auto_added,
+        missing_dependencies,
     })
 }
 
-fn auto_dependency_items(
+fn missing_skill_dependencies(
     skills: &[NormalizedSkill],
     config: &StillConfig,
+    include_auto: bool,
 ) -> Vec<InstallItemRequest> {
     let mut items = Vec::new();
-    for skill in skills.iter().filter(|skill| skill.auto) {
+    for skill in skills.iter().filter(|skill| include_auto || !skill.auto) {
         extend_missing(&mut items, ItemKind::Tool, &skill.tools, |spec| {
             !config.tools.contains_key(&spec.name)
         });
@@ -117,6 +128,21 @@ fn auto_dependency_items(
         });
     }
     items
+}
+
+fn auto_dependency_items(
+    skills: &[NormalizedSkill],
+    config: &StillConfig,
+) -> Vec<InstallItemRequest> {
+    missing_skill_dependencies(
+        &skills
+            .iter()
+            .filter(|skill| skill.auto)
+            .cloned()
+            .collect::<Vec<_>>(),
+        config,
+        true,
+    )
 }
 
 fn extend_missing(
@@ -485,6 +511,40 @@ mod tests {
         assert!(config.tools.contains_key("cargo-nextest"));
         assert!(config.packages.latest.contains(&"llvm".to_string()));
         assert!(config.apps.latest.contains(&"zed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn agents_check_reports_missing_non_auto_skill_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents]
+
+            [agents.skills]
+            repo-auditor = { source = "repo-auditor", tools = ["cargo-audit"], packages = ["jq"], apps = ["zed"] }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added, []);
+        assert_eq!(result.missing_dependencies.len(), 3);
+        assert!(
+            result
+                .missing_dependencies
+                .iter()
+                .any(|item| { item.kind == ItemKind::Tool && item.spec.name == "cargo-audit" })
+        );
+        let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
+        assert!(!content.contains("cargo-audit ="));
     }
 
     #[tokio::test]
