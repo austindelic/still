@@ -85,13 +85,13 @@ Rules:
 - `ignore` excludes a platform.
 - `only` restricts an entry to one platform.
 - `names` maps a portable Still name to platform/backend-specific names.
+- `backends` maps platform names to platform-specific backend choices, with scalar `backend` as the fallback.
 - Platform-specific install paths, executable linking, app registration, service management, and shell activation belong in the engine layer.
 - Config should express intent; backends and platform adapters should translate that intent into host-specific operations.
 
 Open decisions:
 
 - Whether `platforms`, `ignore`, and `only` should be consolidated into one canonical platform filter.
-- Whether configs should support platform-specific backend selection.
 - Whether lockfiles are per-platform, multi-platform, or both.
 
 ## Config Surface
@@ -127,6 +127,7 @@ Expanded:
 [tools.rust]
 version = "stable"
 backend = "rustup"
+backends = { macos = "rustup", linux = "mise", windows = "rustup" }
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
 ```
@@ -136,6 +137,7 @@ Rules:
 - A string value is shorthand for `{ version = "<value>" }`.
 - Expanded tools must include `version`.
 - `backend` selects a provider family such as `rustup`, `npm`, `asdf`, `aqua`, or `auto`.
+- `backends` overrides `backend` for specific platforms.
 - `components` and `targets` are toolchain-specific extras, primarily for runtimes such as Rust.
 
 ### Environment
@@ -188,6 +190,7 @@ Expanded package:
 [packages.llvm]
 version = "18"
 backend = "auto"
+backends = { macos = "homebrew", linux = "apt", windows = "winget" }
 ```
 
 Platform names:
@@ -211,7 +214,8 @@ ignore = "windows"
 Rules:
 
 - `latest` is an array of package names that should track the latest available version.
-- A keyed package may specify `version`, `backend`, `names`, `platforms`, `ignore`, and `only`.
+- A keyed package may specify `version`, `backend`, `backends`, `names`, `platforms`, `ignore`, and `only`.
+- `backends` overrides `backend` for specific platforms.
 - `names` maps Still's logical package name to backend/platform-specific package names.
 - `platforms` is an allow-list.
 - `ignore` excludes one platform.
