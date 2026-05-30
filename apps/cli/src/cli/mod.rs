@@ -119,6 +119,7 @@ mod tests {
         output::BufferedOutput,
         runtime::CliRuntime,
     };
+    use engine::actions::config::CheckConfigResult;
 
     #[derive(Debug, Default)]
     struct FakeRuntime;
@@ -129,6 +130,10 @@ mod tests {
             _request: engine::actions::install::InstallRequest,
         ) -> anyhow::Result<engine::actions::install::InstallResult> {
             panic!("install should not run in these routing tests");
+        }
+
+        fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
+            panic!("config_check should not run in these routing tests");
         }
     }
 

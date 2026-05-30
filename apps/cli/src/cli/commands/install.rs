@@ -73,6 +73,7 @@ mod tests {
     use std::path::PathBuf;
 
     use anyhow::anyhow;
+    use engine::actions::config::CheckConfigResult;
     use engine::actions::install::{InstallRequest, InstallResult};
 
     use super::*;
@@ -98,6 +99,10 @@ mod tests {
             self.install_result
                 .take()
                 .expect("test runtime install result was not configured")
+        }
+
+        fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
+            panic!("config_check should not run in install tests");
         }
     }
 

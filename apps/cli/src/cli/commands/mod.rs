@@ -3,7 +3,7 @@
 /// Install command handler.
 pub mod install;
 
-use crate::cli::args::{Cli, Command};
+use crate::cli::args::{Cli, Command, ConfigCommand};
 use crate::cli::output::Output;
 use crate::cli::runtime::CliRuntime;
 use clap::CommandFactory;
@@ -57,10 +57,18 @@ where
             output.info(&format!("Agents command: {:?}", args));
             0
         }
-        Command::Config(args) => {
-            output.info(&format!("Config command: {:?}", args));
-            0
-        }
+        Command::Config(args) => match args.command {
+            ConfigCommand::Check => match runtime.config_check(args.global) {
+                Ok(result) => {
+                    output.success(&format!("Config OK: {}", result.path.display()));
+                    0
+                }
+                Err(e) => {
+                    output.error(&format!("config check failed: {e}"));
+                    1
+                }
+            },
+        },
         Command::Doctor(args) => {
             output.info(&format!("Doctor command: {:?}", args));
             0
@@ -125,4 +133,91 @@ pub fn help_text() -> std::io::Result<String> {
     command.write_help(&mut bytes)?;
     bytes.push(b'\n');
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use anyhow::anyhow;
+    use engine::actions::{
+        config::CheckConfigResult,
+        install::{InstallRequest, InstallResult},
+    };
+    use engine::specs::toml::StillConfig;
+
+    use super::*;
+    use crate::cli::args::{ConfigArgs, ConfigCommand};
+    use crate::cli::output::BufferedOutput;
+
+    struct FakeRuntime {
+        config_check_result: Option<anyhow::Result<CheckConfigResult>>,
+        config_check_globals: Vec<bool>,
+    }
+
+    impl CliRuntime for FakeRuntime {
+        fn install(&mut self, _request: InstallRequest) -> anyhow::Result<InstallResult> {
+            panic!("install should not run in config tests");
+        }
+
+        fn config_check(&mut self, global: bool) -> anyhow::Result<CheckConfigResult> {
+            self.config_check_globals.push(global);
+            self.config_check_result
+                .take()
+                .expect("test runtime config_check result was not configured")
+        }
+    }
+
+    #[test]
+    fn config_check_formats_success() {
+        let mut runtime = FakeRuntime {
+            config_check_result: Some(Ok(CheckConfigResult {
+                path: PathBuf::from("/repo/still.toml"),
+                config: StillConfig::default(),
+            })),
+            config_check_globals: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Config(ConfigArgs {
+                global: false,
+                command: ConfigCommand::Check,
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.config_check_globals, [false]);
+        insta::assert_snapshot!(output.stdout, @r###"
+✓ Config OK: /repo/still.toml
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn config_check_formats_error() {
+        let mut runtime = FakeRuntime {
+            config_check_result: Some(Err(anyhow!("failed to parse still.toml"))),
+            config_check_globals: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Config(ConfigArgs {
+                global: true,
+                command: ConfigCommand::Check,
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(runtime.config_check_globals, [true]);
+        assert_eq!(output.stdout, "");
+        insta::assert_snapshot!(output.stderr, @r###"
+config check failed: failed to parse still.toml
+"###);
+    }
 }

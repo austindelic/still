@@ -169,6 +169,9 @@ pub struct InitArgs {}
 /// Arguments for config operations.
 #[derive(clap::Args, Debug, Clone)]
 pub struct ConfigArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
     #[command(subcommand)]
     pub command: ConfigCommand,
 }
