@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::actions::install::InstallItemRequest;
+use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::add_install_items;
 use crate::error::EngineError;
@@ -77,6 +78,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
             tokio::fs::write(&resolved.path, updated)
                 .await
                 .with_context(|| format!("failed to write {}", resolved.path.display()))?;
+            refresh_lockfile(&resolved.path).await?;
             let updated_config = parse_still_toml(
                 &tokio::fs::read_to_string(&resolved.path)
                     .await
@@ -512,6 +514,11 @@ mod tests {
         assert!(config.tools.contains_key("cargo-nextest"));
         assert!(config.packages.latest.contains(&"llvm".to_string()));
         assert!(config.apps.latest.contains(&"zed".to_string()));
+
+        let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
+        assert!(lockfile.contains("name = \"cargo-nextest\""));
+        assert!(lockfile.contains("name = \"llvm\""));
+        assert!(lockfile.contains("name = \"zed\""));
     }
 
     #[tokio::test]
