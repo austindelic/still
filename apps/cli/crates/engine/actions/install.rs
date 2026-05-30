@@ -114,6 +114,9 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     if item.kind == ItemKind::Package {
         return install_package(item).await;
     }
+    if should_use_tool_command_backend(item) {
+        return install_tool_with_command(item).await;
+    }
 
     let tool = ToolSpec {
         name: item.spec.name.clone(),
@@ -166,6 +169,182 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
         outputs: vec![install_path],
         linked_executables,
     })
+}
+
+fn should_use_tool_command_backend(item: &InstallItemRequest) -> bool {
+    item.spec
+        .backend
+        .as_ref()
+        .is_some_and(|backend| !matches!(backend.as_str(), "auto" | "homebrew" | "brew"))
+}
+
+async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallResult> {
+    let command = tool_install_command(item)?;
+    let output = Command::new(&command.program)
+        .args(&command.args)
+        .output()
+        .with_context(|| format!("failed to run tool backend {}", command.backend))?;
+    if !output.status.success() {
+        return Err(EngineError::Conflict {
+            message: format!(
+                "tool backend {} failed: {}",
+                command.backend,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        }
+        .into());
+    }
+
+    let install_path = System::tool_dir()
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str());
+    write_install_marker(
+        &install_path,
+        item,
+        &command.backend,
+        &[install_path.clone()],
+        &[],
+    )
+    .await?;
+
+    Ok(InstallResult {
+        tool_name: item.spec.name.clone(),
+        version: item.spec.version.to_string(),
+        install_path: install_path.clone(),
+        binary_path: None,
+        outputs: vec![install_path],
+        linked_executables: Vec::new(),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolInstallCommand {
+    backend: String,
+    program: String,
+    args: Vec<String>,
+}
+
+fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand> {
+    let backend = item
+        .spec
+        .backend
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(default_tool_backend);
+    tool_install_command_for_backend(&item.spec.name, item.spec.version.as_str(), &backend)
+}
+
+fn tool_install_command_for_backend(
+    name: &str,
+    version: &str,
+    backend: &str,
+) -> Result<ToolInstallCommand> {
+    let normalized = normalize_auto_backend(backend, default_tool_backend);
+    match normalized.as_str() {
+        "rustup" => Ok(ToolInstallCommand {
+            backend: "rustup".to_string(),
+            program: "rustup".to_string(),
+            args: vec![
+                "toolchain".to_string(),
+                "install".to_string(),
+                version.to_string(),
+            ],
+        }),
+        "cargo" => {
+            let mut args = vec!["install".to_string(), name.to_string()];
+            if version != "latest" {
+                args.extend(["--version".to_string(), version.to_string()]);
+            }
+            Ok(ToolInstallCommand {
+                backend: "cargo".to_string(),
+                program: "cargo".to_string(),
+                args,
+            })
+        }
+        "npm" => Ok(ToolInstallCommand {
+            backend: "npm".to_string(),
+            program: "npm".to_string(),
+            args: vec![
+                "install".to_string(),
+                "--global".to_string(),
+                package_with_version(name, version),
+            ],
+        }),
+        "pnpm" => Ok(ToolInstallCommand {
+            backend: "pnpm".to_string(),
+            program: "pnpm".to_string(),
+            args: vec![
+                "add".to_string(),
+                "--global".to_string(),
+                package_with_version(name, version),
+            ],
+        }),
+        "yarn" => Ok(ToolInstallCommand {
+            backend: "yarn".to_string(),
+            program: "yarn".to_string(),
+            args: vec![
+                "global".to_string(),
+                "add".to_string(),
+                package_with_version(name, version),
+            ],
+        }),
+        "pipx" => Ok(ToolInstallCommand {
+            backend: "pipx".to_string(),
+            program: "pipx".to_string(),
+            args: vec![
+                "install".to_string(),
+                python_package_with_version(name, version),
+            ],
+        }),
+        "mise" => Ok(ToolInstallCommand {
+            backend: "mise".to_string(),
+            program: "mise".to_string(),
+            args: vec!["install".to_string(), format!("{name}@{version}")],
+        }),
+        "asdf" => Ok(ToolInstallCommand {
+            backend: "asdf".to_string(),
+            program: "asdf".to_string(),
+            args: vec!["install".to_string(), name.to_string(), version.to_string()],
+        }),
+        "aqua" => Ok(ToolInstallCommand {
+            backend: "aqua".to_string(),
+            program: "aqua".to_string(),
+            args: vec!["install".to_string(), package_with_version(name, version)],
+        }),
+        "homebrew" | "brew" => Err(EngineError::Conflict {
+            message: "homebrew tool installs use the Still-managed bottle installer".to_string(),
+        }
+        .into()),
+        _ => unsupported_tool_backend(&normalized),
+    }
+}
+
+fn default_tool_backend() -> String {
+    "homebrew".to_string()
+}
+
+fn package_with_version(name: &str, version: &str) -> String {
+    if version == "latest" {
+        name.to_string()
+    } else {
+        format!("{name}@{version}")
+    }
+}
+
+fn python_package_with_version(name: &str, version: &str) -> String {
+    if version == "latest" {
+        name.to_string()
+    } else {
+        format!("{name}=={version}")
+    }
+}
+
+fn unsupported_tool_backend(backend: &str) -> Result<ToolInstallCommand> {
+    Err(EngineError::UnsupportedPlatform {
+        feature: format!("tool backend {backend}"),
+        platform: std::env::consts::OS.to_string(),
+    }
+    .into())
 }
 
 async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
@@ -985,6 +1164,82 @@ mod tests {
         let err = package_install_command(&item).unwrap_err();
 
         assert!(err.to_string().contains("package backend unknown-backend"));
+    }
+
+    #[test]
+    fn tool_install_command_plans_rustup() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "rust@stable@rustup".parse::<ItemSpec>().unwrap(),
+        };
+
+        let command = tool_install_command(&item).unwrap();
+
+        assert_eq!(command.program, "rustup");
+        assert_eq!(command.args, ["toolchain", "install", "stable"]);
+    }
+
+    #[test]
+    fn tool_install_command_plans_language_package_managers() {
+        let cargo = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "cargo-nextest@0.9.99@cargo".parse::<ItemSpec>().unwrap(),
+        })
+        .unwrap();
+        let npm = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "typescript@5.8.0@npm".parse::<ItemSpec>().unwrap(),
+        })
+        .unwrap();
+        let pipx = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "ruff@0.11.0@pipx".parse::<ItemSpec>().unwrap(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            cargo.args,
+            ["install", "cargo-nextest", "--version", "0.9.99"]
+        );
+        assert_eq!(npm.args, ["install", "--global", "typescript@5.8.0"]);
+        assert_eq!(pipx.args, ["install", "ruff==0.11.0"]);
+    }
+
+    #[test]
+    fn tool_install_command_plans_version_managers() {
+        let mise = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "node@22@mise".parse::<ItemSpec>().unwrap(),
+        })
+        .unwrap();
+        let asdf = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "node@22@asdf".parse::<ItemSpec>().unwrap(),
+        })
+        .unwrap();
+        let aqua = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "ripgrep@14.1.1@aqua".parse::<ItemSpec>().unwrap(),
+        })
+        .unwrap();
+
+        assert_eq!(mise.args, ["install", "node@22"]);
+        assert_eq!(asdf.args, ["install", "node", "22"]);
+        assert_eq!(aqua.args, ["install", "ripgrep@14.1.1"]);
+    }
+
+    #[test]
+    fn tool_install_command_rejects_unknown_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "ripgrep@latest@unknown-backend"
+                .parse::<ItemSpec>()
+                .unwrap(),
+        };
+
+        let err = tool_install_command(&item).unwrap_err();
+
+        assert!(err.to_string().contains("tool backend unknown-backend"));
     }
 
     #[tokio::test]
