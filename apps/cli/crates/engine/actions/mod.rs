@@ -24,5 +24,7 @@ pub mod services;
 pub mod sync;
 /// Task action implementation.
 pub mod task;
+/// Trust action implementation.
+pub mod trust;
 /// Uninstall action implementation.
 pub mod uninstall;

@@ -131,6 +131,7 @@ mod tests {
         services::{ServicesOperation, ServicesResult},
         sync::SyncResult,
         task::TaskResult,
+        trust::TrustResult,
     };
 
     #[derive(Debug, Default)]
@@ -196,6 +197,10 @@ mod tests {
             _name: Option<String>,
         ) -> anyhow::Result<ServicesResult> {
             panic!("services should not run in these routing tests");
+        }
+
+        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+            panic!("trust should not run in these routing tests");
         }
     }
 

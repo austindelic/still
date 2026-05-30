@@ -88,6 +88,7 @@ mod tests {
     use engine::actions::services::{ServicesOperation, ServicesResult};
     use engine::actions::sync::SyncResult;
     use engine::actions::task::TaskResult;
+    use engine::actions::trust::TrustResult;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -162,6 +163,10 @@ mod tests {
             _name: Option<String>,
         ) -> anyhow::Result<ServicesResult> {
             panic!("services should not run in install tests");
+        }
+
+        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+            panic!("trust should not run in install tests");
         }
     }
 

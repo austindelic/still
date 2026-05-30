@@ -30,10 +30,17 @@ where
                 1
             }
         },
-        Command::Trust(args) => {
-            output.info(&format!("Trust command: {:?}", args));
-            0
-        }
+        Command::Trust(_args) => match runtime.trust() {
+            Ok(result) => {
+                output.success(&format!("Trusted {}", result.config_path.display()));
+                output.info(&format!("Marker: {}", result.trust_path.display()));
+                0
+            }
+            Err(e) => {
+                output.error(&format!("trust failed: {e}"));
+                1
+            }
+        },
         Command::Install(args) => install::run(args, runtime, output),
         Command::Sync(_args) => match runtime.sync() {
             Ok(result) => {
@@ -371,6 +378,7 @@ mod tests {
         services::{ServiceReport, ServiceStatus, ServicesOperation, ServicesResult},
         sync::{SyncItem, SyncResult},
         task::{TaskExecution, TaskResult, TaskSummary},
+        trust::TrustResult,
     };
     use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
     use engine::specs::item::ItemKind;
@@ -401,6 +409,7 @@ mod tests {
         sync_result: Option<anyhow::Result<SyncResult>>,
         services_result: Option<anyhow::Result<ServicesResult>>,
         services_requests: Vec<(ServicesOperation, Option<String>)>,
+        trust_result: Option<anyhow::Result<TrustResult>>,
     }
 
     impl CliRuntime for FakeRuntime {
@@ -489,6 +498,12 @@ mod tests {
                 .take()
                 .expect("test runtime services result was not configured")
         }
+
+        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+            self.trust_result
+                .take()
+                .expect("test runtime trust result was not configured")
+        }
     }
 
     #[test]
@@ -517,6 +532,7 @@ mod tests {
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -560,6 +576,7 @@ mod tests {
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -605,6 +622,7 @@ config check failed: failed to parse still.toml
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -645,6 +663,7 @@ config check failed: failed to parse still.toml
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -689,6 +708,7 @@ init failed: still.toml already exists
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -731,6 +751,7 @@ RUST_LOG=debug
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -784,6 +805,7 @@ env failed: failed to read still.toml
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -831,6 +853,7 @@ Apps:
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -880,6 +903,7 @@ list failed: failed to read still.toml
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -931,6 +955,7 @@ Skills:
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -987,6 +1012,7 @@ warn
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1032,6 +1058,7 @@ run failed: failed to run cargo
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1096,6 +1123,7 @@ run failed: failed to run cargo
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1150,6 +1178,7 @@ Tasks:
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1198,6 +1227,7 @@ failed
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1240,6 +1270,7 @@ export PATH="/opt/still/bin:$PATH"
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1294,6 +1325,7 @@ activate failed: unsupported shell
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1334,6 +1366,7 @@ activate failed: unsupported shell
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1380,6 +1413,7 @@ doctor failed: home directory missing
             })),
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1426,6 +1460,7 @@ Sync plan:
             })),
             services_result: None,
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1474,6 +1509,7 @@ Sync plan:
                 }],
             })),
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1535,6 +1571,7 @@ web: configured - echo web
                 }],
             })),
             services_requests: Vec::new(),
+            trust_result: None,
         };
         let mut output = BufferedOutput::default();
 
@@ -1558,6 +1595,51 @@ Config: /repo/still.toml
 web: ok - start
 command: echo web
 web
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn trust_formats_success() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
+            trust_result: Some(Ok(TrustResult {
+                config_path: PathBuf::from("/repo/still.toml"),
+                trust_path: PathBuf::from("/repo/.still/trust.toml"),
+                fingerprint: "abc".to_string(),
+            })),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Trust(crate::cli::args::TrustArgs {}),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        insta::assert_snapshot!(output.stdout, @r###"
+✓ Trusted /repo/still.toml
+Marker: /repo/.still/trust.toml
 "###);
         assert_eq!(output.stderr, "");
     }
