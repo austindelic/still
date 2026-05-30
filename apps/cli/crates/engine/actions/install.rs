@@ -65,6 +65,7 @@ pub struct InstallRequest {
 /// The result is intentionally small and user-facing: it contains the canonical
 /// installed identity, the final install directory, and the linked executable
 /// when one was found.
+#[derive(Debug)]
 pub struct InstallResult {
     /// Canonical installed tool name.
     pub tool_name: String,
@@ -87,14 +88,25 @@ pub struct InstallResult {
 /// # Side Effects
 /// Downloads an archive, replaces the install directory, and may create a symlink.
 pub async fn run(request: InstallRequest) -> Result<InstallResult> {
-    let item = match request.items.as_slice() {
-        [item] => item,
-        [] => return Err(EngineError::EmptyInstallRequest.into()),
-        _ => return Err(EngineError::not_implemented("multi-item install execution").into()),
-    };
+    if request.items.is_empty() {
+        return Err(EngineError::EmptyInstallRequest.into());
+    }
 
+    let mut last = None;
+    for item in &request.items {
+        last = Some(install_one(item).await?);
+    }
+
+    last.ok_or_else(|| EngineError::EmptyInstallRequest.into())
+}
+
+async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     if item.kind == ItemKind::App {
-        return Err(EngineError::not_implemented("app install execution").into());
+        return Err(EngineError::UnsupportedPlatform {
+            feature: "app install execution".to_string(),
+            platform: std::env::consts::OS.to_string(),
+        }
+        .into());
     }
 
     let tool = ToolSpec {
@@ -450,5 +462,33 @@ impl InstallOps for MacOS {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::specs::item::{ItemKind, ItemSpec};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn install_rejects_empty_requests() {
+        let err = run(InstallRequest { items: Vec::new() }).await.unwrap_err();
+
+        assert!(err.to_string().contains("at least one item"));
+    }
+
+    #[tokio::test]
+    async fn install_reports_app_execution_as_unsupported() {
+        let err = run(InstallRequest {
+            items: vec![InstallItemRequest {
+                kind: ItemKind::App,
+                spec: "firefox".parse::<ItemSpec>().unwrap(),
+            }],
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("app install execution"));
     }
 }
