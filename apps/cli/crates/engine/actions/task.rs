@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
-use crate::specs::toml::{ExpandedTask, TaskEntry, TaskRun, parse_still_toml};
+use crate::specs::toml::{ExpandedTask, ServiceEntry, TaskEntry, TaskRun, parse_still_toml};
 use crate::trust::assert_config_trusted;
 
 /// Request to list or run configured tasks.
@@ -68,6 +68,7 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
     let tasks = config.tasks;
+    let services = config.services;
     let summaries = task_summaries(&tasks);
 
     let Some(name) = request.name else {
@@ -88,7 +89,14 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
 
     let mut executions = Vec::new();
     let mut visited = BTreeSet::new();
-    run_task_graph(&tasks, &name, &working_dir, &mut visited, &mut executions)?;
+    run_task_graph(
+        &tasks,
+        &services,
+        &name,
+        &working_dir,
+        &mut visited,
+        &mut executions,
+    )?;
     let status = executions
         .last()
         .map(|execution| execution.status)
@@ -117,6 +125,7 @@ fn task_summaries(tasks: &BTreeMap<String, TaskEntry>) -> Vec<TaskSummary> {
 
 fn run_task_graph(
     tasks: &BTreeMap<String, TaskEntry>,
+    services: &BTreeMap<String, ServiceEntry>,
     name: &str,
     working_dir: &Path,
     visited: &mut BTreeSet<String>,
@@ -131,12 +140,28 @@ fn run_task_graph(
     })?;
     let normalized = normalize_task(name, task)?;
     for dependency in normalized.depends {
-        run_task_graph(tasks, &dependency, working_dir, visited, executions)?;
+        run_task_graph(
+            tasks,
+            services,
+            &dependency,
+            working_dir,
+            visited,
+            executions,
+        )?;
         if executions
             .last()
             .is_some_and(|execution| execution.status != 0)
         {
             return Ok(());
+        }
+    }
+
+    for service in normalized.requires {
+        if !services.contains_key(&service) {
+            return Err(EngineError::Conflict {
+                message: format!("task \"{name}\" requires unknown service \"{service}\""),
+            }
+            .into());
         }
     }
 
@@ -163,6 +188,7 @@ fn run_task_graph(
 
 struct NormalizedTask {
     depends: Vec<String>,
+    requires: Vec<String>,
     commands: Vec<String>,
 }
 
@@ -170,6 +196,7 @@ fn normalize_task(name: &str, entry: &TaskEntry) -> Result<NormalizedTask> {
     match entry {
         TaskEntry::Command(command) => Ok(NormalizedTask {
             depends: Vec::new(),
+            requires: Vec::new(),
             commands: vec![command.clone()],
         }),
         TaskEntry::Expanded(task) => normalize_expanded_task(name, task),
@@ -190,6 +217,7 @@ fn normalize_expanded_task(name: &str, task: &ExpandedTask) -> Result<Normalized
 
     Ok(NormalizedTask {
         depends: task.depends.clone(),
+        requires: task.requires.clone(),
         commands,
     })
 }
@@ -373,6 +401,59 @@ mod tests {
             .map(|execution| execution.task.as_str())
             .collect();
         assert_eq!(executed, ["setup", "build", "ci"]);
+    }
+
+    #[tokio::test]
+    async fn task_requires_configured_services() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [tasks.test]
+            requires = ["db"]
+            run = "echo test"
+        "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let err = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("task \"test\" requires unknown service \"db\"")
+        );
+    }
+
+    #[tokio::test]
+    async fn task_runs_when_required_services_are_configured() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [services]
+            db = "echo db"
+
+            [tasks.test]
+            requires = ["db"]
+            run = "echo test"
+        "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.status, 0);
+        assert_eq!(result.executions[0].stdout, "test\n");
     }
 
     fn write_trust_marker(config_path: &Path, content: &[u8]) {

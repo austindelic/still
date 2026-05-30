@@ -324,7 +324,7 @@ Rules:
 - Expanded tasks must include `run`.
 - `run` may be a string or list of strings.
 - `depends` names other tasks that must run before the current task.
-- `requires` names services that must be available for the task.
+- `requires` names services that must be configured before the task can run. Runtime health should be checked with explicit service `check` actions.
 - `task` with no name should list available tasks.
 - List-form `run` stops on the first failing command and returns that status.
 - Dependency tasks run at most once per invocation, even when multiple graph paths require the same task.
