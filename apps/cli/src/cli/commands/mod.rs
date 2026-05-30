@@ -20,36 +20,59 @@ where
     O: Output,
 {
     match cmd {
-        Command::Install(args) => install::run(args, runtime, output),
-        Command::Uninstall(args) => {
-            output.info(&format!("Uninstall command: {:?}", args));
+        Command::Init(args) => {
+            output.info(&format!("Init command: {:?}", args));
             0
         }
-        Command::Use(args) => {
-            output.info(&format!("Use command: {:?}", args));
+        Command::Trust(args) => {
+            output.info(&format!("Trust command: {:?}", args));
+            0
+        }
+        Command::Install(args) => install::run(args, runtime, output),
+        Command::Sync(args) => {
+            output.info(&format!("Sync command: {:?}", args));
+            0
+        }
+        Command::List(args) => {
+            output.info(&format!("List command: {:?}", args));
+            0
+        }
+        Command::Uninstall(args) => {
+            output.info(&format!("Uninstall command: {:?}", args));
             0
         }
         Command::Run(args) => {
             output.info(&format!("Run command: {:?}", args));
             0
         }
-        Command::Translate(args) => {
-            output.info(&format!("Translate command: {:?}", args));
+        Command::Task(args) => {
+            output.info(&format!("Task command: {:?}", args));
+            0
+        }
+        Command::Services(args) => {
+            output.info(&format!("Services command: {:?}", args));
+            0
+        }
+        Command::Agents(args) => {
+            output.info(&format!("Agents command: {:?}", args));
+            0
+        }
+        Command::Config(args) => {
+            output.info(&format!("Config command: {:?}", args));
             0
         }
         Command::Doctor(args) => {
             output.info(&format!("Doctor command: {:?}", args));
             0
         }
-        Command::Init(args) => {
-            output.info(&format!("Init command: {:?}", args));
+        Command::Env(args) => {
+            output.info(&format!("Env command: {:?}", args));
             0
         }
-        Command::Convert(args) => {
-            output.info(&format!("Convert command: {:?}", args));
+        Command::Activate(args) => {
+            output.info(&format!("Activate command: {:?}", args));
             0
         }
-        _ => 0,
     }
 }
 

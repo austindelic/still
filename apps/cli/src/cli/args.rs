@@ -28,36 +28,34 @@ pub struct Cli {
 /// side effects belong behind `CliRuntime`.
 #[derive(Subcommand)]
 pub enum Command {
-    #[command(about = "Install a package/app into the current environment")]
-    Install(InstallArgs),
-    #[command(about = "Remove a package/app from the current environment")]
-    Uninstall(UninstallArgs),
-    #[command(about = "Switch to a specific runtime or toolchain version")]
-    Use(UseArgs),
-    #[command(about = "Diagnose the environment and suggest fixes or updates")]
-    Doctor(DoctorArgs),
-    #[command(about = "Run a command within the managed environment")]
-    Run(RunArgs),
-    #[command(about = "Translate project definitions between supported formats")]
-    Translate(TranslateArgs),
     #[command(about = "Initialize configuration for a new project")]
     Init(InitArgs),
-    #[command(about = "Convert configuration or lockfiles to another supported format")]
-    Convert(ConvertArgs),
-    #[command(about = "Display environment information required for debugging")]
-    Env,
-    #[command(about = "Open or run the web-based management dashboard")]
-    Web,
-    #[command(about = "Activate a workspace or profile for the current shell session")]
-    Activate,
-    #[command(about = "Synchronize the workspace state with configured sources")]
-    Sync,
-    #[command(about = "Run or manage tasks defined in config")]
-    Task,
+    #[command(about = "Trust project-defined executable behavior")]
+    Trust(TrustArgs),
+    #[command(about = "Install requested tools, packages, or apps")]
+    Install(InstallArgs),
+    #[command(about = "Synchronize installed state with config")]
+    Sync(SyncArgs),
+    #[command(about = "List configured and installed items")]
+    List(ListArgs),
+    #[command(about = "Remove a Still-managed install")]
+    Uninstall(UninstallArgs),
+    #[command(about = "Run a command within the managed environment")]
+    Run(RunArgs),
+    #[command(about = "Run or list tasks defined in config")]
+    Task(TaskArgs),
+    #[command(about = "Inspect, start, stop, or check services")]
+    Services(ServicesArgs),
+    #[command(about = "Inspect, sync, or validate agent instructions and skills")]
+    Agents(AgentsArgs),
     #[command(about = "Inspect, validate, or edit Still configuration")]
-    Config,
-    #[command(about = "Run post-install behavior")]
-    PostInstall,
+    Config(ConfigArgs),
+    #[command(about = "Diagnose machine, cache, config, and platform health")]
+    Doctor(DoctorArgs),
+    #[command(about = "Display resolved environment information")]
+    Env(EnvArgs),
+    #[command(about = "Print shell activation code")]
+    Activate(ActivateArgs),
 }
 
 /// Arguments for installing requested tool/package/app specs.
@@ -89,15 +87,20 @@ pub struct UninstallArgs {
     pub tool: ToolSpec,
 }
 
-/// Arguments for selecting a tool entry in project configuration.
-///
-/// `tool_name` is currently a plain string because the final config mutation
-/// flow is still being designed; validate or normalize it before writing config.
+/// Arguments for project trust.
 #[derive(clap::Args, Debug, Clone)]
-pub struct UseArgs {
-    /// Tool name to select or update.
-    #[arg(short, long, value_name = "TOOL")]
-    pub tool_name: String,
+pub struct TrustArgs {}
+
+/// Arguments for syncing installed state.
+#[derive(clap::Args, Debug, Clone)]
+pub struct SyncArgs {}
+
+/// Arguments for listing configured and installed state.
+#[derive(clap::Args, Debug, Clone)]
+pub struct ListArgs {
+    /// Include inactive global/project entries and known installed items.
+    #[arg(long)]
+    pub all: bool,
 }
 
 /// Arguments for environment diagnostics.
@@ -118,12 +121,43 @@ pub struct RunArgs {
     pub command: Vec<String>,
 }
 
-/// Arguments for translating project definitions between formats.
-///
-/// Empty for now while the supported input/output formats are still being
-/// narrowed into an explicit contract.
+/// Arguments for task execution.
 #[derive(clap::Args, Debug, Clone)]
-pub struct TranslateArgs {}
+pub struct TaskArgs {
+    /// Task name. When omitted, Still lists configured tasks.
+    pub name: Option<String>,
+}
+
+/// Arguments for service operations.
+#[derive(clap::Args, Debug, Clone)]
+pub struct ServicesArgs {
+    #[command(subcommand)]
+    pub command: Option<ServicesCommand>,
+}
+
+/// Service subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum ServicesCommand {
+    Status { name: Option<String> },
+    Start { name: Option<String> },
+    Stop { name: Option<String> },
+    Check { name: Option<String> },
+}
+
+/// Arguments for agent operations.
+#[derive(clap::Args, Debug, Clone)]
+pub struct AgentsArgs {
+    #[command(subcommand)]
+    pub command: Option<AgentsCommand>,
+}
+
+/// Agent subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum AgentsCommand {
+    List,
+    Sync,
+    Check,
+}
 
 /// Arguments for initializing a project config.
 ///
@@ -132,11 +166,30 @@ pub struct TranslateArgs {}
 #[derive(clap::Args, Debug, Clone)]
 pub struct InitArgs {}
 
-/// Arguments for converting Still-owned config or lockfiles.
-///
-/// Empty for now while conversion targets and write policy are still undefined.
+/// Arguments for config operations.
 #[derive(clap::Args, Debug, Clone)]
-pub struct ConvertArgs {}
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+
+/// Config subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigCommand {
+    Check,
+}
+
+/// Arguments for resolved environment output.
+#[derive(clap::Args, Debug, Clone)]
+pub struct EnvArgs {}
+
+/// Arguments for shell activation.
+#[derive(clap::Args, Debug, Clone)]
+pub struct ActivateArgs {
+    /// Shell to generate activation code for.
+    #[arg(long)]
+    pub shell: Option<String>,
+}
 
 #[cfg(test)]
 mod tests {

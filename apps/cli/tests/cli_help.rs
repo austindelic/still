@@ -12,22 +12,21 @@ Universal Package Manager + Version Manager
 Usage: Still [COMMAND]
 
 Commands:
-  install       Install a package/app into the current environment
-  uninstall     Remove a package/app from the current environment
-  use           Switch to a specific runtime or toolchain version
-  doctor        Diagnose the environment and suggest fixes or updates
-  run           Run a command within the managed environment
-  translate     Translate project definitions between supported formats
-  init          Initialize configuration for a new project
-  convert       Convert configuration or lockfiles to another supported format
-  env           Display environment information required for debugging
-  web           Open or run the web-based management dashboard
-  activate      Activate a workspace or profile for the current shell session
-  sync          Synchronize the workspace state with configured sources
-  task          Run or manage tasks defined in config
-  config        Inspect, validate, or edit Still configuration
-  post-install  Run post-install behavior
-  help          Print this message or the help of the given subcommand(s)
+  init       Initialize configuration for a new project
+  trust      Trust project-defined executable behavior
+  install    Install requested tools, packages, or apps
+  sync       Synchronize installed state with config
+  list       List configured and installed items
+  uninstall  Remove a Still-managed install
+  run        Run a command within the managed environment
+  task       Run or list tasks defined in config
+  services   Inspect, start, stop, or check services
+  agents     Inspect, sync, or validate agent instructions and skills
+  config     Inspect, validate, or edit Still configuration
+  doctor     Diagnose machine, cache, config, and platform health
+  env        Display resolved environment information
+  activate   Print shell activation code
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
@@ -39,6 +38,16 @@ fn default_build_does_not_expose_tui_command() {
     let help = clap_help();
 
     assert!(!help.contains("  tui"));
+}
+
+#[test]
+fn help_does_not_expose_non_priority_commands() {
+    let help = clap_help();
+
+    assert!(!help.contains("translate"));
+    assert!(!help.contains("convert"));
+    assert!(!help.contains("post-install"));
+    assert!(!help.contains("  web"));
 }
 
 fn clap_help() -> String {
