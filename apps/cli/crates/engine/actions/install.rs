@@ -101,7 +101,12 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
 
     let mut last = None;
     for item in &request.items {
-        last = Some(install_one(item).await?);
+        last = Some(install_one(item).await.with_context(|| {
+            format!(
+                "failed to install {} {}@{}",
+                item.kind, item.spec.name, item.spec.version
+            )
+        })?);
     }
 
     last.ok_or_else(|| EngineError::EmptyInstallRequest.into())

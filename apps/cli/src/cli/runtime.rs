@@ -93,9 +93,11 @@ pub struct RealRuntime;
 impl CliRuntime for RealRuntime {
     fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult> {
         let install_request = request.install.clone();
+        let pending_config =
+            prepare_install_config_write(&install_request, request.global, request.force)?;
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         let result = runtime.block_on(engine::actions::install::run(request.install))?;
-        record_install_items(install_request, request.global, request.force)?;
+        record_install_items(pending_config)?;
         Ok(result)
     }
 
@@ -264,13 +266,33 @@ impl CliRuntime for RealRuntime {
     }
 }
 
-fn record_install_items(request: InstallRequest, global: bool, force: bool) -> anyhow::Result<()> {
+#[derive(Debug, Clone)]
+struct PendingInstallConfigWrite {
+    path: std::path::PathBuf,
+    updated: String,
+}
+
+fn prepare_install_config_write(
+    request: &InstallRequest,
+    global: bool,
+    force: bool,
+) -> anyhow::Result<PendingInstallConfigWrite> {
     let start_dir = std::env::current_dir()?;
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
+    prepare_install_config_write_at(request, global, force, &start_dir, &home_dir)
+}
+
+fn prepare_install_config_write_at(
+    request: &InstallRequest,
+    global: bool,
+    force: bool,
+    start_dir: &std::path::Path,
+    home_dir: &std::path::Path,
+) -> anyhow::Result<PendingInstallConfigWrite> {
     let resolved = resolve_config_path(
-        &start_dir,
-        &home_dir,
+        start_dir,
+        home_dir,
         ConfigSelection {
             scope: if global {
                 ConfigScope::Global
@@ -288,11 +310,104 @@ fn record_install_items(request: InstallRequest, global: bool, force: bool) -> a
     };
     let updated =
         engine::config_edit::add_install_items_with_force(&content, &request.items, force)?;
-    if let Some(parent) = resolved.path.parent() {
+    Ok(PendingInstallConfigWrite {
+        path: resolved.path,
+        updated,
+    })
+}
+
+fn record_install_items(pending: PendingInstallConfigWrite) -> anyhow::Result<()> {
+    if let Some(parent) = pending.path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&resolved.path, updated)?;
+    std::fs::write(&pending.path, pending.updated)?;
     let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    runtime.block_on(engine::actions::sync::refresh_lockfile(&resolved.path))?;
+    runtime.block_on(engine::actions::sync::refresh_lockfile(&pending.path))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use engine::actions::install::InstallItemRequest;
+    use engine::specs::item::{ItemKind, ItemSpec};
+
+    use super::*;
+
+    #[test]
+    fn install_config_preflight_rejects_changed_existing_entries_before_write() {
+        let temp = test_dir("install-preflight-conflict");
+        let config_path = temp.join("still.toml");
+        fs::write(
+            &config_path,
+            r#"
+            [tools]
+            rust = "stable"
+            "#,
+        )
+        .unwrap();
+        let request = InstallRequest {
+            items: vec![install_item(
+                ItemKind::Tool,
+                "rust",
+                "1.76.0",
+                Some("rustup"),
+            )],
+        };
+
+        let err =
+            prepare_install_config_write_at(&request, false, false, &temp, &temp).unwrap_err();
+
+        assert!(err.to_string().contains("--force"));
+        assert_eq!(
+            fs::read_to_string(config_path).unwrap(),
+            r#"
+            [tools]
+            rust = "stable"
+            "#
+        );
+    }
+
+    #[test]
+    fn install_config_preflight_uses_global_when_no_project_config_exists() {
+        let temp = test_dir("install-preflight-global");
+        let request = InstallRequest {
+            items: vec![install_item(ItemKind::Package, "openssl", "latest", None)],
+        };
+
+        let pending =
+            prepare_install_config_write_at(&request, false, false, &temp, &temp).unwrap();
+
+        assert_eq!(pending.path, temp.join(".config/still/config.toml"));
+        assert!(pending.updated.contains("latest = [\"openssl\"]"));
+    }
+
+    fn install_item(
+        kind: ItemKind,
+        name: &str,
+        version: &str,
+        backend: Option<&str>,
+    ) -> InstallItemRequest {
+        InstallItemRequest {
+            kind,
+            spec: ItemSpec {
+                name: name.to_string(),
+                version: version.parse().unwrap(),
+                backend: backend.map(|backend| backend.parse().unwrap()),
+            },
+        }
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("still-{name}-{suffix}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
 }
