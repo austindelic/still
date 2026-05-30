@@ -8,7 +8,9 @@ use anyhow::{Context, Result};
 
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
-use crate::specs::toml::{ExpandedService, ServiceAction, ServiceEntry, parse_still_toml};
+use crate::specs::toml::{
+    ExpandedService, ServiceAction, ServiceEntry, TaskEntry, TaskRun, parse_still_toml,
+};
 
 /// Service operation requested by a caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,10 +86,13 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
+    let tasks = config.tasks;
     let services = select_services(config.services, request.name.as_deref())?;
     let reports = services
         .into_iter()
-        .map(|(name, service)| service_report(name, service, request.operation, &working_dir))
+        .map(|(name, service)| {
+            service_report(name, service, request.operation, &working_dir, &tasks)
+        })
         .collect::<Result<Vec<_>>>()?;
 
     Ok(ServicesResult {
@@ -116,6 +121,7 @@ fn service_report(
     service: ServiceEntry,
     operation: ServicesOperation,
     working_dir: &Path,
+    tasks: &BTreeMap<String, TaskEntry>,
 ) -> Result<ServiceReport> {
     let normalized = normalize_service(service);
     if operation == ServicesOperation::Status {
@@ -142,14 +148,9 @@ fn service_report(
         });
     };
 
-    let ActionCommand::Command(command) = action else {
-        return Ok(ServiceReport {
-            name,
-            status: ServiceStatus::Skipped,
-            detail: "task-backed service actions are listed but not executed by services yet"
-                .to_string(),
-            execution: None,
-        });
+    let command = match action {
+        ActionCommand::Command(command) => command,
+        ActionCommand::Task(task) => task_command(tasks, &task)?,
     };
 
     let output = shell_command(&command)
@@ -246,6 +247,28 @@ fn action_detail_ref(action: &ServiceAction) -> Option<String> {
     }
 }
 
+fn task_command(tasks: &BTreeMap<String, TaskEntry>, task: &str) -> Result<String> {
+    let entry = tasks.get(task).ok_or_else(|| EngineError::Conflict {
+        message: format!("unknown task \"{task}\""),
+    })?;
+    match entry {
+        TaskEntry::Command(command) => Ok(command.clone()),
+        TaskEntry::Expanded(task_entry) => match &task_entry.run {
+            TaskRun::Command(command) => Ok(command.clone()),
+            TaskRun::Commands(commands) => commands.first().cloned().ok_or_else(|| {
+                EngineError::InvalidConfig {
+                    reason: format!("task \"{task}\" must define run"),
+                }
+                .into()
+            }),
+            TaskRun::None => Err(EngineError::InvalidConfig {
+                reason: format!("task \"{task}\" must define run"),
+            }
+            .into()),
+        },
+    }
+}
+
 fn operation_name(operation: ServicesOperation) -> &'static str {
     match operation {
         ServicesOperation::Status => "status",
@@ -326,5 +349,34 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("unknown service"));
+    }
+
+    #[tokio::test]
+    async fn services_start_runs_task_backed_action() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [services]
+            web = { task = "web:start" }
+
+            [tasks]
+            "web:start" = "echo web"
+            "#,
+        )
+        .unwrap();
+
+        let result = run(ServicesRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: ServicesOperation::Start,
+            name: Some("web".to_string()),
+        })
+        .await
+        .unwrap();
+
+        let execution = result.services[0].execution.as_ref().unwrap();
+        assert_eq!(execution.command, "echo web");
+        assert_eq!(execution.stdout, "web\n");
     }
 }
