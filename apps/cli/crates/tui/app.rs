@@ -2,7 +2,7 @@
 
 use crate::components::action_menu::{Action, ActionMenu, ActionMenuState};
 use crate::tabs::config::ConfigTab;
-use crate::tabs::formula::{FormulaTab, NavigationDirection};
+use crate::tabs::formula::{FormulaTab, NavigationDirection, PackageKind, PackageRow};
 use crate::tabs::logs::LogsTab;
 use crate::tabs::resources::ResourcesTab;
 use crate::tabs::tasks::TasksTab;
@@ -562,43 +562,25 @@ impl App {
         if let Some(action) = action {
             match action {
                 Action::Install => {
-                    // Get selected formula name
-                    if let Tab::Packages = self.current_tab {
-                        let filtered = self.formula_tab.filter(&self.search_query);
-                        if let Some(row) = filtered.get(
-                            self.formula_tab
-                                .selected_index
-                                .min(filtered.len().saturating_sub(1)),
-                        ) {
-                            eprintln!("Installing: {}", row.name);
-                            eprintln!("Install from TUI is not wired to the engine yet");
+                    if let Some(row) = self.selected_package_row() {
+                        match install_package_from_tui(&row) {
+                            Ok(()) => eprintln!("Installed: {}", row.name),
+                            Err(err) => eprintln!("Install failed for {}: {err}", row.name),
                         }
                     }
                 }
                 Action::Uninstall => {
-                    if let Tab::Packages = self.current_tab {
-                        let filtered = self.formula_tab.filter(&self.search_query);
-                        if let Some(row) = filtered.get(
-                            self.formula_tab
-                                .selected_index
-                                .min(filtered.len().saturating_sub(1)),
-                        ) {
-                            eprintln!("Uninstalling: {}", row.name);
-                            eprintln!("Uninstall from TUI is not wired to the engine yet");
+                    if let Some(row) = self.selected_package_row() {
+                        match uninstall_package_from_tui(&row) {
+                            Ok(()) => eprintln!("Uninstalled: {}", row.name),
+                            Err(err) => eprintln!("Uninstall failed for {}: {err}", row.name),
                         }
                     }
                 }
                 Action::Info => {
-                    if let Tab::Packages = self.current_tab {
-                        let filtered = self.formula_tab.filter(&self.search_query);
-                        if let Some(row) = filtered.get(
-                            self.formula_tab
-                                .selected_index
-                                .min(filtered.len().saturating_sub(1)),
-                        ) {
-                            eprintln!("Info for: {}", row.name);
-                            eprintln!("Selected package version: {}", row.version);
-                        }
+                    if let Some(row) = self.selected_package_row() {
+                        eprintln!("Info for: {}", row.name);
+                        eprintln!("Selected package version: {}", row.version);
                     }
                 }
                 Action::Cancel => {
@@ -606,6 +588,52 @@ impl App {
                 }
             }
         }
+    }
+
+    fn selected_package_row(&self) -> Option<PackageRow> {
+        if self.current_tab != Tab::Packages {
+            return None;
+        }
+        let filtered = self.formula_tab.filter(&self.search_query);
+        filtered
+            .get(
+                self.formula_tab
+                    .selected_index
+                    .min(filtered.len().saturating_sub(1)),
+            )
+            .map(|row| (*row).clone())
+    }
+}
+
+fn install_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let status = match row.kind {
+        PackageKind::Formula => std::process::Command::new(exe)
+            .args(["install", "--package", &row.name])
+            .status()?,
+        PackageKind::Cask => {
+            let spec = format!("{}@latest@homebrew-cask", row.name);
+            std::process::Command::new(exe)
+                .args(["install", "--app", &spec])
+                .status()?
+        }
+    };
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("install command failed"))
+    }
+}
+
+fn uninstall_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let status = std::process::Command::new(exe)
+        .args(["uninstall", &row.name])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("uninstall command failed"))
     }
 }
 
