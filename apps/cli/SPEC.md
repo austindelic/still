@@ -276,12 +276,9 @@ Rules:
 - Expanded services may define `preset`, `start`, `stop`, and `check`.
 - A service must define at least `preset`, `start`, or `check`.
 - Built-in presets should cover common services so users do not need to write start/check/stop commands every time.
-
-Open decisions:
-
-- Whether services auto-watch and restart stale services by default.
-- How Still stores service process state.
-- Whether `sync` starts services or only prepares them.
+- Services are explicit in v0.1: Still does not auto-watch or restart stale services by default.
+- `sync` prepares tools, packages, apps, and lockfile state only; it does not start services.
+- Still does not store service process state in v0.1. Service status reports configured actions, and `check` commands are the source of runtime health when users request them.
 
 ### Tasks
 

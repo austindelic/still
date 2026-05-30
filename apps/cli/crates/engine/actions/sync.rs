@@ -391,6 +391,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sync_only_prepares_services_without_running_them() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [services]
+            web = "exit 99"
+            "#,
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.items.is_empty());
+        assert_eq!(result.drift, [SyncDrift::LockfileMissing]);
+    }
+
+    #[tokio::test]
     async fn sync_uses_platform_specific_backend_overrides() {
         let temp = tempfile::tempdir().unwrap();
         let platform = current_platform().to_string();
