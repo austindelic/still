@@ -542,8 +542,7 @@ Installing public packages from configured backends is not the same as running p
 
 - Trust is stored in a project-local `.still/trust.toml` marker scoped to the config path and content fingerprint.
 - `still init` writes a Still-managed trust marker for the newly created config.
-
-Open decisions:
-
-- Whether package post-install scripts are allowed by default.
-- How TUI review/confirmation should work for trust-sensitive actions.
+- Still does not define or execute project-authored package post-install scripts in v0.1.
+- Platform package managers may run their own package metadata hooks; that behavior belongs to the selected backend and is not treated as project-defined shell code.
+- CLI and TUI entry points must route trust-sensitive behavior through engine actions so the same trust marker and stale-config checks apply everywhere.
+- The v0.1 TUI does not add a separate trust review flow. If a TUI surface triggers a trust-sensitive engine action, the engine must return the same untrusted-config error the CLI would format.
