@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use crate::error::EngineError;
+
 /// Parsed project or global Still config.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -177,7 +179,59 @@ pub struct ExpandedSkillSource {
 /// # Errors
 /// Fails when the document is invalid TOML or does not match the config model.
 pub fn parse_still_toml(input: &str) -> Result<StillConfig> {
-    toml_edit::de::from_str(input).context("failed to parse still.toml")
+    let config: StillConfig =
+        toml_edit::de::from_str(input).context("failed to parse still.toml")?;
+    validate_config(&config)?;
+    Ok(config)
+}
+
+fn validate_config(config: &StillConfig) -> Result<()> {
+    for (name, entry) in &config.tools {
+        if let ToolEntry::Expanded(tool) = entry
+            && tool.version.trim().is_empty()
+        {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("tool \"{name}\" must define version"),
+            }
+            .into());
+        }
+    }
+
+    for (name, entry) in &config.services {
+        if let ServiceEntry::Expanded(service) = entry
+            && service.preset.is_none()
+            && service.task.is_none()
+            && service.start.is_none()
+            && service.check.is_none()
+        {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("service \"{name}\" must define preset, task, start, or check"),
+            }
+            .into());
+        }
+    }
+
+    for (name, entry) in &config.tasks {
+        if let TaskEntry::Expanded(task) = entry {
+            match &task.run {
+                TaskRun::None => {
+                    return Err(EngineError::InvalidConfig {
+                        reason: format!("task \"{name}\" must define run"),
+                    }
+                    .into());
+                }
+                TaskRun::Commands(commands) if commands.is_empty() => {
+                    return Err(EngineError::InvalidConfig {
+                        reason: format!("task \"{name}\" must define at least one run command"),
+                    }
+                    .into());
+                }
+                TaskRun::Command(_) | TaskRun::Commands(_) => {}
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -281,5 +335,50 @@ mod tests {
         };
         assert!(skills.contains_key("rust-review"));
         assert!(skills.contains_key("repo-auditor"));
+    }
+
+    #[test]
+    fn rejects_expanded_tool_without_version() {
+        let err = parse_still_toml(
+            r#"
+            [tools.rust]
+            backend = "rustup"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("tool \"rust\" must define version")
+        );
+    }
+
+    #[test]
+    fn rejects_expanded_task_without_run() {
+        let err = parse_still_toml(
+            r#"
+            [tasks.ci]
+            depends = ["test"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("task \"ci\" must define run"));
+    }
+
+    #[test]
+    fn rejects_expanded_service_without_action() {
+        let err = parse_still_toml(
+            r#"
+            [services.web]
+            stop = { command = "echo stop" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("service \"web\" must define preset, task, start, or check")
+        );
     }
 }

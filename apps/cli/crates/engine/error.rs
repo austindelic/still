@@ -29,21 +29,10 @@ pub enum EngineError {
         config_path: PathBuf,
         behavior: String,
     },
-    #[error("{feature} is not implemented yet")]
-    NotImplemented { feature: String },
     #[error("{feature} is not supported on {platform}")]
     UnsupportedPlatform { feature: String, platform: String },
     #[error("{message}")]
     Conflict { message: String },
-}
-
-impl EngineError {
-    /// Creates a not-yet-implemented error with a stable display shape.
-    pub fn not_implemented(feature: impl Into<String>) -> Self {
-        Self::NotImplemented {
-            feature: feature.into(),
-        }
-    }
 }
 
 #[cfg(test)]

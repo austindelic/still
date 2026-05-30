@@ -274,7 +274,7 @@ Rules:
 - A `{ task = "name" }` service action runs a task.
 - A `{ command = "..." }` service action runs a command directly.
 - Expanded services may define `preset`, `start`, `stop`, and `check`.
-- A service must define at least `preset`, `start`, or `check`.
+- A service must define at least `preset`, `task`, `start`, or `check`.
 - Built-in presets should cover common services so users do not need to write start/check/stop commands every time.
 - Services are explicit in v0.1: Still does not auto-watch or restart stale services by default.
 - `sync` prepares tools, packages, apps, and lockfile state only; it does not start services.
