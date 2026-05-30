@@ -4,6 +4,8 @@
 
 /// Install, uninstall, and other state-changing actions.
 pub mod actions;
+/// Config discovery and filesystem locations.
+pub mod config;
 /// Package registry integrations and re-exports.
 pub mod registries;
 /// Typed models for external and Still-owned specs.
