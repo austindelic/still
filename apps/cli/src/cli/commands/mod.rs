@@ -114,7 +114,16 @@ where
                             .backend
                             .map(|backend| format!("@{backend}"))
                             .unwrap_or_default();
-                        output.info(&format!("  {}@{}{}", item.name, item.version, backend));
+                        let status = match (item.configured, item.installed) {
+                            (true, true) => " (configured, installed)",
+                            (true, false) => "",
+                            (false, true) => " (installed)",
+                            (false, false) => "",
+                        };
+                        output.info(&format!(
+                            "  {}@{}{}{}",
+                            item.name, item.version, backend, status
+                        ));
                     }
                 }
                 0
@@ -873,7 +882,13 @@ env failed: failed to read still.toml
                             item("openssl", "latest", None),
                         ],
                     ),
-                    section(ItemKind::App, [item("firefox", "latest", None)]),
+                    section(
+                        ItemKind::App,
+                        [
+                            item("firefox", "latest", None),
+                            installed_item("zed", "latest", Some("homebrew-cask")),
+                        ],
+                    ),
                 ],
             })),
             list_alls: Vec::new(),
@@ -912,6 +927,7 @@ Packages:
   openssl@latest
 Apps:
   firefox@latest
+  zed@latest@homebrew-cask (installed)
 "###);
         assert_eq!(output.stderr, "");
     }
@@ -1845,6 +1861,18 @@ Removed artifact /opt/still/packages/openssl
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
+            configured: true,
+            installed: false,
+        }
+    }
+
+    fn installed_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
+        ListItem {
+            name: name.to_string(),
+            version: version.to_string(),
+            backend: backend.map(str::to_string),
+            configured: false,
+            installed: true,
         }
     }
 

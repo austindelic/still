@@ -175,7 +175,8 @@ async fn missing_items(items: &[SyncItem]) -> Result<Vec<SyncItem>> {
 
 fn installed_path(item: &SyncItem) -> PathBuf {
     let root = match item.kind {
-        ItemKind::Tool | ItemKind::Package => System::tool_dir(),
+        ItemKind::Tool => System::tool_dir(),
+        ItemKind::Package => System::root_dir().join("packages"),
         ItemKind::App => System::apps_dir(),
     };
     root.join(&item.spec.name).join(item.spec.version.as_str())
