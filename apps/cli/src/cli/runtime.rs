@@ -186,12 +186,16 @@ impl CliRuntime for RealRuntime {
     }
 
     fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult> {
+        let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
-        Ok(engine::actions::activate::run(ActivateRequest {
+        let request = ActivateRequest {
+            start_dir,
             home_dir,
             shell,
-        })?)
+        };
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        runtime.block_on(engine::actions::activate::run(request))
     }
 
     fn doctor(&mut self) -> anyhow::Result<DoctorResult> {

@@ -38,7 +38,7 @@ still task lint
 - `uninstall <TOOL@VERSION>`: remove a Still-managed install and related links.
 - `run <COMMAND...>`: run an arbitrary command with Still-managed PATH/env and return the child exit code.
 - `task <NAME>`: run a named task from config; no name should list available tasks.
-- `config check`: validate `still.toml` with the schema/Taplo path.
+- `config check`: validate `still.toml` through the typed TOML parser and engine config validators.
 - `doctor`: diagnose machine, cache, config, permissions, and platform health.
 - `env`: print resolved environment/debug information.
 - `activate`: print shell-specific activation code or instructions.
@@ -61,7 +61,7 @@ A future setting may relax this, but it should be strongly discouraged.
 
 ## Config Direction
 
-Use `examples/still.toml` and `examples/still.schema.json` as the working concept config and schema.
+Use `examples/still.toml` and `examples/still.schema.json` as concept references while the engine parser and validators remain the authoritative config check path.
 
 Important decisions:
 

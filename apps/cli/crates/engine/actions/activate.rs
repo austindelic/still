@@ -1,12 +1,20 @@
 //! Engine action for shell activation snippets.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::error::{EngineError, EngineResult};
+use anyhow::Result;
+
+use crate::actions::run::resolve_env;
+use crate::config::{find_project_config, global_config_path};
+use crate::error::EngineError;
+use crate::system::System;
+use crate::utils::paths::PathOps;
 
 /// Request to generate shell activation code.
 #[derive(Debug, Clone)]
 pub struct ActivateRequest {
+    pub start_dir: PathBuf,
     pub home_dir: PathBuf,
     pub shell: Option<String>,
 }
@@ -27,8 +35,10 @@ pub enum ShellKind {
     Cmd,
 }
 
-/// Generates shell code that prepends Still's bin directory to PATH.
-pub fn run(request: ActivateRequest) -> EngineResult<ActivateResult> {
+/// Generates shell code that applies Still-managed PATH and configured env.
+/// # Errors
+/// Fails when the shell is unsupported or project env cannot be resolved.
+pub async fn run(request: ActivateRequest) -> Result<ActivateResult> {
     let shell = request
         .shell
         .as_deref()
@@ -36,13 +46,13 @@ pub fn run(request: ActivateRequest) -> EngineResult<ActivateResult> {
         .transpose()?
         .unwrap_or(ShellKind::Posix);
     let root = still_root(&request.home_dir);
-    let bin = root.join("bin");
-    let code = activation_code(shell, &root, &bin);
+    let vars = activation_vars(&request.start_dir, &request.home_dir, &root).await?;
+    let code = activation_code(shell, &vars)?;
 
     Ok(ActivateResult { shell, code })
 }
 
-fn parse_shell(value: &str) -> EngineResult<ShellKind> {
+fn parse_shell(value: &str) -> Result<ShellKind, EngineError> {
     match value {
         "sh" | "bash" | "zsh" | "posix" => Ok(ShellKind::Posix),
         "fish" => Ok(ShellKind::Fish),
@@ -54,17 +64,72 @@ fn parse_shell(value: &str) -> EngineResult<ShellKind> {
     }
 }
 
-fn activation_code(shell: ShellKind, root: &Path, bin: &Path) -> String {
-    let root = root.display();
-    let bin = bin.display();
-    match shell {
-        ShellKind::Posix => format!("export STILL_HOME=\"{root}\"\nexport PATH=\"{bin}:$PATH\""),
-        ShellKind::Fish => format!("set -gx STILL_HOME \"{root}\"\nfish_add_path \"{bin}\""),
-        ShellKind::PowerShell => {
-            format!("$env:STILL_HOME = \"{root}\"\n$env:Path = \"{bin};$env:Path\"")
-        }
-        ShellKind::Cmd => format!("set \"STILL_HOME={root}\"\nset \"PATH={bin};%PATH%\""),
+async fn activation_vars(
+    start_dir: &Path,
+    home_dir: &Path,
+    root: &Path,
+) -> Result<BTreeMap<String, String>> {
+    let has_readable_config =
+        find_project_config(start_dir).is_some() || global_config_path(home_dir).is_file();
+    let mut vars = if has_readable_config {
+        resolve_env(start_dir, home_dir).await?.vars
+    } else {
+        BTreeMap::from([("PATH".to_string(), managed_path())])
+    };
+    vars.insert("STILL_HOME".to_string(), root.display().to_string());
+    Ok(vars)
+}
+
+fn managed_path() -> String {
+    let mut paths = vec![System::bin_dir()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
     }
+    std::env::join_paths(paths)
+        .unwrap_or_else(|_| System::bin_dir().into_os_string())
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn activation_code(shell: ShellKind, vars: &BTreeMap<String, String>) -> Result<String> {
+    let mut lines = Vec::new();
+    for (key, value) in vars {
+        if !is_portable_env_name(key) {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("invalid environment variable name \"{key}\""),
+            }
+            .into());
+        }
+        lines.push(match shell {
+            ShellKind::Posix => format!("export {key}={}", quote_posix(value)),
+            ShellKind::Fish => format!("set -gx {key} {}", quote_fish(value)),
+            ShellKind::PowerShell => format!("$env:{key} = {}", quote_powershell(value)),
+            ShellKind::Cmd => format!("set \"{key}={}\"", quote_cmd_set_value(value)),
+        });
+    }
+    Ok(lines.join("\n"))
+}
+
+fn is_portable_env_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some('_') | Some('A'..='Z') | Some('a'..='z'))
+        && chars.all(|char| matches!(char, '_' | 'A'..='Z' | 'a'..='z' | '0'..='9'))
+}
+
+fn quote_posix(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn quote_fish(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn quote_powershell(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn quote_cmd_set_value(value: &str) -> String {
+    value.replace('^', "^^").replace('"', "^\"")
 }
 
 fn still_root(home_dir: &Path) -> PathBuf {
@@ -79,14 +144,21 @@ fn still_root(home_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
     use super::*;
 
-    #[test]
-    fn generates_posix_activation_by_default() {
+    #[tokio::test]
+    async fn generates_posix_activation_by_default() {
+        let temp = tempfile::tempdir().unwrap();
         let result = run(ActivateRequest {
-            home_dir: PathBuf::from("/home/alex"),
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
             shell: None,
         })
+        .await
         .unwrap();
 
         assert_eq!(result.shell, ShellKind::Posix);
@@ -94,26 +166,150 @@ mod tests {
         assert!(result.code.contains("export PATH="));
     }
 
-    #[test]
-    fn generates_fish_activation() {
+    #[tokio::test]
+    async fn generates_fish_activation() {
+        let temp = tempfile::tempdir().unwrap();
         let result = run(ActivateRequest {
-            home_dir: PathBuf::from("/home/alex"),
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
             shell: Some("fish".to_string()),
         })
+        .await
         .unwrap();
 
         assert_eq!(result.shell, ShellKind::Fish);
-        assert!(result.code.contains("fish_add_path"));
+        assert!(result.code.contains("set -gx PATH"));
     }
 
-    #[test]
-    fn rejects_unknown_shells() {
+    #[tokio::test]
+    async fn activation_applies_project_env() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [env]
+            RUST_LOG = "debug"
+            MESSAGE = "hello 'still'"
+            "#,
+        )
+        .unwrap();
+
+        let result = run(ActivateRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            shell: None,
+        })
+        .await
+        .unwrap();
+
+        assert!(result.code.contains("export RUST_LOG='debug'"));
+        assert!(
+            result
+                .code
+                .contains("export MESSAGE='hello '\"'\"'still'\"'\"''")
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_env_file_loading_requires_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(temp.path().join(".env"), "TOKEN=secret\n").unwrap();
+
         let err = run(ActivateRequest {
-            home_dir: PathBuf::from("/home/alex"),
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            shell: None,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("not trusted"));
+        assert!(err.to_string().contains("env file loading"));
+    }
+
+    #[tokio::test]
+    async fn activation_loads_trusted_env_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [env]
+            files = [".env"]
+            INLINE = "config"
+            "#;
+        fs::write(&config_path, config).unwrap();
+        fs::write(temp.path().join(".env"), "FROM_FILE=loaded\n").unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(ActivateRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            shell: Some("powershell".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.code.contains("$env:FROM_FILE = 'loaded'"));
+        assert!(result.code.contains("$env:INLINE = 'config'"));
+    }
+
+    #[tokio::test]
+    async fn activation_applies_global_env_without_project_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            &global,
+            r#"
+            [env]
+            GLOBAL_ONLY = "yes"
+            "#,
+        )
+        .unwrap();
+
+        let result = run(ActivateRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            shell: None,
+        })
+        .await
+        .unwrap();
+
+        assert!(result.code.contains("export GLOBAL_ONLY='yes'"));
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_shells() {
+        let temp = tempfile::tempdir().unwrap();
+        let err = run(ActivateRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
             shell: Some("elvish".to_string()),
         })
+        .await
         .unwrap_err();
 
         assert!(err.to_string().contains("unsupported shell"));
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
     }
 }
