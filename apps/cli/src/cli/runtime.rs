@@ -213,7 +213,7 @@ impl CliRuntime for RealRuntime {
             home_dir,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        runtime.block_on(engine::actions::sync::plan(request))
+        runtime.block_on(engine::actions::sync::run(request))
     }
 
     fn services(

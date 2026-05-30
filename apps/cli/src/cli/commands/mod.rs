@@ -65,6 +65,15 @@ where
                         ));
                     }
                 }
+                if !result.installed.is_empty() {
+                    output.info("Installed:");
+                    for item in &result.installed {
+                        output.info(&format!(
+                            "  {} {}@{}",
+                            item.kind, item.spec.name, item.spec.version
+                        ));
+                    }
+                }
                 output.info("Sync plan:");
                 if result.items.is_empty() {
                     output.info("  (nothing to sync)");
@@ -1504,6 +1513,7 @@ doctor failed: home directory missing
                     sync_item(ItemKind::App, "firefox@latest@homebrew-cask"),
                 ],
                 missing: vec![sync_item(ItemKind::Package, "openssl")],
+                installed: vec![sync_item(ItemKind::Tool, "rust@stable@rustup")],
             })),
             services_result: None,
             services_requests: Vec::new(),
@@ -1527,6 +1537,8 @@ Drift:
   lockfile outdated
 Missing:
   package openssl@latest
+Installed:
+  tool rust@stable
 Sync plan:
   tool rust@stable@rustup
   package openssl@latest
@@ -1561,6 +1573,7 @@ Sync plan:
                 drift: Vec::new(),
                 items: Vec::new(),
                 missing: Vec::new(),
+                installed: Vec::new(),
             })),
             services_result: None,
             services_requests: Vec::new(),

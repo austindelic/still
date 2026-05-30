@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::lockfile::{lockfile_path, render_lockfile};
 use crate::platform::{PlatformFilter, PlatformId};
@@ -27,6 +28,7 @@ pub struct SyncResult {
     pub items: Vec<SyncItem>,
     pub drift: Vec<SyncDrift>,
     pub missing: Vec<SyncItem>,
+    pub installed: Vec<SyncItem>,
 }
 
 /// One desired item that sync should reconcile.
@@ -41,6 +43,52 @@ pub struct SyncItem {
 pub enum SyncDrift {
     LockfileMissing,
     LockfileOutdated,
+}
+
+/// Installs missing items selected by sync.
+pub trait SyncInstaller {
+    /// Installs the supplied missing items.
+    /// # Errors
+    /// Fails when backend resolution, download, extraction, linking, or app
+    /// registration fails.
+    async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()>;
+}
+
+/// Production sync installer backed by the engine install action.
+#[derive(Debug, Default)]
+pub struct RealSyncInstaller;
+
+impl SyncInstaller for RealSyncInstaller {
+    async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        super::install::run(InstallRequest { items }).await?;
+        Ok(())
+    }
+}
+
+/// Reconciles config, lockfile, and missing installs with the production installer.
+/// # Errors
+/// Fails when planning, lockfile writing, missing detection, or install execution fails.
+pub async fn run(request: SyncRequest) -> Result<SyncResult> {
+    let mut installer = RealSyncInstaller;
+    run_with_installer(request, &mut installer).await
+}
+
+/// Reconciles config with an injected installer for tests and alternate frontends.
+/// # Errors
+/// Fails when planning, lockfile writing, missing detection, or install execution fails.
+pub async fn run_with_installer(
+    request: SyncRequest,
+    installer: &mut impl SyncInstaller,
+) -> Result<SyncResult> {
+    let mut result = plan(request).await?;
+    let to_install = install_requests(&result.missing);
+    installer.install(to_install).await?;
+    result.installed = result.missing.clone();
+    result.missing = missing_items(&result.items).await?;
+    Ok(result)
 }
 
 /// Reads config, writes a lockfile, and returns desired install state.
@@ -74,7 +122,18 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         items,
         drift,
         missing,
+        installed: Vec::new(),
     })
+}
+
+fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
+    items
+        .iter()
+        .map(|item| InstallItemRequest {
+            kind: item.kind,
+            spec: item.spec.clone(),
+        })
+        .collect()
 }
 
 async fn lockfile_drift(path: &std::path::Path, desired: &str) -> Result<Vec<SyncDrift>> {
@@ -188,6 +247,18 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[derive(Default)]
+    struct FakeInstaller {
+        installed: Vec<InstallItemRequest>,
+    }
+
+    impl SyncInstaller for FakeInstaller {
+        async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
+            self.installed.extend(items);
+            Ok(())
+        }
+    }
 
     #[tokio::test]
     async fn sync_plans_tools_packages_and_apps() {
@@ -310,6 +381,34 @@ mod tests {
 
         assert_eq!(result.missing.len(), 1);
         assert_eq!(result.missing[0].spec.name, "still-test-definitely-missing");
+    }
+
+    #[tokio::test]
+    async fn sync_installs_missing_items_through_installer() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nstill-test-definitely-missing = \"0.0.1\"\n",
+        )
+        .unwrap();
+        let mut installer = FakeInstaller::default();
+
+        let result = run_with_installer(
+            SyncRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(installer.installed.len(), 1);
+        assert_eq!(
+            installer.installed[0].spec.name,
+            "still-test-definitely-missing"
+        );
+        assert_eq!(result.installed.len(), 1);
     }
 
     #[tokio::test]
