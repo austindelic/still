@@ -10,7 +10,9 @@ use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::error::EngineError;
+use crate::platform::{PlatformId, current_platform};
 use crate::specs::item::{BackendId, ItemKind};
+use crate::specs::toml::{PackageEntry, PackageMap, parse_still_toml};
 use crate::system::{Linux, MacOS, System, Windows};
 use crate::utils::paths::PathOps;
 
@@ -88,12 +90,13 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
         }
         .into());
     };
+    let artifact_targets = artifact_targets_for_config(&content, kind, &request.target)?;
 
     tokio::fs::write(&resolved.path, updated)
         .await
         .with_context(|| format!("failed to write {}", resolved.path.display()))?;
     refresh_lockfile(&resolved.path).await?;
-    let removed_paths = remove_installed_artifacts(kind, &request.target).await?;
+    let removed_paths = remove_installed_artifacts(kind, &artifact_targets).await?;
 
     Ok(UninstallResult {
         path: resolved.path,
@@ -105,17 +108,56 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
 
 async fn remove_installed_artifacts(
     kind: ItemKind,
-    target: &UninstallTarget,
+    targets: &[UninstallTarget],
 ) -> Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
-    for path in managed_artifact_paths(kind, target).await? {
-        if tokio::fs::symlink_metadata(&path).await.is_err() {
-            continue;
+    let mut seen = BTreeSet::new();
+    for target in targets {
+        for path in managed_artifact_paths(kind, target).await? {
+            if !seen.insert(path.clone()) || tokio::fs::symlink_metadata(&path).await.is_err() {
+                continue;
+            }
+            remove_path(&path).await?;
+            removed.push(path);
         }
-        remove_path(&path).await?;
-        removed.push(path);
     }
     Ok(removed)
+}
+
+fn artifact_targets_for_config(
+    content: &str,
+    kind: ItemKind,
+    target: &UninstallTarget,
+) -> Result<Vec<UninstallTarget>> {
+    let mut targets = vec![target.clone()];
+    let Some(resolved_name) = resolved_artifact_name(content, kind, &target.name)? else {
+        return Ok(targets);
+    };
+    if resolved_name != target.name {
+        let mut resolved = target.clone();
+        resolved.name = resolved_name;
+        targets.push(resolved);
+    }
+    Ok(targets)
+}
+
+fn resolved_artifact_name(content: &str, kind: ItemKind, name: &str) -> Result<Option<String>> {
+    let config = parse_still_toml(content)?;
+    let map = match kind {
+        ItemKind::Tool => return Ok(None),
+        ItemKind::Package => config.packages,
+        ItemKind::App => config.apps,
+    };
+    Ok(package_name_for_current_platform(&map, name))
+}
+
+fn package_name_for_current_platform(map: &PackageMap, name: &str) -> Option<String> {
+    let PackageEntry::Expanded(package) = map.entries.get(name)?;
+    let platform = current_platform();
+    package.names.iter().find_map(|(key, value)| {
+        let key_platform: PlatformId = key.parse().ok()?;
+        (key_platform == platform).then(|| value.clone())
+    })
 }
 
 async fn managed_artifact_paths(kind: ItemKind, target: &UninstallTarget) -> Result<Vec<PathBuf>> {
@@ -298,6 +340,25 @@ mod tests {
         let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(config.packages.latest, ["llvm"]);
         assert!(!config.packages.entries.contains_key("openssl"));
+    }
+
+    #[test]
+    fn uninstall_artifact_targets_include_platform_specific_package_name() {
+        let platform = current_platform().to_string();
+        let config = format!(
+            r#"
+            [packages.fd]
+            version = "latest"
+            names = {{ {platform} = "fd-find" }}
+            "#
+        );
+
+        let targets =
+            artifact_targets_for_config(&config, ItemKind::Package, &target("fd")).unwrap();
+
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|target| target.name == "fd"));
+        assert!(targets.iter().any(|target| target.name == "fd-find"));
     }
 
     #[tokio::test]
