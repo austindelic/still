@@ -82,6 +82,20 @@ pub struct InstallResult {
     pub outputs: Vec<PathBuf>,
     /// Executable links created in Still's bin directory.
     pub linked_executables: Vec<PathBuf>,
+    /// Every item installed during this request, in request order.
+    pub installed: Vec<InstalledItemResult>,
+}
+
+/// One installed item result inside a possibly multi-item install request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledItemResult {
+    pub kind: ItemKind,
+    pub name: String,
+    pub version: String,
+    pub install_path: PathBuf,
+    pub binary_path: Option<PathBuf>,
+    pub outputs: Vec<PathBuf>,
+    pub linked_executables: Vec<PathBuf>,
 }
 
 /// Installs one requested item into Still-managed storage and links its executable when found.
@@ -100,16 +114,29 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     }
 
     let mut last = None;
+    let mut installed = Vec::new();
     for item in &request.items {
-        last = Some(install_one(item).await.with_context(|| {
+        let result = install_one(item).await.with_context(|| {
             format!(
                 "failed to install {} {}@{}",
                 item.kind, item.spec.name, item.spec.version
             )
-        })?);
+        })?;
+        installed.push(InstalledItemResult {
+            kind: item.kind,
+            name: result.tool_name.clone(),
+            version: result.version.clone(),
+            install_path: result.install_path.clone(),
+            binary_path: result.binary_path.clone(),
+            outputs: result.outputs.clone(),
+            linked_executables: result.linked_executables.clone(),
+        });
+        last = Some(result);
     }
 
-    last.ok_or_else(|| EngineError::EmptyInstallRequest.into())
+    let mut result: InstallResult = last.ok_or_else(|| EngineError::EmptyInstallRequest)?;
+    result.installed = installed;
+    Ok(result)
 }
 
 async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
@@ -173,6 +200,7 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
         binary_path,
         outputs: vec![install_path],
         linked_executables,
+        installed: Vec::new(),
     })
 }
 
@@ -219,6 +247,7 @@ async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallR
         binary_path: None,
         outputs: vec![install_path],
         linked_executables: Vec::new(),
+        installed: Vec::new(),
     })
 }
 
@@ -389,6 +418,7 @@ async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
         binary_path: None,
         outputs: vec![install_path],
         linked_executables: Vec::new(),
+        installed: Vec::new(),
     })
 }
 
@@ -519,6 +549,7 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
         binary_path: None,
         outputs: vec![install_path],
         linked_executables: Vec::new(),
+        installed: Vec::new(),
     })
 }
 

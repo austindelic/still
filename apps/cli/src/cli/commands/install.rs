@@ -3,7 +3,7 @@
 use crate::cli::args::InstallArgs;
 use crate::cli::output::Output;
 use crate::cli::runtime::{CliRuntime, InstallCommandRequest};
-use engine::actions::install::{InstallItemRequest, InstallRequest};
+use engine::actions::install::{InstallItemRequest, InstallRequest, InstallResult};
 use engine::registries::specs::tool::ToolSpec;
 use engine::specs::item::{ItemKind, ItemSpec};
 
@@ -28,6 +28,7 @@ where
             return 1;
         }
     };
+    let request_items = items.clone();
     let install_request = InstallCommandRequest {
         global,
         force,
@@ -36,21 +37,8 @@ where
 
     match runtime.install(install_request) {
         Ok(res) => {
-            if let Some(binary_path) = &res.binary_path {
-                output.info(&format!("Binary installed at: {}", binary_path.display()));
-            } else {
-                output.warning(&format!(
-                    "Could not find binary in {}",
-                    res.install_path.display()
-                ));
-            }
-
-            output.success(&format!(
-                "Successfully installed {}@{} to {}",
-                res.tool_name,
-                res.version,
-                res.install_path.display()
-            ));
+            write_grouped_request(&request_items, output);
+            write_install_result(&res, output);
             0
         }
         Err(e) => {
@@ -58,6 +46,72 @@ where
             1
         }
     }
+}
+
+fn write_grouped_request<O: Output>(items: &[InstallItemRequest], output: &mut O) {
+    for (kind, heading) in [
+        (ItemKind::Tool, "Tools"),
+        (ItemKind::Package, "Packages"),
+        (ItemKind::App, "Apps"),
+    ] {
+        let names = items
+            .iter()
+            .filter(|item| item.kind == kind)
+            .map(|item| item.spec.name.as_str())
+            .collect::<Vec<_>>();
+        if names.is_empty() {
+            continue;
+        }
+        output.info(&format!("{heading}:"));
+        for name in names {
+            output.info(&format!("  {name}"));
+        }
+    }
+}
+
+fn write_install_result<O: Output>(res: &InstallResult, output: &mut O) {
+    if res.installed.is_empty() {
+        write_one_install(
+            &res.tool_name,
+            &res.version,
+            &res.install_path,
+            res.binary_path.as_deref(),
+            output,
+        );
+        return;
+    }
+
+    for item in &res.installed {
+        write_one_install(
+            &item.name,
+            &item.version,
+            &item.install_path,
+            item.binary_path.as_deref(),
+            output,
+        );
+    }
+}
+
+fn write_one_install<O: Output>(
+    name: &str,
+    version: &str,
+    install_path: &std::path::Path,
+    binary_path: Option<&std::path::Path>,
+    output: &mut O,
+) {
+    if let Some(binary_path) = binary_path {
+        output.info(&format!("Binary installed at: {}", binary_path.display()));
+    } else {
+        output.warning(&format!(
+            "Could not find binary in {}",
+            install_path.display()
+        ));
+    }
+
+    output.success(&format!(
+        "Successfully installed {name}@{version} to {}",
+        install_path.display()
+    ));
 }
 
 fn install_items(args: InstallArgs) -> anyhow::Result<Vec<InstallItemRequest>> {
@@ -116,7 +170,7 @@ mod tests {
     use engine::actions::doctor::DoctorResult;
     use engine::actions::env::EnvResult;
     use engine::actions::init::InitResult;
-    use engine::actions::install::InstallResult;
+    use engine::actions::install::{InstallResult, InstalledItemResult};
     use engine::actions::list::ListResult;
     use engine::actions::run::RunResult;
     use engine::actions::services::{ServicesOperation, ServicesResult};
@@ -215,14 +269,13 @@ mod tests {
     fn install_success_writes_stdout_and_records_request() {
         let args = install_args("ripgrep");
         let mut runtime = FakeRuntime {
-            install_result: Some(Ok(InstallResult {
-                tool_name: "ripgrep".to_string(),
-                version: "14.1.1".to_string(),
-                install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
-                binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
-                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
-                linked_executables: vec![PathBuf::from("/opt/still/bin/rg")],
-            })),
+            install_result: Some(Ok(install_result(
+                ItemKind::Tool,
+                "ripgrep",
+                "14.1.1",
+                "/opt/still/tools/ripgrep/14.1.1",
+                Some("/opt/still/tools/ripgrep/14.1.1/bin/rg"),
+            ))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();
@@ -242,6 +295,8 @@ mod tests {
         assert_eq!(runtime.install_globals, [false]);
         assert_eq!(runtime.install_forces, [false]);
         insta::assert_snapshot!(output.stdout, @r###"
+Tools:
+  ripgrep
 Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
 ✓ Successfully installed ripgrep@14.1.1 to /opt/still/tools/ripgrep/14.1.1
 "###);
@@ -252,14 +307,13 @@ Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
     fn install_success_without_binary_writes_warning_to_stderr() {
         let args = install_args("ripgrep");
         let mut runtime = FakeRuntime {
-            install_result: Some(Ok(InstallResult {
-                tool_name: "ripgrep".to_string(),
-                version: "14.1.1".to_string(),
-                install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
-                binary_path: None,
-                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
-                linked_executables: Vec::new(),
-            })),
+            install_result: Some(Ok(install_result(
+                ItemKind::Tool,
+                "ripgrep",
+                "14.1.1",
+                "/opt/still/tools/ripgrep/14.1.1",
+                None,
+            ))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();
@@ -268,6 +322,8 @@ Binary installed at: /opt/still/tools/ripgrep/14.1.1/bin/rg
 
         assert_eq!(code, 0);
         insta::assert_snapshot!(output.stdout, @r###"
+Tools:
+  ripgrep
 ✓ Successfully installed ripgrep@14.1.1 to /opt/still/tools/ripgrep/14.1.1
 "###);
         insta::assert_snapshot!(output.stderr, @r###"
@@ -298,14 +354,13 @@ install failed: formula.json not found
         let mut args = install_args("ripgrep");
         args.global = true;
         let mut runtime = FakeRuntime {
-            install_result: Some(Ok(InstallResult {
-                tool_name: "ripgrep".to_string(),
-                version: "14.1.1".to_string(),
-                install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
-                binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
-                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
-                linked_executables: vec![PathBuf::from("/opt/still/bin/rg")],
-            })),
+            install_result: Some(Ok(install_result(
+                ItemKind::Tool,
+                "ripgrep",
+                "14.1.1",
+                "/opt/still/tools/ripgrep/14.1.1",
+                Some("/opt/still/tools/ripgrep/14.1.1/bin/rg"),
+            ))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();
@@ -322,14 +377,13 @@ install failed: formula.json not found
         let mut args = install_args("ripgrep");
         args.force = true;
         let mut runtime = FakeRuntime {
-            install_result: Some(Ok(InstallResult {
-                tool_name: "ripgrep".to_string(),
-                version: "14.1.1".to_string(),
-                install_path: PathBuf::from("/opt/still/tools/ripgrep/14.1.1"),
-                binary_path: Some(PathBuf::from("/opt/still/tools/ripgrep/14.1.1/bin/rg")),
-                outputs: vec![PathBuf::from("/opt/still/tools/ripgrep/14.1.1")],
-                linked_executables: vec![PathBuf::from("/opt/still/bin/rg")],
-            })),
+            install_result: Some(Ok(install_result(
+                ItemKind::Tool,
+                "ripgrep",
+                "14.1.1",
+                "/opt/still/tools/ripgrep/14.1.1",
+                Some("/opt/still/tools/ripgrep/14.1.1/bin/rg"),
+            ))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();
@@ -350,14 +404,13 @@ install failed: formula.json not found
             "firefox@latest@homebrew-cask".parse().unwrap(),
         ];
         let mut runtime = FakeRuntime {
-            install_result: Some(Ok(InstallResult {
-                tool_name: "firefox".to_string(),
-                version: "latest".to_string(),
-                install_path: PathBuf::from("/opt/still/apps/firefox/latest"),
-                binary_path: None,
-                outputs: vec![PathBuf::from("/opt/still/apps/firefox/latest")],
-                linked_executables: Vec::new(),
-            })),
+            install_result: Some(Ok(install_result(
+                ItemKind::App,
+                "firefox",
+                "latest",
+                "/opt/still/apps/firefox/latest",
+                None,
+            ))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();
@@ -391,6 +444,98 @@ install failed: formula.json not found
     }
 
     #[test]
+    fn install_reports_grouped_multi_item_request_and_each_result() {
+        let mut args = install_args("jq");
+        args.tools.push("fd".parse().unwrap());
+        args.packages = vec!["openssl".parse().unwrap(), "llvm".parse().unwrap()];
+        args.apps = vec!["zed".parse().unwrap(), "firefox".parse().unwrap()];
+        let mut result = install_result(
+            ItemKind::App,
+            "firefox",
+            "latest",
+            "/opt/still/apps/firefox/latest",
+            Some("/opt/still/apps/firefox/latest/firefox"),
+        );
+        result.installed = vec![
+            installed_item(
+                ItemKind::Tool,
+                "jq",
+                "latest",
+                "/opt/still/tools/jq/latest",
+                Some("/opt/still/tools/jq/latest/bin/jq"),
+            ),
+            installed_item(
+                ItemKind::Tool,
+                "fd",
+                "latest",
+                "/opt/still/tools/fd/latest",
+                Some("/opt/still/tools/fd/latest/bin/fd"),
+            ),
+            installed_item(
+                ItemKind::Package,
+                "openssl",
+                "latest",
+                "/opt/still/packages/openssl/latest",
+                Some("/opt/still/packages/openssl/latest/bin/openssl"),
+            ),
+            installed_item(
+                ItemKind::Package,
+                "llvm",
+                "latest",
+                "/opt/still/packages/llvm/latest",
+                Some("/opt/still/packages/llvm/latest/bin/llvm"),
+            ),
+            installed_item(
+                ItemKind::App,
+                "zed",
+                "latest",
+                "/opt/still/apps/zed/latest",
+                Some("/opt/still/apps/zed/latest/zed"),
+            ),
+            installed_item(
+                ItemKind::App,
+                "firefox",
+                "latest",
+                "/opt/still/apps/firefox/latest",
+                Some("/opt/still/apps/firefox/latest/firefox"),
+            ),
+        ];
+        let mut runtime = FakeRuntime {
+            install_result: Some(Ok(result)),
+            ..FakeRuntime::default()
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run(args, &mut runtime, &mut output);
+
+        assert_eq!(code, 0);
+        insta::assert_snapshot!(output.stdout, @r###"
+Tools:
+  jq
+  fd
+Packages:
+  openssl
+  llvm
+Apps:
+  zed
+  firefox
+Binary installed at: /opt/still/tools/jq/latest/bin/jq
+✓ Successfully installed jq@latest to /opt/still/tools/jq/latest
+Binary installed at: /opt/still/tools/fd/latest/bin/fd
+✓ Successfully installed fd@latest to /opt/still/tools/fd/latest
+Binary installed at: /opt/still/packages/openssl/latest/bin/openssl
+✓ Successfully installed openssl@latest to /opt/still/packages/openssl/latest
+Binary installed at: /opt/still/packages/llvm/latest/bin/llvm
+✓ Successfully installed llvm@latest to /opt/still/packages/llvm/latest
+Binary installed at: /opt/still/apps/zed/latest/zed
+✓ Successfully installed zed@latest to /opt/still/apps/zed/latest
+Binary installed at: /opt/still/apps/firefox/latest/firefox
+✓ Successfully installed firefox@latest to /opt/still/apps/firefox/latest
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
     fn install_errors_when_unclassified_item_is_ambiguous() {
         let mut args = install_args("jq");
         args.tools.clear();
@@ -415,6 +560,48 @@ install failed: cannot infer whether jq is a tool, package, or app; use --tool, 
             packages: Vec::new(),
             apps: Vec::new(),
             items: Vec::new(),
+        }
+    }
+
+    fn install_result(
+        kind: ItemKind,
+        name: &str,
+        version: &str,
+        install_path: &str,
+        binary_path: Option<&str>,
+    ) -> InstallResult {
+        InstallResult {
+            tool_name: name.to_string(),
+            version: version.to_string(),
+            install_path: PathBuf::from(install_path),
+            binary_path: binary_path.map(PathBuf::from),
+            outputs: vec![PathBuf::from(install_path)],
+            linked_executables: binary_path.map(PathBuf::from).into_iter().collect(),
+            installed: vec![installed_item(
+                kind,
+                name,
+                version,
+                install_path,
+                binary_path,
+            )],
+        }
+    }
+
+    fn installed_item(
+        kind: ItemKind,
+        name: &str,
+        version: &str,
+        install_path: &str,
+        binary_path: Option<&str>,
+    ) -> InstalledItemResult {
+        InstalledItemResult {
+            kind,
+            name: name.to_string(),
+            version: version.to_string(),
+            install_path: PathBuf::from(install_path),
+            binary_path: binary_path.map(PathBuf::from),
+            outputs: vec![PathBuf::from(install_path)],
+            linked_executables: binary_path.map(PathBuf::from).into_iter().collect(),
         }
     }
 }
