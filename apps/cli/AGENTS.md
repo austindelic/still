@@ -32,7 +32,7 @@ Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file 
 - No subcommand opens the TUI in `--features tui` builds.
 - CLI subcommands should behave the same with or without the TUI feature.
 - `install` installs immediately and records requested items in config.
-- Config mutation should be explicit through `install` and future `use`, `add`, or `config set` flows.
+- Config mutation should be explicit. In v0.1, `install` and `uninstall` are the supported mutation flows.
 - `sync` reconciles local installed state from `still.toml`.
 - `config check` is the schema/Taplo validation path.
 - `doctor` diagnoses local machine and project health.
