@@ -17,6 +17,7 @@ use engine::actions::{
     uninstall::{UninstallRequest, UninstallResult, UninstallTarget},
 };
 use engine::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use engine::lockfile::lockfile_path;
 
 /// CLI install request plus desired-state write scope.
 #[derive(Debug, Clone)]
@@ -344,16 +345,39 @@ fn record_install_items(pending: PendingInstallConfigWrite) -> anyhow::Result<()
     if let Some(parent) = pending.path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let lockfile_path = lockfile_path(&pending.path);
+    let original_lockfile = read_optional_file(&lockfile_path)?;
     std::fs::write(&pending.path, pending.updated)?;
     let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     if let Err(err) = runtime.block_on(engine::actions::sync::refresh_lockfile(&pending.path)) {
         restore_install_config(&pending.path, pending.original)?;
+        restore_install_lockfile(&lockfile_path, original_lockfile)?;
         return Err(err);
     }
     Ok(())
 }
 
+fn read_optional_file(path: &std::path::Path) -> anyhow::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
 fn restore_install_config(path: &std::path::Path, original: Option<String>) -> anyhow::Result<()> {
+    match original {
+        Some(original) => std::fs::write(path, original)?,
+        None if path.exists() => std::fs::remove_file(path)?,
+        None => {}
+    }
+    Ok(())
+}
+
+fn restore_install_lockfile(
+    path: &std::path::Path,
+    original: Option<String>,
+) -> anyhow::Result<()> {
     match original {
         Some(original) => std::fs::write(path, original)?,
         None if path.exists() => std::fs::remove_file(path)?,
@@ -422,12 +446,13 @@ mod tests {
     }
 
     #[test]
-    fn install_recording_restores_config_when_lockfile_refresh_fails() {
-        let temp = test_dir("install-recording-rollback");
+    fn install_recording_does_not_mutate_config_when_lockfile_backup_fails() {
+        let temp = test_dir("install-recording-preflight");
         let config_path = temp.join("still.toml");
         let original = "[tools]\nrust = \"stable\"\n";
         fs::write(&config_path, original).unwrap();
-        fs::create_dir(temp.join("still.lock.toml")).unwrap();
+        let lockfile_path = temp.join("still.lock.toml");
+        fs::create_dir(&lockfile_path).unwrap();
 
         let err = record_install_items(PendingInstallConfigWrite {
             path: config_path.clone(),
@@ -436,8 +461,48 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(err.to_string().contains("still.lock.toml"));
+        assert!(!err.to_string().is_empty());
         assert_eq!(fs::read_to_string(config_path).unwrap(), original);
+        assert!(lockfile_path.is_dir());
+    }
+
+    #[test]
+    fn install_recording_restores_lockfile_when_refresh_fails() {
+        let temp = test_dir("install-lockfile-rollback");
+        let config_path = temp.join("still.toml");
+        let lockfile_path = temp.join("still.lock.toml");
+        let original_config = "[tools]\nrust = \"stable\"\n";
+        let original_lockfile = "# original lockfile\n";
+        fs::write(&config_path, original_config).unwrap();
+        fs::write(&lockfile_path, original_lockfile).unwrap();
+
+        let err = record_install_items(PendingInstallConfigWrite {
+            path: config_path.clone(),
+            original: Some(original_config.to_string()),
+            updated: "[tools]\nrust = {}\n".to_string(),
+        })
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("tool \"rust\" must define version")
+        );
+        assert_eq!(fs::read_to_string(config_path).unwrap(), original_config);
+        assert_eq!(
+            fs::read_to_string(lockfile_path).unwrap(),
+            original_lockfile
+        );
+    }
+
+    #[test]
+    fn install_restore_lockfile_puts_original_content_back() {
+        let temp = test_dir("install-lockfile-restore-helper");
+        let lockfile_path = temp.join("still.lock.toml");
+        fs::write(&lockfile_path, "# updated\n").unwrap();
+
+        restore_install_lockfile(&lockfile_path, Some("# original\n".to_string())).unwrap();
+
+        assert_eq!(fs::read_to_string(lockfile_path).unwrap(), "# original\n");
     }
 
     fn install_item(
