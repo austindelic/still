@@ -342,6 +342,36 @@ mod tests {
         assert!(!config.packages.entries.contains_key("openssl"));
     }
 
+    #[tokio::test]
+    async fn uninstall_exact_latest_removes_keyed_app_with_backend() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("still.toml");
+        fs::write(
+            &path,
+            r#"
+            [apps]
+            firefox = { backend = "homebrew-cask" }
+            "#,
+        )
+        .unwrap();
+        let mut target = target("firefox");
+        target.kind = Some(ItemKind::App);
+        target.exact = true;
+
+        let result = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            target,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.kind, ItemKind::App);
+        let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
+        assert!(!config.apps.entries.contains_key("firefox"));
+    }
+
     #[test]
     fn uninstall_artifact_targets_include_platform_specific_package_name() {
         let platform = current_platform().to_string();

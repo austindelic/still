@@ -236,6 +236,7 @@ fn remove_exact_from_section(
             latest.retain(|value| value.as_str() != Some(target.name.as_str()));
             removed |= latest.len() != before;
         }
+        removed |= table.remove(&target.name).is_some();
     } else {
         removed |= table.remove(&target.name).is_some();
     }
@@ -287,11 +288,14 @@ fn exact_package_entry_matches(
     spec: &ItemSpec,
 ) -> Option<bool> {
     if spec.version.is_latest() && spec.backend.is_none() {
-        return map
-            .latest
-            .iter()
-            .any(|name| name == &spec.name)
-            .then_some(true);
+        if map.latest.iter().any(|name| name == &spec.name) {
+            return Some(true);
+        }
+
+        return map.entries.get(&spec.name).map(|entry| {
+            let crate::specs::toml::PackageEntry::Expanded(package) = entry;
+            package.version.as_deref().unwrap_or("latest") == "latest"
+        });
     }
 
     map.entries.get(&spec.name).map(|entry| {
@@ -697,6 +701,22 @@ mod tests {
         let config = parse(&output);
         assert_eq!(removed, Some(ItemKind::Tool));
         assert!(!config.tools.contains_key("rust"));
+    }
+
+    #[test]
+    fn exact_remove_latest_matches_keyed_package_or_app_with_backend() {
+        let (output, removed) = remove_item_target(
+            r#"
+            [apps]
+            firefox = { backend = "homebrew-cask" }
+            "#,
+            &remove_target("firefox@latest"),
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, Some(ItemKind::App));
+        assert!(!config.apps.entries.contains_key("firefox"));
     }
 
     #[test]
