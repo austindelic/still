@@ -241,7 +241,7 @@ fn installed_path(item: &SyncItem) -> PathBuf {
     root.join(&item.spec.name).join(item.spec.version.as_str())
 }
 
-fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
+pub(crate) fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
     let platform = current_platform();
     let mut items = Vec::new();
     for (name, entry) in config.tools {

@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
-use crate::lockfile::{lockfile_path, validate_lockfile};
+use crate::lockfile::{lockfile_path, render_merged_lockfile, validate_lockfile};
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::toml::parse_still_toml;
 use crate::trust::{TrustMarker, config_fingerprint, trust_marker_path};
@@ -143,24 +143,45 @@ fn named_lockfile_check(name: &str, config_path: &Path) -> DoctorCheck {
     }
 
     match std::fs::read_to_string(&path) {
-        Ok(content) => match validate_lockfile(&content) {
-            Ok(_) => DoctorCheck {
-                name: name.to_string(),
-                status: DoctorStatus::Ok,
-                detail: path.display().to_string(),
-            },
-            Err(err) => DoctorCheck {
-                name: name.to_string(),
-                status: DoctorStatus::Error,
-                detail: format!("{}: {err}", path.display()),
-            },
-        },
+        Ok(content) => {
+            if let Err(err) = validate_lockfile(&content) {
+                return DoctorCheck {
+                    name: name.to_string(),
+                    status: DoctorStatus::Error,
+                    detail: format!("{}: {err}", path.display()),
+                };
+            }
+            match expected_lockfile(config_path, &content) {
+                Ok(expected) if expected == content => DoctorCheck {
+                    name: name.to_string(),
+                    status: DoctorStatus::Ok,
+                    detail: path.display().to_string(),
+                },
+                Ok(_) => DoctorCheck {
+                    name: name.to_string(),
+                    status: DoctorStatus::Warning,
+                    detail: format!("{} is outdated; run `still sync`", path.display()),
+                },
+                Err(err) => DoctorCheck {
+                    name: name.to_string(),
+                    status: DoctorStatus::Error,
+                    detail: format!("failed to check {} drift: {err}", path.display()),
+                },
+            }
+        }
         Err(err) => DoctorCheck {
             name: name.to_string(),
             status: DoctorStatus::Error,
             detail: format!("failed to read {}: {err}", path.display()),
         },
     }
+}
+
+fn expected_lockfile(config_path: &Path, existing_lockfile: &str) -> Result<String> {
+    let content = std::fs::read_to_string(config_path)?;
+    let config = parse_still_toml(&content)?;
+    let items = crate::actions::sync::sync_items(config)?;
+    Ok(render_merged_lockfile(Some(existing_lockfile), &items))
 }
 
 fn trust_check(config_path: &Path) -> DoctorCheck {
@@ -351,7 +372,11 @@ mod tests {
     fn doctor_reports_existing_project_and_global_config() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("still.toml"), "[tools]\n").unwrap();
-        fs::write(temp.path().join("still.lock.toml"), "# generated\n").unwrap();
+        fs::write(
+            temp.path().join("still.lock.toml"),
+            render_merged_lockfile(None, &[]),
+        )
+        .unwrap();
         let global = temp.path().join(".config/still/config.toml");
         fs::create_dir_all(global.parent().unwrap()).unwrap();
         fs::write(&global, "[tools]\n").unwrap();
@@ -603,6 +628,35 @@ mod tests {
             .unwrap();
         assert_eq!(check.status, DoctorStatus::Error);
         assert!(check.detail.contains("invalid checksum"));
+    }
+
+    #[test]
+    fn doctor_warns_when_lockfile_is_outdated() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[packages]\nlatest = [\"openssl\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("still.lock.toml"),
+            render_merged_lockfile(None, &[]),
+        )
+        .unwrap();
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "lockfile")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Warning);
+        assert!(check.detail.contains("outdated"));
     }
 
     #[test]
