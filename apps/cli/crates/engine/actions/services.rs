@@ -7,11 +7,10 @@ use std::process::Command;
 use anyhow::{Context, Result};
 
 use crate::actions::run::resolve_env;
+use crate::actions::task::{TaskRequest, run as run_task};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
-use crate::specs::toml::{
-    ExpandedService, ServiceAction, ServiceEntry, TaskEntry, TaskRun, parse_still_toml,
-};
+use crate::specs::toml::{ExpandedService, ServiceAction, ServiceEntry, parse_still_toml};
 use crate::trust::assert_config_trusted;
 
 /// Service operation requested by a caller.
@@ -88,7 +87,6 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let tasks = config.tasks;
     let services = select_services(config.services, request.name.as_deref())?;
     if request.operation != ServicesOperation::Status {
         assert_config_trusted(&resolved.path, content.as_bytes(), "service actions").await?;
@@ -99,27 +97,29 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
         Some(resolve_env(&request.start_dir, &request.home_dir).await?)
     };
     let empty_env = BTreeMap::new();
-    let reports = services
-        .into_iter()
-        .map(|(name, service)| {
-            let command_dir = resolved_env
-                .as_ref()
-                .map(|env| env.working_dir.as_path())
-                .unwrap_or(&working_dir);
-            let command_env = resolved_env
-                .as_ref()
-                .map(|env| &env.vars)
-                .unwrap_or(&empty_env);
+    let mut reports = Vec::new();
+    for (name, service) in services {
+        let command_dir = resolved_env
+            .as_ref()
+            .map(|env| env.working_dir.as_path())
+            .unwrap_or(&working_dir);
+        let command_env = resolved_env
+            .as_ref()
+            .map(|env| &env.vars)
+            .unwrap_or(&empty_env);
+        reports.push(
             service_report(
                 name,
                 service,
                 request.operation,
                 command_dir,
                 command_env,
-                &tasks,
+                &request.start_dir,
+                &request.home_dir,
             )
-        })
-        .collect::<Result<Vec<_>>>()?;
+            .await?,
+        );
+    }
 
     Ok(ServicesResult {
         path: resolved.path,
@@ -142,13 +142,14 @@ fn select_services(
     }
 }
 
-fn service_report(
+async fn service_report(
     name: String,
     service: ServiceEntry,
     operation: ServicesOperation,
     working_dir: &Path,
     env: &BTreeMap<String, String>,
-    tasks: &BTreeMap<String, TaskEntry>,
+    start_dir: &Path,
+    home_dir: &Path,
 ) -> Result<ServiceReport> {
     let normalized = normalize_service(service);
     if operation == ServicesOperation::Status {
@@ -177,7 +178,50 @@ fn service_report(
 
     let command = match action {
         ActionCommand::Command(command) => command,
-        ActionCommand::Task(task) => task_command(tasks, &task)?,
+        ActionCommand::Task(task) => {
+            let result = run_task(TaskRequest {
+                start_dir: start_dir.to_path_buf(),
+                home_dir: home_dir.to_path_buf(),
+                name: Some(task.clone()),
+            })
+            .await?;
+            let stdout = result
+                .executions
+                .iter()
+                .map(|execution| execution.stdout.as_str())
+                .collect::<String>();
+            let stderr = result
+                .executions
+                .iter()
+                .map(|execution| execution.stderr.as_str())
+                .collect::<String>();
+            let command = result
+                .executions
+                .iter()
+                .map(|execution| execution.command.as_str())
+                .collect::<Vec<_>>()
+                .join(" && ");
+
+            return Ok(ServiceReport {
+                name,
+                status: if result.status == 0 {
+                    ServiceStatus::Ok
+                } else {
+                    ServiceStatus::Failed
+                },
+                detail: operation_name(operation).to_string(),
+                execution: Some(ServiceExecution {
+                    command: if command.is_empty() {
+                        format!("task:{task}")
+                    } else {
+                        command
+                    },
+                    status: result.status,
+                    stdout,
+                    stderr,
+                }),
+            });
+        }
     };
 
     let output = shell_command(&command)
@@ -318,28 +362,6 @@ fn action_detail_ref(action: &ServiceAction) -> Option<String> {
     }
 }
 
-fn task_command(tasks: &BTreeMap<String, TaskEntry>, task: &str) -> Result<String> {
-    let entry = tasks.get(task).ok_or_else(|| EngineError::Conflict {
-        message: format!("unknown task \"{task}\""),
-    })?;
-    match entry {
-        TaskEntry::Command(command) => Ok(command.clone()),
-        TaskEntry::Expanded(task_entry) => match &task_entry.run {
-            TaskRun::Command(command) => Ok(command.clone()),
-            TaskRun::Commands(commands) => commands.first().cloned().ok_or_else(|| {
-                EngineError::InvalidConfig {
-                    reason: format!("task \"{task}\" must define run"),
-                }
-                .into()
-            }),
-            TaskRun::None => Err(EngineError::InvalidConfig {
-                reason: format!("task \"{task}\" must define run"),
-            }
-            .into()),
-        },
-    }
-}
-
 fn operation_name(operation: ServicesOperation) -> &'static str {
     match operation {
         ServicesOperation::Status => "status",
@@ -450,6 +472,39 @@ mod tests {
         let execution = result.services[0].execution.as_ref().unwrap();
         assert_eq!(execution.command, "echo web");
         assert_eq!(execution.stdout, "web\n");
+    }
+
+    #[tokio::test]
+    async fn services_task_actions_run_full_task_graph() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [services]
+            web = { task = "web:start" }
+
+            [tasks]
+            setup = "echo setup"
+
+            [tasks."web:start"]
+            depends = ["setup"]
+            run = ["echo web", "echo ready"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(ServicesRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: ServicesOperation::Start,
+            name: Some("web".to_string()),
+        })
+        .await
+        .unwrap();
+
+        let execution = result.services[0].execution.as_ref().unwrap();
+        assert_eq!(execution.status, 0);
+        assert_eq!(execution.command, "echo setup && echo web && echo ready");
+        assert_eq!(execution.stdout, "setup\nweb\nready\n");
     }
 
     #[tokio::test]
