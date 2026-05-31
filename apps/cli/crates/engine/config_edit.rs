@@ -267,10 +267,12 @@ fn add_tool(doc: &mut DocumentMut, spec: &ItemSpec) {
 fn add_package_like(doc: &mut DocumentMut, section: &str, spec: &ItemSpec) {
     let table = table_mut(doc, section);
     if should_use_latest_shorthand(spec) {
+        table.remove(&spec.name);
         append_unique_latest(table, &spec.name);
         return;
     }
 
+    remove_latest_value(table, &spec.name);
     let mut entry = InlineTable::new();
     if !spec.version.is_latest() {
         entry.insert("version", Value::from(spec.version.as_str()));
@@ -300,6 +302,12 @@ fn append_unique_latest(table: &mut Table, name: &str) {
         .expect("latest was set to an array");
     if !latest.iter().any(|value| value.as_str() == Some(name)) {
         latest.push(name);
+    }
+}
+
+fn remove_latest_value(table: &mut Table, name: &str) {
+    if let Some(latest) = table.get_mut("latest").and_then(Item::as_array_mut) {
+        latest.retain(|value| value.as_str() != Some(name));
     }
 }
 
@@ -463,6 +471,43 @@ mod tests {
             panic!("rust should be expanded");
         };
         assert_eq!(rust.backend.as_deref(), Some("mise"));
+    }
+
+    #[test]
+    fn force_replaces_latest_package_with_keyed_entry() {
+        let output = add_install_items_with_force(
+            r#"
+            [packages]
+            latest = ["openssl", "llvm"]
+            "#,
+            &[item(ItemKind::Package, "openssl@3@homebrew")],
+            true,
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(config.packages.latest, ["llvm"]);
+        let PackageEntry::Expanded(openssl) = &config.packages.entries["openssl"];
+        assert_eq!(openssl.version.as_deref(), Some("3"));
+        assert_eq!(openssl.backend.as_deref(), Some("homebrew"));
+    }
+
+    #[test]
+    fn force_replaces_keyed_app_with_latest_entry() {
+        let output = add_install_items_with_force(
+            r#"
+            [apps]
+            firefox = { version = "121", backend = "homebrew-cask" }
+            latest = ["zed"]
+            "#,
+            &[item(ItemKind::App, "firefox")],
+            true,
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(config.apps.latest, ["zed", "firefox"]);
+        assert!(!config.apps.entries.contains_key("firefox"));
     }
 
     #[test]
