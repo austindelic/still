@@ -200,6 +200,8 @@ pub fn parse_still_toml(input: &str) -> Result<StillConfig> {
 }
 
 fn validate_config(config: &StillConfig) -> Result<()> {
+    validate_env_config(&config.env)?;
+
     for (name, entry) in &config.tools {
         if let ToolEntry::Expanded(tool) = entry
             && tool.version.trim().is_empty()
@@ -264,6 +266,18 @@ fn validate_config(config: &StillConfig) -> Result<()> {
         normalize_agents(agents.clone())?;
     }
 
+    Ok(())
+}
+
+fn validate_env_config(env: &EnvConfig) -> Result<()> {
+    for file in &env.files {
+        if file.trim().is_empty() {
+            return Err(EngineError::InvalidConfig {
+                reason: "env files cannot contain empty entries".to_string(),
+            }
+            .into());
+        }
+    }
     Ok(())
 }
 
@@ -459,6 +473,22 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("tool \"rust\" must define version")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_env_file_entries() {
+        let err = parse_still_toml(
+            r#"
+            [env]
+            files = [".env", " "]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("env files cannot contain empty entries")
         );
     }
 
