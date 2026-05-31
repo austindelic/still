@@ -10,6 +10,7 @@ use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
+use crate::specs::backend::normalize_auto_backend;
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -143,11 +144,11 @@ fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Result<Vec<L
         },
         ListSection {
             kind: ItemKind::Package,
-            items: package_items(config.packages, scope, platform)?,
+            items: package_items(ItemKind::Package, config.packages, scope, platform)?,
         },
         ListSection {
             kind: ItemKind::App,
-            items: package_items(config.apps, scope, platform)?,
+            items: package_items(ItemKind::App, config.apps, scope, platform)?,
         },
     ])
 }
@@ -178,7 +179,12 @@ fn tool_items(
                 } else {
                     tool.version
                 },
-                backend: backend_for_platform(tool.backend, tool.backends, platform),
+                backend: backend_for_platform(
+                    ItemKind::Tool,
+                    tool.backend,
+                    tool.backends,
+                    platform,
+                ),
                 outputs: Vec::new(),
                 linked_executables: Vec::new(),
                 configured: true,
@@ -191,6 +197,7 @@ fn tool_items(
 }
 
 fn package_items(
+    kind: ItemKind,
     map: PackageMap,
     scope: ConfigScope,
     platform: PlatformId,
@@ -229,7 +236,7 @@ fn package_items(
             ListItem {
                 name: resolved_name,
                 version: package.version.unwrap_or_else(|| "latest".to_string()),
-                backend: backend_for_platform(package.backend, package.backends, platform),
+                backend: backend_for_platform(kind, package.backend, package.backends, platform),
                 outputs: Vec::new(),
                 linked_executables: Vec::new(),
                 configured: true,
@@ -258,6 +265,7 @@ fn name_for_platform(
 }
 
 fn backend_for_platform(
+    kind: ItemKind,
     backend: Option<String>,
     backends: BTreeMap<String, String>,
     platform: PlatformId,
@@ -269,6 +277,7 @@ fn backend_for_platform(
             _ => None,
         })
         .or(backend)
+        .and_then(|backend| normalize_auto_backend(kind, Some(backend), platform))
 }
 
 async fn discover_installed_items() -> Result<Vec<ListSection>> {
@@ -580,6 +589,64 @@ mod tests {
         assert_eq!(
             result.sections[2].items,
             [item("zed", "latest", Some("flatpak"))]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_resolves_literal_auto_backends() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools.rust]
+            version = "stable"
+            backend = "auto"
+
+            [packages.openssl]
+            version = "3"
+            backend = "auto"
+
+            [apps.firefox]
+            version = "latest"
+            backend = "auto"
+            "#,
+        )
+        .unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.sections[0].items,
+            [item("rust", "stable", Some("homebrew"))]
+        );
+        assert_eq!(
+            result.sections[1].items,
+            [item(
+                "openssl",
+                "3",
+                Some(crate::specs::backend::default_backend(
+                    ItemKind::Package,
+                    current_platform()
+                ))
+            )]
+        );
+        assert_eq!(
+            result.sections[2].items,
+            [item(
+                "firefox",
+                "latest",
+                Some(crate::specs::backend::default_backend(
+                    ItemKind::App,
+                    current_platform()
+                ))
+            )]
         );
     }
 

@@ -8,6 +8,7 @@ use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::lockfile::{lockfile_path, render_merged_lockfile};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
+use crate::specs::backend::normalize_auto_backend;
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -224,7 +225,7 @@ fn tool_spec(name: String, entry: ToolEntry, platform: PlatformId) -> Result<Ite
             item_spec(
                 name,
                 version,
-                backend_for_platform(tool.backend, tool.backends, platform)?,
+                backend_for_platform(ItemKind::Tool, tool.backend, tool.backends, platform)?,
             )
         }
     }
@@ -259,7 +260,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
             spec: item_spec(
                 resolved_name,
                 package.version.unwrap_or_else(|| "latest".to_string()),
-                backend_for_platform(package.backend, package.backends, platform)?,
+                backend_for_platform(kind, package.backend, package.backends, platform)?,
             )?,
             desired_state,
         });
@@ -282,6 +283,7 @@ fn name_for_platform(
 }
 
 fn backend_for_platform(
+    kind: ItemKind,
     backend: Option<String>,
     backends: std::collections::BTreeMap<String, String>,
     platform: PlatformId,
@@ -289,10 +291,10 @@ fn backend_for_platform(
     for (key, value) in backends {
         let key_platform: PlatformId = key.parse()?;
         if key_platform == platform {
-            return Ok(Some(value));
+            return Ok(normalize_auto_backend(kind, Some(value), platform));
         }
     }
-    Ok(backend)
+    Ok(normalize_auto_backend(kind, backend, platform))
 }
 
 fn item_spec(name: String, version: String, backend: Option<String>) -> Result<ItemSpec> {
@@ -467,6 +469,54 @@ mod tests {
             item.kind == ItemKind::Package
                 && item.spec.name == "openssl"
                 && item.spec.backend.as_ref().unwrap().as_str() == "apt"
+        }));
+    }
+
+    #[tokio::test]
+    async fn sync_resolves_literal_auto_backends() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools.rust]
+            version = "stable"
+            backend = "auto"
+
+            [packages.openssl]
+            version = "3"
+            backend = "auto"
+
+            [apps.firefox]
+            version = "latest"
+            backend = "auto"
+            "#,
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        assert!(result.items.iter().any(|item| {
+            item.kind == ItemKind::Tool
+                && item.spec.name == "rust"
+                && item.spec.backend.as_ref().unwrap().as_str() == "homebrew"
+        }));
+        assert!(result.items.iter().any(|item| {
+            item.kind == ItemKind::Package
+                && item.spec.name == "openssl"
+                && item.spec.backend.as_ref().unwrap().as_str()
+                    == crate::specs::backend::default_backend(ItemKind::Package, current_platform())
+        }));
+        assert!(result.items.iter().any(|item| {
+            item.kind == ItemKind::App
+                && item.spec.name == "firefox"
+                && item.spec.backend.as_ref().unwrap().as_str()
+                    == crate::specs::backend::default_backend(ItemKind::App, current_platform())
         }));
     }
 

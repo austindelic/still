@@ -2,6 +2,8 @@
 
 /// Agent skill normalization models.
 pub mod agents;
+/// Backend defaulting and normalization models.
+pub mod backend;
 /// Homebrew formula and cask JSON models.
 pub mod brew;
 /// Shared item request models.
