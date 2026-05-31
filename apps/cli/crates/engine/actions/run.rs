@@ -65,11 +65,19 @@ pub(crate) struct ResolvedRunEnv {
 }
 
 pub(crate) async fn resolve_env(start_dir: &Path, home_dir: &Path) -> Result<ResolvedRunEnv> {
+    resolve_env_with_scope(start_dir, home_dir, ConfigScope::Project).await
+}
+
+pub(crate) async fn resolve_env_with_scope(
+    start_dir: &Path,
+    home_dir: &Path,
+    scope: ConfigScope,
+) -> Result<ResolvedRunEnv> {
     let resolved = resolve_config_path(
         start_dir,
         home_dir,
         ConfigSelection {
-            scope: ConfigScope::Project,
+            scope,
             for_write: false,
         },
     )?;
