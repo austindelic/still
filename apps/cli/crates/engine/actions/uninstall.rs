@@ -1,8 +1,10 @@
 //! Engine action for removing desired install state.
 
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use serde::Deserialize;
 
 use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
@@ -81,7 +83,7 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
 
 async fn remove_installed_artifacts(kind: ItemKind, name: &str) -> Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
-    for path in artifact_paths(kind, name) {
+    for path in managed_artifact_paths(kind, name).await? {
         if tokio::fs::symlink_metadata(&path).await.is_err() {
             continue;
         }
@@ -91,17 +93,100 @@ async fn remove_installed_artifacts(kind: ItemKind, name: &str) -> Result<Vec<Pa
     Ok(removed)
 }
 
-fn artifact_paths(kind: ItemKind, name: &str) -> Vec<PathBuf> {
+async fn managed_artifact_paths(kind: ItemKind, name: &str) -> Result<Vec<PathBuf>> {
+    managed_artifact_paths_at(kind, name, &install_root(kind), &System::bin_dir()).await
+}
+
+async fn managed_artifact_paths_at(
+    kind: ItemKind,
+    name: &str,
+    install_root: &Path,
+    bin_dir: &Path,
+) -> Result<Vec<PathBuf>> {
+    let item_root = install_root.join(name);
+    let mut paths = BTreeSet::new();
+    let mut entries = match tokio::fs::read_dir(&item_root).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err.into()),
+    };
+
+    while let Some(entry) = entries.next_entry().await? {
+        let install_path = entry.path();
+        if !entry.metadata().await?.is_dir() {
+            continue;
+        }
+        let marker = match read_install_marker(&install_path).await? {
+            Some(marker) if marker.matches(kind, name) => marker,
+            Some(_) | None => continue,
+        };
+        paths.insert(install_path.clone());
+        for output in marker.outputs {
+            let path = PathBuf::from(output);
+            if is_safe_install_output(install_root, name, &path) {
+                paths.insert(path);
+            }
+        }
+        for linked in marker.linked_executables {
+            let path = PathBuf::from(linked);
+            if is_safe_link_path(bin_dir, &path) {
+                paths.insert(path);
+            }
+        }
+    }
+
+    let mut paths = paths.into_iter().collect::<Vec<_>>();
+    paths.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+    Ok(paths)
+}
+
+async fn read_install_marker(install_path: &Path) -> Result<Option<InstallMarker>> {
+    let marker_path = install_path.join("install.toml");
+    let content = match tokio::fs::read_to_string(&marker_path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let marker = toml_edit::de::from_str(&content).with_context(|| {
+        format!(
+            "failed to parse Still install marker {}",
+            marker_path.display()
+        )
+    })?;
+    Ok(Some(marker))
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallMarker {
+    kind: String,
+    name: String,
+    #[serde(default)]
+    outputs: Vec<String>,
+    #[serde(default)]
+    linked_executables: Vec<String>,
+}
+
+impl InstallMarker {
+    fn matches(&self, kind: ItemKind, name: &str) -> bool {
+        self.kind == kind.to_string() && self.name == name
+    }
+}
+
+fn is_safe_install_output(install_root: &Path, name: &str, path: &Path) -> bool {
+    path.starts_with(install_root.join(name))
+}
+
+fn is_safe_link_path(bin_dir: &Path, path: &Path) -> bool {
+    path.starts_with(bin_dir)
+}
+
+fn install_root(kind: ItemKind) -> PathBuf {
     let install_root = match kind {
         ItemKind::Tool => System::tool_dir(),
         ItemKind::Package => System::root_dir().join("packages"),
         ItemKind::App => System::apps_dir(),
     };
-    let mut paths = vec![install_root.join(name)];
-    if matches!(kind, ItemKind::Tool | ItemKind::Package) {
-        paths.push(System::bin_dir().join(name));
-    }
-    paths
+    install_root
 }
 
 async fn remove_path(path: &PathBuf) -> Result<()> {
@@ -166,15 +251,95 @@ mod tests {
         assert!(err.to_string().contains("not configured"));
     }
 
-    #[test]
-    fn artifact_paths_stay_under_still_roots() {
-        let paths = artifact_paths(ItemKind::Package, "openssl");
+    #[tokio::test]
+    async fn managed_artifact_paths_reads_marker_owned_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_root = temp.path().join("packages");
+        let bin_dir = temp.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let install_path = install_root.join("openssl").join("latest");
+        let link_path = bin_dir.join("openssl");
+        fs::create_dir_all(&install_path).unwrap();
+        fs::write(&link_path, "link").unwrap();
+        fs::write(
+            install_path.join("install.toml"),
+            format!(
+                r#"
+                kind = "package"
+                name = "openssl"
+                version = "latest"
+                backend = "test"
+                install_path = "{}"
+                outputs = ["{}"]
+                linked_executables = ["{}"]
+                "#,
+                install_path.display(),
+                install_path.display(),
+                link_path.display()
+            ),
+        )
+        .unwrap();
 
-        assert!(
-            paths
-                .iter()
-                .any(|path| { path.ends_with(std::path::Path::new("packages").join("openssl")) })
-        );
+        let paths =
+            managed_artifact_paths_at(ItemKind::Package, "openssl", &install_root, &bin_dir)
+                .await
+                .unwrap();
+
+        assert!(paths.contains(&install_path));
+        assert!(paths.contains(&link_path));
+    }
+
+    #[tokio::test]
+    async fn managed_artifact_paths_ignores_unmarked_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_root = temp.path().join("packages");
+        let bin_dir = temp.path().join("bin");
+        let custom_path = install_root.join("openssl").join("latest");
+        fs::create_dir_all(&custom_path).unwrap();
+        fs::write(custom_path.join("custom.txt"), "keep").unwrap();
+
+        let paths =
+            managed_artifact_paths_at(ItemKind::Package, "openssl", &install_root, &bin_dir)
+                .await
+                .unwrap();
+
+        assert!(paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn managed_artifact_paths_rejects_marker_paths_outside_managed_roots() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_root = temp.path().join("packages");
+        let bin_dir = temp.path().join("bin");
+        let install_path = install_root.join("openssl").join("latest");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&install_path).unwrap();
+        fs::write(
+            install_path.join("install.toml"),
+            format!(
+                r#"
+                kind = "package"
+                name = "openssl"
+                version = "latest"
+                backend = "test"
+                install_path = "{}"
+                outputs = ["{}"]
+                linked_executables = ["{}"]
+                "#,
+                install_path.display(),
+                outside.display(),
+                outside.display()
+            ),
+        )
+        .unwrap();
+
+        let paths =
+            managed_artifact_paths_at(ItemKind::Package, "openssl", &install_root, &bin_dir)
+                .await
+                .unwrap();
+
+        assert!(paths.contains(&install_path));
+        assert!(!paths.contains(&outside));
     }
 
     #[tokio::test]
