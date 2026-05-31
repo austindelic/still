@@ -7,6 +7,9 @@ use crate::tabs::logs::LogsTab;
 use crate::tabs::resources::ResourcesTab;
 use crate::tabs::tasks::TasksTab;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use engine::actions::install::{InstallAndRecordRequest, InstallItemRequest, InstallRequest};
+use engine::actions::uninstall::{UninstallRequest, UninstallTarget};
+use engine::specs::item::{ItemKind, ItemSpec};
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -16,6 +19,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use std::io;
+use std::path::PathBuf;
 
 /// Top-level tab identifiers for the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -606,35 +610,75 @@ impl App {
 }
 
 fn install_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
-    let exe = std::env::current_exe()?;
-    let status = match row.kind {
-        PackageKind::Formula => std::process::Command::new(exe)
-            .args(["install", "--package", &row.name])
-            .status()?,
-        PackageKind::Cask => {
-            let spec = format!("{}@latest@homebrew-cask", row.name);
-            std::process::Command::new(exe)
-                .args(["install", "--app", &spec])
-                .status()?
-        }
+    let item = match row.kind {
+        PackageKind::Formula => InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: row.name.parse::<ItemSpec>().map_err(io_error)?,
+            tool: Default::default(),
+        },
+        PackageKind::Cask => InstallItemRequest {
+            kind: ItemKind::App,
+            spec: format!("{}@latest@homebrew-cask", row.name)
+                .parse::<ItemSpec>()
+                .map_err(io_error)?,
+            tool: Default::default(),
+        },
     };
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other("install command failed"))
-    }
+    let request = InstallAndRecordRequest {
+        start_dir: std::env::current_dir()?,
+        home_dir: home_dir()?,
+        global: false,
+        force: false,
+        install: InstallRequest { items: vec![item] },
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime
+        .block_on(engine::actions::install::run_and_record(request))
+        .map(|_| ())
+        .map_err(io_error)
 }
 
 fn uninstall_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
-    let exe = std::env::current_exe()?;
-    let status = std::process::Command::new(exe)
-        .args(["uninstall", &row.name])
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other("uninstall command failed"))
-    }
+    let target = match row.kind {
+        PackageKind::Formula => UninstallTarget {
+            kind: Some(ItemKind::Package),
+            name: row.name.clone(),
+            version: "latest".to_string(),
+            backend: None,
+            exact: false,
+        },
+        PackageKind::Cask => UninstallTarget {
+            kind: Some(ItemKind::App),
+            name: row.name.clone(),
+            version: "latest".to_string(),
+            backend: Some("homebrew-cask".parse().map_err(io_error)?),
+            exact: false,
+        },
+    };
+    let request = UninstallRequest {
+        start_dir: std::env::current_dir()?,
+        home_dir: home_dir()?,
+        global: false,
+        target,
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime
+        .block_on(engine::actions::uninstall::run(request))
+        .map(|_| ())
+        .map_err(io_error)
+}
+
+fn home_dir() -> std::io::Result<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
+        })
+}
+
+fn io_error(error: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::other(error.to_string())
 }
 
 /// Initializes terminal mode, runs the TUI application, and restores the terminal.

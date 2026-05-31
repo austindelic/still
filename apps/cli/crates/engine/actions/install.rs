@@ -1,6 +1,9 @@
 //! Engine install action for resolving, downloading, verifying, extracting, and linking packages.
 
+use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config_edit::add_install_items_with_force;
 use crate::error::EngineError;
+use crate::lockfile::lockfile_path;
 use crate::platform::{PlatformId, current_platform};
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::backend::{
@@ -75,6 +78,16 @@ pub struct InstallRequest {
     pub items: Vec<InstallItemRequest>,
 }
 
+/// Request to install items and record the successful desired state.
+#[derive(Debug, Clone)]
+pub struct InstallAndRecordRequest {
+    pub start_dir: PathBuf,
+    pub home_dir: PathBuf,
+    pub global: bool,
+    pub force: bool,
+    pub install: InstallRequest,
+}
+
 /// Result of a completed install operation.
 ///
 /// The result is intentionally small and user-facing: it contains the canonical
@@ -142,6 +155,35 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     run_with_installer(request, &mut installer).await
 }
 
+/// Installs requested items, records them in the selected config, and refreshes the lockfile.
+/// # Errors
+/// Fails when install execution, config editing, lockfile refresh, or rollback fails.
+/// # Side Effects
+/// Installs files, writes selected config, refreshes the adjacent lockfile, and
+/// rolls back installed outputs if recording fails.
+pub async fn run_and_record(request: InstallAndRecordRequest) -> Result<InstallResult> {
+    let install_request = request.install.clone();
+    let pending = prepare_install_config_write_at(
+        &install_request,
+        request.global,
+        request.force,
+        &request.start_dir,
+        &request.home_dir,
+    )?;
+    let result = run(request.install).await?;
+    if let Err(err) = record_install_items(pending).await {
+        if let Err(rollback_err) = rollback_installed_items(&result.installed).await {
+            return Err(err.context(format!(
+                "failed to roll back installed artifacts after config recording failed: {rollback_err}"
+            )));
+        }
+        return Err(
+            err.context("failed to record installed items; rolled back installed artifacts")
+        );
+    }
+    Ok(result)
+}
+
 /// Installs requested items with an injected installer.
 /// # Errors
 /// Fails if any item fails. Already-installed items from the same request are
@@ -161,6 +203,92 @@ pub async fn run_with_installer(
 /// are under Still-managed install roots.
 pub async fn rollback_installed_items(installed: &[InstalledItemResult]) -> Result<()> {
     rollback_installed_items_at(installed, &RollbackRoots::system()).await
+}
+
+#[derive(Debug, Clone)]
+struct PendingInstallConfigWrite {
+    path: PathBuf,
+    home_dir: PathBuf,
+    original: Option<String>,
+    updated: String,
+}
+
+fn prepare_install_config_write_at(
+    request: &InstallRequest,
+    global: bool,
+    force: bool,
+    start_dir: &Path,
+    home_dir: &Path,
+) -> Result<PendingInstallConfigWrite> {
+    let resolved = resolve_config_path(
+        start_dir,
+        home_dir,
+        ConfigSelection {
+            scope: if global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
+            for_write: false,
+        },
+    )?;
+
+    let original = match std::fs::read_to_string(&resolved.path) {
+        Ok(content) => Some(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err.into()),
+    };
+    let content = original.as_deref().unwrap_or("");
+    let updated = add_install_items_with_force(content, &request.items, force)?;
+    Ok(PendingInstallConfigWrite {
+        path: resolved.path,
+        home_dir: home_dir.to_path_buf(),
+        original,
+        updated,
+    })
+}
+
+async fn record_install_items(pending: PendingInstallConfigWrite) -> Result<()> {
+    if let Some(parent) = pending.path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let lockfile_path = lockfile_path(&pending.path);
+    let original_lockfile = read_optional_file(&lockfile_path).await?;
+    tokio::fs::write(&pending.path, pending.updated).await?;
+    if let Err(err) =
+        crate::actions::sync::refresh_active_lockfile(&pending.path, &pending.home_dir).await
+    {
+        restore_install_config(&pending.path, pending.original).await?;
+        restore_install_lockfile(&lockfile_path, original_lockfile).await?;
+        return Err(err);
+    }
+    Ok(())
+}
+
+async fn read_optional_file(path: &Path) -> Result<Option<String>> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn restore_install_config(path: &Path, original: Option<String>) -> Result<()> {
+    match original {
+        Some(original) => tokio::fs::write(path, original).await?,
+        None if path.exists() => tokio::fs::remove_file(path).await?,
+        None => {}
+    }
+    Ok(())
+}
+
+async fn restore_install_lockfile(path: &Path, original: Option<String>) -> Result<()> {
+    match original {
+        Some(original) => tokio::fs::write(path, original).await?,
+        None if path.exists() => tokio::fs::remove_file(path).await?,
+        None => {}
+    }
+    Ok(())
 }
 
 async fn run_with_installer_and_rollback_roots(
@@ -1896,6 +2024,126 @@ mod tests {
         assert!(marker.contains("outputs = ["));
         assert!(marker.contains("linked_executables = ["));
         assert!(marker.contains("bin/rg"));
+    }
+
+    #[test]
+    fn install_config_preflight_rejects_changed_existing_entries_before_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+            [tools]
+            rust = "stable"
+            "#,
+        )
+        .unwrap();
+        let request = InstallRequest {
+            items: vec![InstallItemRequest {
+                kind: ItemKind::Tool,
+                spec: "rust@1.76.0@rustup".parse::<ItemSpec>().unwrap(),
+                tool: Default::default(),
+            }],
+        };
+
+        let err = prepare_install_config_write_at(&request, false, false, temp.path(), temp.path())
+            .unwrap_err();
+
+        assert!(err.to_string().contains("--force"));
+        assert_eq!(
+            std::fs::read_to_string(config_path).unwrap(),
+            r#"
+            [tools]
+            rust = "stable"
+            "#
+        );
+    }
+
+    #[test]
+    fn install_config_preflight_uses_global_when_no_project_config_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = InstallRequest {
+            items: vec![install_item(ItemKind::Package, "openssl")],
+        };
+
+        let pending =
+            prepare_install_config_write_at(&request, false, false, temp.path(), temp.path())
+                .unwrap();
+
+        assert_eq!(pending.path, temp.path().join(".config/still/config.toml"));
+        assert!(pending.updated.contains("latest = [\"openssl\"]"));
+    }
+
+    #[tokio::test]
+    async fn install_recording_does_not_mutate_config_when_lockfile_backup_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let original = "[tools]\nrust = \"stable\"\n";
+        std::fs::write(&config_path, original).unwrap();
+        let lockfile_path = temp.path().join("still.lock.toml");
+        std::fs::create_dir(&lockfile_path).unwrap();
+
+        let err = record_install_items(PendingInstallConfigWrite {
+            path: config_path.clone(),
+            home_dir: temp.path().to_path_buf(),
+            original: Some(original.to_string()),
+            updated: "[tools]\nrust = \"stable\"\nnode = \"latest\"\n".to_string(),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(!err.to_string().is_empty());
+        assert_eq!(std::fs::read_to_string(config_path).unwrap(), original);
+        assert!(lockfile_path.is_dir());
+    }
+
+    #[tokio::test]
+    async fn install_recording_restores_lockfile_when_refresh_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let lockfile_path = temp.path().join("still.lock.toml");
+        let original_config = "[tools]\nrust = \"stable\"\n";
+        let original_lockfile = "# original lockfile\n";
+        std::fs::write(&config_path, original_config).unwrap();
+        std::fs::write(&lockfile_path, original_lockfile).unwrap();
+
+        let err = record_install_items(PendingInstallConfigWrite {
+            path: config_path.clone(),
+            home_dir: temp.path().to_path_buf(),
+            original: Some(original_config.to_string()),
+            updated: "[tools]\nrust = {}\n".to_string(),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("tool \"rust\" must define version")
+        );
+        assert_eq!(
+            std::fs::read_to_string(config_path).unwrap(),
+            original_config
+        );
+        assert_eq!(
+            std::fs::read_to_string(lockfile_path).unwrap(),
+            original_lockfile
+        );
+    }
+
+    #[tokio::test]
+    async fn install_restore_lockfile_puts_original_content_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let lockfile_path = temp.path().join("still.lock.toml");
+        std::fs::write(&lockfile_path, "# updated\n").unwrap();
+
+        restore_install_lockfile(&lockfile_path, Some("# original\n".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(lockfile_path).unwrap(),
+            "# original\n"
+        );
     }
 
     struct FakeItemInstaller {

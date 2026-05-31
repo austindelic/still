@@ -2318,6 +2318,7 @@ dependencies = [
  "fuzzy-matcher",
  "ratatui",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
