@@ -425,7 +425,6 @@ fn merge_specs(target: &mut Vec<ItemSpec>, incoming: Vec<ItemSpec>) {
 }
 
 async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<()> {
-    validate_materializable_skill_sources(skills)?;
     tokio::fs::create_dir_all(root).await?;
     for skill in skills {
         let dir_name = managed_skill_dir_name(&skill.name)?;
@@ -461,20 +460,6 @@ async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<(
         tokio::fs::write(path.join(MANAGED_MARKER), managed_marker(skill)?).await?;
         tokio::fs::write(path.join(SOURCE_METADATA), source_metadata(skill)?).await?;
         materialize_skill_source(skill, &path).await?;
-    }
-    Ok(())
-}
-
-fn validate_materializable_skill_sources(skills: &[NormalizedSkill]) -> Result<()> {
-    for skill in skills {
-        if let NormalizedSkillSource::Official { name, .. } = &skill.source {
-            return Err(EngineError::Conflict {
-                message: format!(
-                    "official agent skill resolver is not available for \"{name}\"; use a GitHub or URL skill source"
-                ),
-            }
-            .into());
-        }
     }
     Ok(())
 }
@@ -607,12 +592,9 @@ async fn validate_instructions_file(project_root: &Path, instructions: Option<&s
 
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
-        NormalizedSkillSource::Official { name, .. } => Err(EngineError::Conflict {
-            message: format!(
-                "official agent skill resolver is not available for \"{name}\"; use a GitHub or URL skill source"
-            ),
+        NormalizedSkillSource::Official { name, .. } => {
+            materialize_official_skill(name, &path.join(CONTENT_DIR)).await
         }
-        .into()),
         NormalizedSkillSource::GitHub {
             path: repo,
             version,
@@ -630,6 +612,53 @@ async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Resul
         NormalizedSkillSource::Url { url, .. } => {
             download_skill_file(url, &path.join(CONTENT_DIR)).await
         }
+    }
+}
+
+async fn materialize_official_skill(name: &str, destination: &Path) -> Result<()> {
+    let Some(content) = official_skill_content(name) else {
+        return Err(EngineError::Conflict {
+            message: format!("official agent skill \"{name}\" is not available"),
+        }
+        .into());
+    };
+    if tokio::fs::metadata(destination).await.is_ok() {
+        tokio::fs::remove_dir_all(destination).await?;
+    }
+    tokio::fs::create_dir_all(destination).await?;
+    tokio::fs::write(destination.join("SKILL.md"), content).await?;
+    Ok(())
+}
+
+fn official_skill_content(name: &str) -> Option<&'static str> {
+    match name {
+        "rust-review" => Some(
+            r#"# rust-review
+
+Review Rust changes for correctness, maintainability, and test coverage.
+
+## Focus
+
+- Check ownership, lifetimes, error handling, and async boundaries.
+- Look for platform-specific behavior hidden behind generic code.
+- Prefer small, actionable findings with file and line references.
+- Call out missing tests when behavior changes.
+"#,
+        ),
+        "repo-auditor" => Some(
+            r#"# repo-auditor
+
+Audit a repository against its documented architecture and product spec.
+
+## Focus
+
+- Compare implementation, docs, examples, and tests for drift.
+- Identify unowned side effects, unsafe filesystem behavior, and stale generated artifacts.
+- Report concrete gaps before summaries.
+- Recommend the narrowest next verification step.
+"#,
+        ),
+        _ => None,
     }
 }
 
@@ -983,12 +1012,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agents_sync_rejects_official_skill_without_resolver() {
+    async fn agents_sync_materializes_official_skill() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
         let config = r#"
             [agents.skills]
             rust-review = { source = "rust-review", version = "v1.2.3" }
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let skill_dir = temp.path().join(".agents/skills/rust-review");
+        assert!(skill_dir.join(".still-managed").is_file());
+        let content = fs::read_to_string(skill_dir.join("content/SKILL.md")).unwrap();
+        assert!(content.contains("# rust-review"));
+        let metadata = fs::read_to_string(skill_dir.join("source.toml")).unwrap();
+        assert!(metadata.contains("source_kind = \"official\""));
+        assert!(metadata.contains("source = \"rust-review\""));
+        assert!(metadata.contains("version = \"v1.2.3\""));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_rejects_unknown_official_skill() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents.skills]
+            unknown-skill = { source = "unknown-skill" }
             "#;
         fs::write(&config_path, config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
@@ -1002,11 +1061,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(
-            err.to_string()
-                .contains("official agent skill resolver is not available")
-        );
-        assert!(!temp.path().join(".agents/skills/rust-review").exists());
+        assert!(err.to_string().contains("official agent skill"));
     }
 
     #[test]
