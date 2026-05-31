@@ -631,6 +631,18 @@ fn tool_install_command_for_backend(
                 after: Vec::new(),
             })
         }
+        "go" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "go".to_string(),
+                program: "go".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    go_package_with_version(name, version),
+                ],
+                after: Vec::new(),
+            })
+        }
         "mise" => {
             reject_tool_extras(&normalized, options)?;
             Ok(ToolInstallCommand {
@@ -713,6 +725,14 @@ fn python_package_with_version(name: &str, version: &str) -> String {
         name.to_string()
     } else {
         format!("{name}=={version}")
+    }
+}
+
+fn go_package_with_version(name: &str, version: &str) -> String {
+    if version == "latest" {
+        format!("{name}@latest")
+    } else {
+        format!("{name}@{version}")
     }
 }
 
@@ -1946,6 +1966,12 @@ mod tests {
             tool: Default::default(),
         })
         .unwrap();
+        let go = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "stringer@latest@go".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        })
+        .unwrap();
 
         assert_eq!(
             cargo.args,
@@ -1953,6 +1979,7 @@ mod tests {
         );
         assert_eq!(npm.args, ["install", "--global", "typescript@5.8.0"]);
         assert_eq!(pipx.args, ["install", "ruff==0.11.0"]);
+        assert_eq!(go.args, ["install", "stringer@latest"]);
     }
 
     #[test]
