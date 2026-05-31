@@ -559,6 +559,23 @@ install failed: cannot infer whether jq is a tool, package, or app; use --tool, 
 "###);
     }
 
+    #[test]
+    fn install_does_not_infer_ambiguous_homebrew_formula_backend() {
+        let mut args = install_args("jq");
+        args.tools.clear();
+        args.items = vec!["ripgrep@latest@brew".parse().unwrap()];
+        let mut runtime = FakeRuntime::default();
+        let mut output = BufferedOutput::default();
+
+        let code = run(args, &mut runtime, &mut output);
+
+        assert_eq!(code, 1);
+        assert!(runtime.install_requests.is_empty());
+        insta::assert_snapshot!(output.stderr, @r###"
+install failed: cannot infer whether ripgrep@latest@brew is a tool, package, or app; use --tool, --package, or --app
+"###);
+    }
+
     fn install_args(tool: &str) -> InstallArgs {
         InstallArgs {
             global: false,
