@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
-use crate::actions::sync::refresh_lockfile;
+use crate::actions::sync::refresh_active_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::add_install_items;
 use crate::error::EngineError;
@@ -150,7 +150,7 @@ pub async fn run_with_installer(
             tokio::fs::write(&resolved.path, updated)
                 .await
                 .with_context(|| format!("failed to write {}", resolved.path.display()))?;
-            if let Err(err) = refresh_lockfile(&resolved.path).await {
+            if let Err(err) = refresh_active_lockfile(&resolved.path, &request.home_dir).await {
                 restore_auto_dependency_state(
                     &resolved.path,
                     &content,

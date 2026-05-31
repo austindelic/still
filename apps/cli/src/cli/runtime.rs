@@ -291,6 +291,7 @@ impl CliRuntime for RealRuntime {
 #[derive(Debug, Clone)]
 struct PendingInstallConfigWrite {
     path: std::path::PathBuf,
+    home_dir: std::path::PathBuf,
     original: Option<String>,
     updated: String,
 }
@@ -336,6 +337,7 @@ fn prepare_install_config_write_at(
         engine::config_edit::add_install_items_with_force(content, &request.items, force)?;
     Ok(PendingInstallConfigWrite {
         path: resolved.path,
+        home_dir: home_dir.to_path_buf(),
         original,
         updated,
     })
@@ -349,7 +351,10 @@ fn record_install_items(pending: PendingInstallConfigWrite) -> anyhow::Result<()
     let original_lockfile = read_optional_file(&lockfile_path)?;
     std::fs::write(&pending.path, pending.updated)?;
     let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    if let Err(err) = runtime.block_on(engine::actions::sync::refresh_lockfile(&pending.path)) {
+    if let Err(err) = runtime.block_on(engine::actions::sync::refresh_active_lockfile(
+        &pending.path,
+        &pending.home_dir,
+    )) {
         restore_install_config(&pending.path, pending.original)?;
         restore_install_lockfile(&lockfile_path, original_lockfile)?;
         return Err(err);
@@ -456,6 +461,7 @@ mod tests {
 
         let err = record_install_items(PendingInstallConfigWrite {
             path: config_path.clone(),
+            home_dir: temp.clone(),
             original: Some(original.to_string()),
             updated: "[tools]\nrust = \"stable\"\nnode = \"latest\"\n".to_string(),
         })
@@ -478,6 +484,7 @@ mod tests {
 
         let err = record_install_items(PendingInstallConfigWrite {
             path: config_path.clone(),
+            home_dir: temp.clone(),
             original: Some(original_config.to_string()),
             updated: "[tools]\nrust = {}\n".to_string(),
         })

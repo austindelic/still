@@ -106,9 +106,32 @@ pub async fn run_with_installer(
 /// Fails when the config cannot be read, parsed, normalized, or written.
 pub async fn refresh_lockfile(config_path: &Path) -> Result<PathBuf> {
     let items = sync_items_for_path(config_path).await?;
+    refresh_lockfile_with_items(config_path, &items).await
+}
+
+/// Rewrites the lockfile from the active desired state for a selected config.
+///
+/// Project config lockfiles include global-only items because active project
+/// state includes global config unless a project item overrides it. Global
+/// config lockfiles remain scoped to the global config only.
+/// # Errors
+/// Fails when selected config or global config cannot be read, parsed,
+/// normalized, or written.
+/// # Side Effects
+/// Writes `still.lock.toml` next to `config_path`.
+pub async fn refresh_active_lockfile(config_path: &Path, home_dir: &Path) -> Result<PathBuf> {
+    let items = if config_path == global_config_path(home_dir) {
+        sync_items_for_path(config_path).await?
+    } else {
+        sync_items_for_active_project_path(config_path, home_dir).await?
+    };
+    refresh_lockfile_with_items(config_path, &items).await
+}
+
+async fn refresh_lockfile_with_items(config_path: &Path, items: &[SyncItem]) -> Result<PathBuf> {
     let path = lockfile_path(config_path);
     let existing = read_optional_lockfile(&path).await?;
-    let rendered = render_merged_lockfile(existing.as_deref(), &items);
+    let rendered = render_merged_lockfile(existing.as_deref(), items);
     tokio::fs::write(&path, rendered)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -847,6 +870,27 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == ItemKind::Tool && item.spec.name == "node")
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_active_lockfile_includes_global_only_project_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(&global, "[tools]\nrust = \"1.80.0\"\nnode = \"22\"\n").unwrap();
+
+        let path = refresh_active_lockfile(&project.join("still.toml"), temp.path())
+            .await
+            .unwrap();
+
+        let lockfile = fs::read_to_string(path).unwrap();
+        assert!(lockfile.contains("name = \"rust\""));
+        assert!(lockfile.contains("version = \"stable\""));
+        assert!(lockfile.contains("name = \"node\""));
+        assert!(!lockfile.contains("version = \"1.80.0\""));
     }
 
     #[tokio::test]

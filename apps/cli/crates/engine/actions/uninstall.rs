@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::actions::sync::refresh_lockfile;
+use crate::actions::sync::refresh_active_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::error::EngineError;
@@ -98,7 +98,7 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
     tokio::fs::write(&resolved.path, updated)
         .await
         .with_context(|| format!("failed to write {}", resolved.path.display()))?;
-    if let Err(err) = refresh_lockfile(&resolved.path).await {
+    if let Err(err) = refresh_active_lockfile(&resolved.path, &request.home_dir).await {
         restore_desired_state(&resolved.path, &content, &lockfile_path, original_lockfile).await?;
         return Err(err);
     }
