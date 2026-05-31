@@ -10,6 +10,7 @@ use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::error::EngineError;
+use crate::lockfile::lockfile_path;
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::item::{BackendId, ItemKind};
 use crate::specs::toml::{PackageEntry, PackageMap, parse_still_toml};
@@ -91,11 +92,16 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
         .into());
     };
     let artifact_targets = artifact_targets_for_config(&content, kind, &request.target)?;
+    let lockfile_path = lockfile_path(&resolved.path);
+    let original_lockfile = read_optional_file(&lockfile_path).await?;
 
     tokio::fs::write(&resolved.path, updated)
         .await
         .with_context(|| format!("failed to write {}", resolved.path.display()))?;
-    refresh_lockfile(&resolved.path).await?;
+    if let Err(err) = refresh_lockfile(&resolved.path).await {
+        restore_desired_state(&resolved.path, &content, &lockfile_path, original_lockfile).await?;
+        return Err(err);
+    }
     let removed_paths = remove_installed_artifacts(kind, &artifact_targets).await?;
 
     Ok(UninstallResult {
@@ -122,6 +128,41 @@ async fn remove_installed_artifacts(
         }
     }
     Ok(removed)
+}
+
+async fn read_optional_file(path: &Path) -> Result<Option<String>> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+async fn restore_desired_state(
+    config_path: &Path,
+    original_config: &str,
+    lockfile_path: &Path,
+    original_lockfile: Option<String>,
+) -> Result<()> {
+    tokio::fs::write(config_path, original_config)
+        .await
+        .with_context(|| format!("failed to restore {}", config_path.display()))?;
+    match original_lockfile {
+        Some(content) => {
+            tokio::fs::write(lockfile_path, content)
+                .await
+                .with_context(|| format!("failed to restore {}", lockfile_path.display()))?;
+        }
+        None => match tokio::fs::remove_file(lockfile_path).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to remove {}", lockfile_path.display()));
+            }
+        },
+    }
+    Ok(())
 }
 
 fn artifact_targets_for_config(
@@ -311,6 +352,53 @@ mod tests {
         let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
         assert!(lockfile.contains("name = \"llvm\""));
         assert!(!lockfile.contains("name = \"openssl\""));
+    }
+
+    #[tokio::test]
+    async fn uninstall_does_not_change_config_when_lockfile_cannot_be_backed_up() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("still.toml");
+        let original = "[packages]\nlatest = [\"openssl\", \"llvm\"]\n";
+        fs::write(&path, original).unwrap();
+        let lockfile_path = temp.path().join("still.lock.toml");
+        fs::create_dir(&lockfile_path).unwrap();
+
+        let err = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            target: target("openssl"),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("still.lock.toml"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(lockfile_path.is_dir());
+    }
+
+    #[tokio::test]
+    async fn restore_desired_state_restores_config_and_lockfile() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let lockfile_path = temp.path().join("still.lock.toml");
+        fs::write(&config_path, "[packages]\nlatest = []\n").unwrap();
+        fs::write(&lockfile_path, "# updated\n").unwrap();
+
+        restore_desired_state(
+            &config_path,
+            "[packages]\nlatest = [\"openssl\"]\n",
+            &lockfile_path,
+            Some("# original\n".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&config_path).unwrap(),
+            "[packages]\nlatest = [\"openssl\"]\n"
+        );
+        assert_eq!(fs::read_to_string(&lockfile_path).unwrap(), "# original\n");
     }
 
     #[tokio::test]
