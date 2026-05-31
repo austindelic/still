@@ -14,7 +14,7 @@ use engine::actions::{
     sync::{SyncRequest, SyncResult},
     task::{TaskRequest, TaskResult},
     trust::{TrustRequest, TrustResult},
-    uninstall::{UninstallRequest, UninstallResult},
+    uninstall::{UninstallRequest, UninstallResult, UninstallTarget},
 };
 use engine::config::{ConfigScope, ConfigSelection, resolve_config_path};
 
@@ -80,7 +80,11 @@ pub trait CliRuntime {
     fn trust(&mut self) -> anyhow::Result<TrustResult>;
 
     /// Removes an item from desired state.
-    fn uninstall(&mut self, name: String, global: bool) -> anyhow::Result<UninstallResult>;
+    fn uninstall(
+        &mut self,
+        target: UninstallTarget,
+        global: bool,
+    ) -> anyhow::Result<UninstallResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -253,7 +257,11 @@ impl CliRuntime for RealRuntime {
         runtime.block_on(engine::actions::trust::run(request))
     }
 
-    fn uninstall(&mut self, name: String, global: bool) -> anyhow::Result<UninstallResult> {
+    fn uninstall(
+        &mut self,
+        target: UninstallTarget,
+        global: bool,
+    ) -> anyhow::Result<UninstallResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
@@ -261,7 +269,7 @@ impl CliRuntime for RealRuntime {
             start_dir,
             home_dir,
             global,
-            name,
+            target,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::uninstall::run(request))

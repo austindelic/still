@@ -128,6 +128,127 @@ pub fn remove_item(input: &str, name: &str) -> EngineResult<(String, Option<Item
     Ok((doc.to_string(), removed))
 }
 
+/// Fully specified desired-state item to remove.
+#[derive(Debug, Clone)]
+pub struct RemoveItemTarget {
+    pub name: String,
+    pub version: String,
+    pub backend: Option<crate::specs::item::BackendId>,
+}
+
+/// Removes one item only when the configured version/backend matches `target`.
+pub fn remove_item_target(
+    input: &str,
+    target: &RemoveItemTarget,
+) -> EngineResult<(String, Option<ItemKind>)> {
+    let mut doc = input
+        .parse::<DocumentMut>()
+        .map_err(|err| EngineError::InvalidConfig {
+            reason: err.to_string(),
+        })?;
+    let config =
+        crate::specs::toml::parse_still_toml(input).map_err(|err| EngineError::InvalidConfig {
+            reason: err.to_string(),
+        })?;
+
+    let removed = remove_exact_from_section(&mut doc, &config, "tools", target, ItemKind::Tool)
+        .or_else(|| {
+            remove_exact_from_section(&mut doc, &config, "packages", target, ItemKind::Package)
+        })
+        .or_else(|| remove_exact_from_section(&mut doc, &config, "apps", target, ItemKind::App));
+
+    Ok((doc.to_string(), removed))
+}
+
+fn remove_exact_from_section(
+    doc: &mut DocumentMut,
+    config: &crate::specs::toml::StillConfig,
+    section: &str,
+    target: &RemoveItemTarget,
+    kind: ItemKind,
+) -> Option<ItemKind> {
+    if !configured_target_matches(config, target, kind)? {
+        return None;
+    }
+    let table = doc.get_mut(section)?.as_table_mut()?;
+    let mut removed = false;
+    if section == "tools" {
+        removed |= table.remove(&target.name).is_some();
+    } else if target.version == "latest" && target.backend.is_none() {
+        if let Some(latest) = table.get_mut("latest").and_then(Item::as_array_mut) {
+            let before = latest.len();
+            latest.retain(|value| value.as_str() != Some(target.name.as_str()));
+            removed |= latest.len() != before;
+        }
+    } else {
+        removed |= table.remove(&target.name).is_some();
+    }
+    removed.then_some(kind)
+}
+
+fn configured_target_matches(
+    config: &crate::specs::toml::StillConfig,
+    target: &RemoveItemTarget,
+    kind: ItemKind,
+) -> Option<bool> {
+    let spec = ItemSpec {
+        name: target.name.clone(),
+        version: target.version.parse().ok()?,
+        backend: target.backend.clone(),
+    };
+    match kind {
+        ItemKind::Tool => config
+            .tools
+            .get(&target.name)
+            .map(|entry| exact_tool_entry_matches(entry, &spec)),
+        ItemKind::Package => exact_package_entry_matches(&config.packages, &spec),
+        ItemKind::App => exact_package_entry_matches(&config.apps, &spec),
+    }
+}
+
+fn exact_tool_entry_matches(entry: &crate::specs::toml::ToolEntry, spec: &ItemSpec) -> bool {
+    match entry {
+        crate::specs::toml::ToolEntry::Version(version) => {
+            version == spec.version.as_str() && spec.backend.is_none()
+        }
+        crate::specs::toml::ToolEntry::Expanded(tool) => {
+            let version = if tool.version.is_empty() {
+                "latest"
+            } else {
+                tool.version.as_str()
+            };
+            version == spec.version.as_str()
+                && spec
+                    .backend
+                    .as_ref()
+                    .is_none_or(|backend| tool.backend.as_deref() == Some(backend.as_str()))
+        }
+    }
+}
+
+fn exact_package_entry_matches(
+    map: &crate::specs::toml::PackageMap,
+    spec: &ItemSpec,
+) -> Option<bool> {
+    if spec.version.is_latest() && spec.backend.is_none() {
+        return map
+            .latest
+            .iter()
+            .any(|name| name == &spec.name)
+            .then_some(true);
+    }
+
+    map.entries.get(&spec.name).map(|entry| {
+        let crate::specs::toml::PackageEntry::Expanded(package) = entry;
+        let version = package.version.as_deref().unwrap_or("latest");
+        version == spec.version.as_str()
+            && spec
+                .backend
+                .as_ref()
+                .is_none_or(|backend| package.backend.as_deref() == Some(backend.as_str()))
+    })
+}
+
 fn add_tool(doc: &mut DocumentMut, spec: &ItemSpec) {
     let tools = table_mut(doc, "tools");
     if should_use_latest_shorthand(spec) {
@@ -389,6 +510,56 @@ mod tests {
     }
 
     #[test]
+    fn removes_exact_matching_entries() {
+        let (output, removed) = remove_item_target(
+            r#"
+            [packages]
+            latest = ["openssl"]
+            openssl = { version = "3", backend = "homebrew" }
+            "#,
+            &remove_target("openssl@3@homebrew"),
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, Some(ItemKind::Package));
+        assert_eq!(config.packages.latest, ["openssl"]);
+        assert!(!config.packages.entries.contains_key("openssl"));
+    }
+
+    #[test]
+    fn exact_remove_version_matches_any_backend_when_backend_is_unspecified() {
+        let (output, removed) = remove_item_target(
+            r#"
+            [tools]
+            rust = { version = "stable", backend = "rustup" }
+            "#,
+            &remove_target("rust@stable"),
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, Some(ItemKind::Tool));
+        assert!(!config.tools.contains_key("rust"));
+    }
+
+    #[test]
+    fn exact_remove_does_not_remove_mismatched_entries() {
+        let (output, removed) = remove_item_target(
+            r#"
+            [packages]
+            openssl = { version = "3", backend = "homebrew" }
+            "#,
+            &remove_target("openssl@1.1@homebrew"),
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, None);
+        assert!(config.packages.entries.contains_key("openssl"));
+    }
+
+    #[test]
     fn reports_when_remove_target_is_missing() {
         let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", "node").unwrap();
 
@@ -400,6 +571,15 @@ mod tests {
         InstallItemRequest {
             kind,
             spec: spec.parse::<ItemSpec>().unwrap(),
+        }
+    }
+
+    fn remove_target(spec: &str) -> RemoveItemTarget {
+        let spec = spec.parse::<ItemSpec>().unwrap();
+        RemoveItemTarget {
+            name: spec.name,
+            version: spec.version.to_string(),
+            backend: spec.backend,
         }
     }
 

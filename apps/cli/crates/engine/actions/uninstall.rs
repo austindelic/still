@@ -8,9 +8,9 @@ use serde::Deserialize;
 
 use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::config_edit::remove_item;
+use crate::config_edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::error::EngineError;
-use crate::specs::item::ItemKind;
+use crate::specs::item::{BackendId, ItemKind};
 use crate::system::{Linux, MacOS, System, Windows};
 use crate::utils::paths::PathOps;
 
@@ -28,7 +28,16 @@ pub struct UninstallRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
     pub global: bool,
+    pub target: UninstallTarget,
+}
+
+/// Item target supplied by uninstall.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UninstallTarget {
     pub name: String,
+    pub version: String,
+    pub backend: Option<BackendId>,
+    pub exact: bool,
 }
 
 /// Desired-state removal result.
@@ -59,10 +68,21 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
     let content = tokio::fs::read_to_string(&resolved.path)
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
-    let (updated, removed) = remove_item(&content, &request.name)?;
+    let (updated, removed) = if request.target.exact {
+        remove_item_target(
+            &content,
+            &RemoveItemTarget {
+                name: request.target.name.clone(),
+                version: request.target.version.clone(),
+                backend: request.target.backend.clone(),
+            },
+        )?
+    } else {
+        remove_item(&content, &request.target.name)?
+    };
     let Some(kind) = removed else {
         return Err(EngineError::Conflict {
-            message: format!("{} is not configured", request.name),
+            message: format!("{} is not configured", request.target.name),
         }
         .into());
     };
@@ -71,19 +91,22 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
         .await
         .with_context(|| format!("failed to write {}", resolved.path.display()))?;
     refresh_lockfile(&resolved.path).await?;
-    let removed_paths = remove_installed_artifacts(kind, &request.name).await?;
+    let removed_paths = remove_installed_artifacts(kind, &request.target).await?;
 
     Ok(UninstallResult {
         path: resolved.path,
         kind,
-        name: request.name,
+        name: request.target.name,
         removed_paths,
     })
 }
 
-async fn remove_installed_artifacts(kind: ItemKind, name: &str) -> Result<Vec<PathBuf>> {
+async fn remove_installed_artifacts(
+    kind: ItemKind,
+    target: &UninstallTarget,
+) -> Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
-    for path in managed_artifact_paths(kind, name).await? {
+    for path in managed_artifact_paths(kind, target).await? {
         if tokio::fs::symlink_metadata(&path).await.is_err() {
             continue;
         }
@@ -93,16 +116,17 @@ async fn remove_installed_artifacts(kind: ItemKind, name: &str) -> Result<Vec<Pa
     Ok(removed)
 }
 
-async fn managed_artifact_paths(kind: ItemKind, name: &str) -> Result<Vec<PathBuf>> {
-    managed_artifact_paths_at(kind, name, &install_root(kind), &System::bin_dir()).await
+async fn managed_artifact_paths(kind: ItemKind, target: &UninstallTarget) -> Result<Vec<PathBuf>> {
+    managed_artifact_paths_at(kind, target, &install_root(kind), &System::bin_dir()).await
 }
 
 async fn managed_artifact_paths_at(
     kind: ItemKind,
-    name: &str,
+    target: &UninstallTarget,
     install_root: &Path,
     bin_dir: &Path,
 ) -> Result<Vec<PathBuf>> {
+    let name = target.name.as_str();
     let item_root = install_root.join(name);
     let mut paths = BTreeSet::new();
     let mut entries = match tokio::fs::read_dir(&item_root).await {
@@ -117,7 +141,7 @@ async fn managed_artifact_paths_at(
             continue;
         }
         let marker = match read_install_marker(&install_path).await? {
-            Some(marker) if marker.matches(kind, name) => marker,
+            Some(marker) if marker.matches(kind, target) => marker,
             Some(_) | None => continue,
         };
         paths.insert(install_path.clone());
@@ -160,15 +184,30 @@ async fn read_install_marker(install_path: &Path) -> Result<Option<InstallMarker
 struct InstallMarker {
     kind: String,
     name: String,
+    #[serde(default = "latest_version")]
+    version: String,
+    #[serde(default)]
+    backend: Option<String>,
     #[serde(default)]
     outputs: Vec<String>,
     #[serde(default)]
     linked_executables: Vec<String>,
 }
 
+fn latest_version() -> String {
+    "latest".to_string()
+}
+
 impl InstallMarker {
-    fn matches(&self, kind: ItemKind, name: &str) -> bool {
-        self.kind == kind.to_string() && self.name == name
+    fn matches(&self, kind: ItemKind, target: &UninstallTarget) -> bool {
+        self.kind == kind.to_string()
+            && self.name == target.name
+            && (!target.exact
+                || (self.version == target.version
+                    && target
+                        .backend
+                        .as_ref()
+                        .is_none_or(|backend| self.backend.as_deref() == Some(backend.as_str()))))
     }
 }
 
@@ -217,7 +256,7 @@ mod tests {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
             global: false,
-            name: "openssl".to_string(),
+            target: target("openssl"),
         })
         .await
         .unwrap();
@@ -228,6 +267,35 @@ mod tests {
         let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
         assert!(lockfile.contains("name = \"llvm\""));
         assert!(!lockfile.contains("name = \"openssl\""));
+    }
+
+    #[tokio::test]
+    async fn uninstall_exact_target_removes_matching_version_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("still.toml");
+        fs::write(
+            &path,
+            r#"
+            [packages]
+            latest = ["openssl"]
+            openssl = { version = "3", backend = "homebrew" }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            target: exact_target("openssl", "3", "homebrew"),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.kind, ItemKind::Package);
+        let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(config.packages.latest, ["openssl"]);
+        assert!(!config.packages.entries.contains_key("openssl"));
     }
 
     #[tokio::test]
@@ -243,7 +311,7 @@ mod tests {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
             global: false,
-            name: "node".to_string(),
+            target: target("node"),
         })
         .await
         .unwrap_err();
@@ -280,10 +348,14 @@ mod tests {
         )
         .unwrap();
 
-        let paths =
-            managed_artifact_paths_at(ItemKind::Package, "openssl", &install_root, &bin_dir)
-                .await
-                .unwrap();
+        let paths = managed_artifact_paths_at(
+            ItemKind::Package,
+            &target("openssl"),
+            &install_root,
+            &bin_dir,
+        )
+        .await
+        .unwrap();
 
         assert!(paths.contains(&install_path));
         assert!(paths.contains(&link_path));
@@ -298,10 +370,14 @@ mod tests {
         fs::create_dir_all(&custom_path).unwrap();
         fs::write(custom_path.join("custom.txt"), "keep").unwrap();
 
-        let paths =
-            managed_artifact_paths_at(ItemKind::Package, "openssl", &install_root, &bin_dir)
-                .await
-                .unwrap();
+        let paths = managed_artifact_paths_at(
+            ItemKind::Package,
+            &target("openssl"),
+            &install_root,
+            &bin_dir,
+        )
+        .await
+        .unwrap();
 
         assert!(paths.is_empty());
     }
@@ -333,13 +409,64 @@ mod tests {
         )
         .unwrap();
 
-        let paths =
-            managed_artifact_paths_at(ItemKind::Package, "openssl", &install_root, &bin_dir)
-                .await
-                .unwrap();
+        let paths = managed_artifact_paths_at(
+            ItemKind::Package,
+            &target("openssl"),
+            &install_root,
+            &bin_dir,
+        )
+        .await
+        .unwrap();
 
         assert!(paths.contains(&install_path));
         assert!(!paths.contains(&outside));
+    }
+
+    #[tokio::test]
+    async fn managed_artifact_paths_honors_exact_version_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_root = temp.path().join("packages");
+        let bin_dir = temp.path().join("bin");
+        let latest_path = install_root.join("openssl").join("latest");
+        let version_path = install_root.join("openssl").join("3");
+        fs::create_dir_all(&latest_path).unwrap();
+        fs::create_dir_all(&version_path).unwrap();
+        fs::write(
+            latest_path.join("install.toml"),
+            r#"
+            kind = "package"
+            name = "openssl"
+            version = "latest"
+            backend = "test"
+            outputs = []
+            linked_executables = []
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            version_path.join("install.toml"),
+            r#"
+            kind = "package"
+            name = "openssl"
+            version = "3"
+            backend = "test"
+            outputs = []
+            linked_executables = []
+            "#,
+        )
+        .unwrap();
+
+        let paths = managed_artifact_paths_at(
+            ItemKind::Package,
+            &exact_target("openssl", "3", "test"),
+            &install_root,
+            &bin_dir,
+        )
+        .await
+        .unwrap();
+
+        assert!(paths.contains(&version_path));
+        assert!(!paths.contains(&latest_path));
     }
 
     #[tokio::test]
@@ -353,7 +480,7 @@ mod tests {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
             global: false,
-            name: "openssl".to_string(),
+            target: target("openssl"),
         })
         .await
         .unwrap();
@@ -379,7 +506,7 @@ mod tests {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
             global: true,
-            name: "llvm".to_string(),
+            target: target("llvm"),
         })
         .await
         .unwrap();
@@ -388,5 +515,23 @@ mod tests {
         let project =
             parse_still_toml(&fs::read_to_string(temp.path().join("still.toml")).unwrap()).unwrap();
         assert_eq!(project.packages.latest, ["openssl"]);
+    }
+
+    fn target(name: &str) -> UninstallTarget {
+        UninstallTarget {
+            name: name.to_string(),
+            version: "latest".to_string(),
+            backend: None,
+            exact: false,
+        }
+    }
+
+    fn exact_target(name: &str, version: &str, backend: &str) -> UninstallTarget {
+        UninstallTarget {
+            name: name.to_string(),
+            version: version.to_string(),
+            backend: Some(backend.parse().unwrap()),
+            exact: true,
+        }
     }
 }

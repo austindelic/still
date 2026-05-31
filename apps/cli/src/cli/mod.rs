@@ -132,7 +132,7 @@ mod tests {
         sync::SyncResult,
         task::TaskResult,
         trust::TrustResult,
-        uninstall::UninstallResult,
+        uninstall::{UninstallResult, UninstallTarget},
     };
 
     #[derive(Debug, Default)]
@@ -204,7 +204,11 @@ mod tests {
             panic!("trust should not run in these routing tests");
         }
 
-        fn uninstall(&mut self, _name: String, _global: bool) -> anyhow::Result<UninstallResult> {
+        fn uninstall(
+            &mut self,
+            _target: UninstallTarget,
+            _global: bool,
+        ) -> anyhow::Result<UninstallResult> {
             panic!("uninstall should not run in these routing tests");
         }
     }

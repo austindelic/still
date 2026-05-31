@@ -177,7 +177,7 @@ mod tests {
     use engine::actions::sync::SyncResult;
     use engine::actions::task::TaskResult;
     use engine::actions::trust::TrustResult;
-    use engine::actions::uninstall::UninstallResult;
+    use engine::actions::uninstall::{UninstallResult, UninstallTarget};
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -260,7 +260,11 @@ mod tests {
             panic!("trust should not run in install tests");
         }
 
-        fn uninstall(&mut self, _name: String, _global: bool) -> anyhow::Result<UninstallResult> {
+        fn uninstall(
+            &mut self,
+            _target: UninstallTarget,
+            _global: bool,
+        ) -> anyhow::Result<UninstallResult> {
             panic!("uninstall should not run in install tests");
         }
     }
