@@ -49,6 +49,7 @@ pub struct AgentsResult {
     pub gitignore: String,
     pub gitignore_path: Option<PathBuf>,
     pub target_manifests: Vec<PathBuf>,
+    pub pending_auto_dependencies: Vec<InstallItemRequest>,
     pub auto_added: Vec<InstallItemRequest>,
     pub missing_dependencies: Vec<InstallItemRequest>,
 }
@@ -71,12 +72,13 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
     let config = parse_still_toml(&content)?;
     let agents = normalize_agents(config.agents.clone().unwrap_or_default())?;
     let gitignore = managed_skills_gitignore(&agents.skills)?;
+    let pending_auto_dependencies = auto_dependency_items(&agents.skills, &config);
     let mut auto_added = Vec::new();
     let mut missing_dependencies = missing_skill_dependencies(&agents.skills, &config, false);
     let mut target_manifests = Vec::new();
     let gitignore_path = if request.operation == AgentsOperation::Sync {
         assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
-        auto_added = auto_dependency_items(&agents.skills, &config);
+        auto_added = pending_auto_dependencies.clone();
         if !auto_added.is_empty() {
             let updated = add_install_items(&content, &auto_added)?;
             tokio::fs::write(&resolved.path, updated)
@@ -117,6 +119,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
         gitignore,
         gitignore_path,
         target_manifests,
+        pending_auto_dependencies,
         auto_added,
         missing_dependencies,
     })
@@ -802,6 +805,44 @@ mod tests {
         );
         let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         assert!(!content.contains("cargo-audit ="));
+    }
+
+    #[tokio::test]
+    async fn agents_check_reports_pending_auto_dependencies_without_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents]
+
+            [agents.skills]
+            rust-review = { source = "rust-review", auto = true, tools = ["cargo-nextest"], packages = ["llvm"], apps = ["zed"] }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added, []);
+        assert_eq!(result.pending_auto_dependencies.len(), 3);
+        assert!(
+            result
+                .pending_auto_dependencies
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+        );
+        let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
+        let config = parse_still_toml(&content).unwrap();
+        assert!(!config.tools.contains_key("cargo-nextest"));
+        assert!(!config.packages.latest.contains(&"llvm".to_string()));
+        assert!(!config.apps.latest.contains(&"zed".to_string()));
+        assert!(!temp.path().join("still.lock.toml").exists());
     }
 
     #[tokio::test]

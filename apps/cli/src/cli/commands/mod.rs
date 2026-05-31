@@ -269,9 +269,16 @@ where
                     for skill in result.agents.skills {
                         output.info(&format!("  {}", skill.name));
                     }
-                    if !result.auto_added.is_empty() {
+                    if operation == engine::actions::agents::AgentsOperation::Sync
+                        && !result.auto_added.is_empty()
+                    {
                         output.info("Auto-added dependencies:");
                         for item in result.auto_added {
+                            output.info(&format!("  {} {}", item.kind, item.spec.name));
+                        }
+                    } else if !result.pending_auto_dependencies.is_empty() {
+                        output.info("Auto dependencies to add on sync:");
+                        for item in result.pending_auto_dependencies {
                             output.info(&format!("  {} {}", item.kind, item.spec.name));
                         }
                     }
@@ -456,7 +463,7 @@ mod tests {
         doctor::{DoctorCheck, DoctorResult, DoctorStatus},
         env::EnvResult,
         init::InitResult,
-        install::InstallResult,
+        install::{InstallItemRequest, InstallResult},
         list::{ListItem, ListResult, ListSection},
         run::RunResult,
         services::{ServiceReport, ServiceStatus, ServicesOperation, ServicesResult},
@@ -1023,6 +1030,7 @@ list failed: failed to read still.toml
                     PathBuf::from("/repo/.agents/targets/claude.toml"),
                     PathBuf::from("/repo/.agents/targets/codex.toml"),
                 ],
+                pending_auto_dependencies: Vec::new(),
                 auto_added: Vec::new(),
                 missing_dependencies: Vec::new(),
             })),
@@ -1062,6 +1070,73 @@ Skills:
 ✓ Updated /repo/.agents/skills/.gitignore
 ✓ Updated /repo/.agents/targets/claude.toml
 ✓ Updated /repo/.agents/targets/codex.toml
+"###);
+        assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn agents_check_formats_pending_auto_dependencies() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: Some(Ok(AgentsResult {
+                path: PathBuf::from("/repo/still.toml"),
+                agents: NormalizedAgents {
+                    targets: vec!["codex".to_string()],
+                    instructions: Some("AGENTS.md".to_string()),
+                    skills: vec![normalized_skill("rust-review")],
+                },
+                gitignore: "# still-managed skills\n/rust-review/\n".to_string(),
+                gitignore_path: None,
+                target_manifests: Vec::new(),
+                pending_auto_dependencies: vec![InstallItemRequest {
+                    kind: ItemKind::Tool,
+                    spec: "cargo-nextest".parse().unwrap(),
+                }],
+                auto_added: Vec::new(),
+                missing_dependencies: Vec::new(),
+            })),
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
+            trust_result: None,
+            uninstall_result: None,
+            uninstall_names: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Agents(crate::cli::args::AgentsArgs {
+                command: Some(AgentsCommand::Check),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.agents_operations, [AgentsOperation::Check]);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Targets: codex
+Instructions: AGENTS.md
+Skills:
+  rust-review
+Auto dependencies to add on sync:
+  tool cargo-nextest
 "###);
         assert_eq!(output.stderr, "");
     }
