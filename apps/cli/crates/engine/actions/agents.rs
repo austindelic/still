@@ -149,6 +149,20 @@ pub async fn run_with_installer(
         if resolved.scope == ConfigScope::Project {
             assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
         }
+        if !pending_auto_dependencies.is_empty() && request.operation == AgentsOperation::Sync {
+            review_required = true;
+            return Ok(AgentsResult {
+                path: resolved.path,
+                agents,
+                gitignore,
+                gitignore_path: None,
+                target_manifests,
+                pending_auto_dependencies,
+                auto_added,
+                missing_dependencies,
+                review_required,
+            });
+        }
         let skills_dir = project_root.join(".agents").join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
         dependency_skills = skills_with_manifest_dependencies(&skills_dir, &agents.skills).await?;
@@ -410,6 +424,7 @@ fn merge_specs(target: &mut Vec<ItemSpec>, incoming: Vec<ItemSpec>) {
 }
 
 async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<()> {
+    validate_materializable_skill_sources(skills)?;
     tokio::fs::create_dir_all(root).await?;
     for skill in skills {
         let dir_name = managed_skill_dir_name(&skill.name)?;
@@ -445,6 +460,20 @@ async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<(
         tokio::fs::write(path.join(MANAGED_MARKER), managed_marker(skill)?).await?;
         tokio::fs::write(path.join(SOURCE_METADATA), source_metadata(skill)?).await?;
         materialize_skill_source(skill, &path).await?;
+    }
+    Ok(())
+}
+
+fn validate_materializable_skill_sources(skills: &[NormalizedSkill]) -> Result<()> {
+    for skill in skills {
+        if let NormalizedSkillSource::Official { name, .. } = &skill.source {
+            return Err(EngineError::Conflict {
+                message: format!(
+                    "official agent skill resolver is not available for \"{name}\"; use a GitHub or URL skill source"
+                ),
+            }
+            .into());
+        }
     }
     Ok(())
 }
@@ -577,7 +606,12 @@ async fn validate_instructions_file(project_root: &Path, instructions: Option<&s
 
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
-        NormalizedSkillSource::Official { .. } => Ok(()),
+        NormalizedSkillSource::Official { name, .. } => Err(EngineError::Conflict {
+            message: format!(
+                "official agent skill resolver is not available for \"{name}\"; use a GitHub or URL skill source"
+            ),
+        }
+        .into()),
         NormalizedSkillSource::GitHub {
             path: repo,
             version,
@@ -912,11 +946,17 @@ mod tests {
     async fn agents_sync_writes_managed_skill_gitignore() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [agents]
-            skills = ["rust-review"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            rust-review = "{}"
+            "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
@@ -937,12 +977,12 @@ mod tests {
         );
         assert!(skill_dir.join(".still-managed").is_file());
         let metadata = fs::read_to_string(skill_dir.join("source.toml")).unwrap();
-        assert!(metadata.contains("source_kind = \"official\""));
-        assert!(metadata.contains("source = \"rust-review\""));
+        assert!(metadata.contains("source_kind = \"url\""));
+        assert!(metadata.contains(&format!("source = \"{}\"", source)));
     }
 
     #[tokio::test]
-    async fn agents_sync_records_pinned_official_skill_version() {
+    async fn agents_sync_rejects_official_skill_without_resolver() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
         let config = r#"
@@ -952,20 +992,20 @@ mod tests {
         fs::write(&config_path, config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
-        run(AgentsRequest {
+        let err = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
             global: false,
             operation: AgentsOperation::Sync,
         })
         .await
-        .unwrap();
+        .unwrap_err();
 
-        let metadata =
-            fs::read_to_string(temp.path().join(".agents/skills/rust-review/source.toml")).unwrap();
-        assert!(metadata.contains("source_kind = \"official\""));
-        assert!(metadata.contains("source = \"rust-review\""));
-        assert!(metadata.contains("version = \"v1.2.3\""));
+        assert!(
+            err.to_string()
+                .contains("official agent skill resolver is not available")
+        );
+        assert!(!temp.path().join(".agents/skills/rust-review").exists());
     }
 
     #[test]
@@ -1015,13 +1055,21 @@ mod tests {
     async fn agents_sync_writes_target_manifests() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let rust_review = write_local_skill_source(temp.path(), "rust-review");
+        let repo_auditor = write_local_skill_source(temp.path(), "repo-auditor");
+        let config = format!(
+            r#"
             [agents]
             targets = ["claude", "codex"]
             instructions = "AGENTS.md"
-            skills = ["rust-review", "repo-auditor"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            rust-review = "{}"
+            repo-auditor = "{}"
+            "#,
+            rust_review, repo_auditor
+        );
+        fs::write(&config_path, &config).unwrap();
         fs::write(temp.path().join("AGENTS.md"), "# Project instructions\n").unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
@@ -1148,6 +1196,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("repo");
         let global = temp.path().join(".config/still/config.toml");
+        let global_skill = write_local_skill_source(temp.path(), "global-skill");
         fs::create_dir_all(&project).unwrap();
         fs::create_dir_all(global.parent().unwrap()).unwrap();
         fs::write(
@@ -1160,10 +1209,15 @@ mod tests {
         .unwrap();
         fs::write(
             &global,
-            r#"
+            format!(
+                r#"
             [agents]
-            skills = ["global-skill"]
+
+            [agents.skills]
+            global-skill = "{}"
             "#,
+                global_skill
+            ),
         )
         .unwrap();
 
@@ -1246,11 +1300,17 @@ mod tests {
     async fn agents_sync_refuses_unmarked_custom_skill_directory() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "custom");
+        let config = format!(
+            r#"
             [agents]
-            skills = ["custom"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            custom = "{}"
+            "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
         fs::create_dir_all(temp.path().join(".agents/skills/custom")).unwrap();
         fs::write(
@@ -1276,11 +1336,17 @@ mod tests {
     async fn agents_sync_prunes_only_stale_managed_skill_directories() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [agents]
-            skills = ["rust-review"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            rust-review = "{}"
+            "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
         let stale = temp.path().join(".agents/skills/old-managed");
@@ -1313,9 +1379,11 @@ mod tests {
     async fn agents_sync_auto_adds_missing_inline_skill_dependencies() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [tools]
-            rust = { version = "stable", backend = "rustup" }
+            rust = {{ version = "stable", backend = "rustup" }}
 
             [packages]
             latest = ["openssl"]
@@ -1323,9 +1391,11 @@ mod tests {
             [agents]
 
             [agents.skills]
-            rust-review = { auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }
-        "#;
-        fs::write(&config_path, config).unwrap();
+            rust-review = {{ url = "{}", auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }}
+        "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
         let mut installer = FakeInstaller::default();
 
@@ -1400,17 +1470,21 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
         let lockfile_path = temp.path().join("still.lock.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [tools]
-            rust = { version = "stable", backend = "rustup" }
+            rust = {{ version = "stable", backend = "rustup" }}
 
             [agents]
 
             [agents.skills]
-            rust-review = { auto = true, tools = ["cargo-nextest"] }
-        "#;
+            rust-review = {{ url = "{}", auto = true, tools = ["cargo-nextest"] }}
+        "#,
+            source
+        );
         let lockfile = "[[items]]\nkind = \"tool\"\nname = \"rust\"\nplatform = \"macos\"\nversion = \"stable\"\n";
-        fs::write(&config_path, config).unwrap();
+        fs::write(&config_path, &config).unwrap();
         fs::write(&lockfile_path, lockfile).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
         let mut installer = FailingInstaller::default();
@@ -1996,6 +2070,13 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    fn write_local_skill_source(root: &Path, name: &str) -> String {
+        let source = root.join(format!("{name}-source"));
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), format!("# {name}\n")).unwrap();
+        format!("file://{}", source.display())
     }
 
     fn os_args(args: &[OsString]) -> Vec<String> {
