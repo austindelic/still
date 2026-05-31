@@ -387,14 +387,9 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "anyOf": [
-            {
-              "required": ["source"]
-            },
-            {
-              "required": ["url"]
-            }
-          ],
+          "not": {
+            "required": ["source", "url"]
+          },
           "properties": {
             "source": {
               "type": "string",
