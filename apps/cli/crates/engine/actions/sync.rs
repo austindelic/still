@@ -9,7 +9,7 @@ use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_co
 use crate::error::EngineError;
 use crate::lockfile::{lockfile_path, render_merged_lockfile};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
-use crate::specs::backend::normalize_auto_backend;
+use crate::specs::backend::{default_backend, normalize_auto_backend};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -285,7 +285,11 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
         items.push(SyncItem {
             kind,
             logical_name: name.clone(),
-            spec: item_spec(name, "latest".to_string(), None)?,
+            spec: item_spec(
+                name,
+                "latest".to_string(),
+                latest_backend_for_kind(kind, platform),
+            )?,
             desired_state,
         });
     }
@@ -317,6 +321,10 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
         });
     }
     Ok(items)
+}
+
+fn latest_backend_for_kind(kind: ItemKind, platform: PlatformId) -> Option<String> {
+    (kind == ItemKind::App).then(|| default_backend(kind, platform).to_string())
 }
 
 fn reject_duplicate_resolved_name(
@@ -437,12 +445,17 @@ mod tests {
                 .iter()
                 .any(|item| { item.kind == ItemKind::Package && item.spec.name == "openssl" })
         );
-        assert!(
-            result
-                .items
-                .iter()
-                .any(|item| { item.kind == ItemKind::App && item.spec.name == "firefox" })
-        );
+        assert!(result.items.iter().any(|item| {
+            item.kind == ItemKind::App
+                && item.spec.name == "firefox"
+                && item.spec.backend.as_ref().unwrap().as_str()
+                    == default_backend(ItemKind::App, current_platform())
+        }));
+        let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
+        assert!(lockfile.contains(&format!(
+            "backend = \"{}\"",
+            default_backend(ItemKind::App, current_platform())
+        )));
     }
 
     #[tokio::test]

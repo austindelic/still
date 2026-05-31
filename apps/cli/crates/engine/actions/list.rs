@@ -11,7 +11,7 @@ use crate::config::{
 };
 use crate::error::EngineError;
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
-use crate::specs::backend::normalize_auto_backend;
+use crate::specs::backend::{default_backend, normalize_auto_backend};
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::system::System;
@@ -249,7 +249,7 @@ fn package_items(
                 logical_name: name.clone(),
                 name,
                 version: "latest".to_string(),
-                backend: None,
+                backend: latest_backend_for_kind(kind, platform),
                 outputs: Vec::new(),
                 linked_executables: Vec::new(),
                 configured: true,
@@ -291,6 +291,10 @@ fn package_items(
     }
 
     Ok(items.into_values().collect())
+}
+
+fn latest_backend_for_kind(kind: ItemKind, platform: PlatformId) -> Option<String> {
+    (kind == ItemKind::App).then(|| default_backend(kind, platform).to_string())
 }
 
 fn reject_duplicate_resolved_name(
@@ -586,7 +590,11 @@ mod tests {
         assert_eq!(
             result.sections[2].items,
             [
-                item("firefox", "latest", None),
+                item(
+                    "firefox",
+                    "latest",
+                    Some(default_backend(ItemKind::App, current_platform()))
+                ),
                 item("zed", "latest", Some("homebrew-cask"))
             ]
         );
@@ -1045,11 +1053,11 @@ mod tests {
                 .items
                 .contains(&item("rust", "stable", None))
         );
-        assert!(
-            result.sections[2]
-                .items
-                .contains(&global_item("firefox", "latest", None))
-        );
+        assert!(result.sections[2].items.contains(&global_item(
+            "firefox",
+            "latest",
+            Some(default_backend(ItemKind::App, current_platform()))
+        )));
     }
 
     #[tokio::test]
