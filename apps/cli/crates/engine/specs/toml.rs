@@ -338,6 +338,15 @@ mod tests {
     }
 
     #[test]
+    fn parses_checked_in_examples() {
+        parse_still_toml(include_str!("../../../examples/still.toml")).unwrap();
+        serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../examples/still.schema.json"
+        ))
+        .unwrap();
+    }
+
+    #[test]
     fn rejects_expanded_tool_without_version() {
         let err = parse_still_toml(
             r#"

@@ -54,7 +54,7 @@ backend = "auto"
 #
 # You should not need to write start/check/stop commands every time.
 # Still should ship built-in service presets.
-# auto watches if enabled so that the service is never stale
+# Services are explicit in v0.1; Still does not auto-watch or restart them.
 
 [services]
 docker-compose = "docker compose up" # Shorthand for a start command.
@@ -71,9 +71,9 @@ check = { task = "docker:check" }
 test = "cargo test"
 fmt = "cargo fmt"
 dev = "cargo run"
-docker:check = "docker info"
-docker:start = "open -a Docker"
-docker:stop = "osascript -e 'quit app \"Docker\"'"
+"docker:check" = "docker info"
+"docker:start" = "open -a Docker"
+"docker:stop" = "osascript -e 'quit app \"Docker\"'"
 
 # Expanded task syntax.
 
