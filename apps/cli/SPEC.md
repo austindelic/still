@@ -212,7 +212,7 @@ Rules:
 - `ignore` excludes one platform.
 - `only` restricts an entry to one platform.
 - These three fields are normalized into the same platform filter used by sync and list planning.
-- Package and app install plans use the resolved platform/backend name for install storage under Still-managed roots until a backend adapter supplies a native platform path.
+- Package and app install plans use the resolved platform/backend name. Native OS package-manager backends install through the host package manager and record Still-owned receipts under `<still-root>/receipts/...` so lockfiles, list, and uninstall can reason about the desired state without pretending Still owns the native artifact path.
 
 ### Apps
 
@@ -237,7 +237,7 @@ Rules:
 
 - Apps use the same metadata shape as packages: `version`, `backend`, `names`, `platforms`, `ignore`, and `only`.
 - Apps should be modeled separately from packages because installation, linking, launchers, and uninstall behavior differ.
-- Apps delegate installation to app-oriented platform backends, then Still records the managed install marker under `<still-root>/apps/<name>/<version>`.
+- Apps delegate installation to app-oriented platform backends, then Still records a managed receipt under `<still-root>/receipts/apps/<name>/<version>`.
 - Default app backends are `homebrew-cask` on macOS, `flatpak` on Linux, and `winget` on Windows.
 - Apps participate in install, sync, list, and uninstall. Activation is limited to shell/PATH environment setup and does not launch or expose apps in v0.1.
 
@@ -521,6 +521,7 @@ V1 backend/provider families:
 Backend direction:
 
 - Tools should prefer version/toolchain backends such as mise, asdf, rustup, npm, aqua, and language-specific installers.
+- Command-backed tool backends must be scoped to Still-managed storage through backend-specific roots, prefixes, or environment variables. A successful command-backed tool install records its marker under `<still-root>/tools/<name>/<version>` and links discovered executables into the Still bin directory when possible.
 - Packages should prefer package-manager backends such as Homebrew formulae, apt, dnf, pacman, winget, Chocolatey, Scoop, Nix, and future system package managers.
 - Apps should prefer app-oriented backends such as Homebrew cask, Mac App Store, Flatpak, winget, Chocolatey, and platform-specific app sources.
 - Backend names in this spec are product direction, not a promise that every backend is implemented today.

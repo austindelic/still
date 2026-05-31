@@ -292,6 +292,8 @@ Execution applies a plan:
 - perform operations through backend/platform traits
 - emit structured progress
 - record successful outputs in typed results
+- scope command-backed tool installers into Still-managed roots with backend
+  flags or environment before execution
 - preserve config and lockfile consistency
 - avoid deleting or overwriting unmanaged files
 - keep rollback explicit and conservative when full rollback is not possible
@@ -311,6 +313,8 @@ exists on disk or in platform services.
   skill sources.
 - Installed-state discovery should never assume every file under a shared path is
   safe to delete; managed markers or lockfile ownership should prove ownership.
+- Native package/app backends should track Still-owned receipts separately from
+  OS-owned installation locations.
 
 ## Agents And Skills
 

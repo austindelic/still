@@ -470,9 +470,13 @@ fn should_use_tool_command_backend(item: &InstallItemRequest) -> bool {
 
 async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallResult> {
     let command = tool_install_command(item)?;
+    let install_path = tool_install_path(item);
+    tokio::fs::create_dir_all(&install_path).await?;
     for step in command.steps() {
-        let output = Command::new(&step.program)
-            .args(&step.args)
+        let mut process = Command::new(&step.program);
+        process.args(&step.args);
+        process.envs(command.env.iter().map(|(key, value)| (key, value)));
+        let output = process
             .output()
             .with_context(|| format!("failed to run tool backend {}", command.backend))?;
         if !output.status.success() {
@@ -487,15 +491,17 @@ async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallR
         }
     }
 
-    let install_path = System::tool_dir()
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str());
+    let binary_path = System::find_binary_recursive(&install_path, &item.spec.name).await?;
+    let linked_executables = link_binary(&binary_path)
+        .await?
+        .into_iter()
+        .collect::<Vec<_>>();
     write_install_marker(
         &install_path,
         item,
         &command.backend,
         &[install_path.clone()],
-        &[],
+        &linked_executables,
     )
     .await?;
 
@@ -503,9 +509,9 @@ async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallR
         tool_name: item.spec.name.clone(),
         version: item.spec.version.to_string(),
         install_path: install_path.clone(),
-        binary_path: None,
+        binary_path,
         outputs: vec![install_path],
-        linked_executables: Vec::new(),
+        linked_executables,
         installed: Vec::new(),
     })
 }
@@ -515,6 +521,7 @@ struct ToolInstallCommand {
     backend: String,
     program: String,
     args: Vec<String>,
+    env: Vec<(String, String)>,
     after: Vec<ToolInstallStep>,
 }
 
@@ -546,6 +553,7 @@ fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand>
         item.spec.version.as_str(),
         &backend,
         &item.tool,
+        &tool_install_path(item),
     )
 }
 
@@ -554,8 +562,10 @@ fn tool_install_command_for_backend(
     version: &str,
     backend: &str,
     options: &ToolInstallOptions,
+    install_path: &Path,
 ) -> Result<ToolInstallCommand> {
     let normalized = install_backend(ItemKind::Tool, Some(backend), current_platform());
+    let install_path = install_path.display().to_string();
     match normalized.as_str() {
         "rustup" => Ok(ToolInstallCommand {
             backend: "rustup".to_string(),
@@ -565,11 +575,20 @@ fn tool_install_command_for_backend(
                 "install".to_string(),
                 version.to_string(),
             ],
+            env: vec![
+                ("RUSTUP_HOME".to_string(), format!("{install_path}/rustup")),
+                ("CARGO_HOME".to_string(), format!("{install_path}/cargo")),
+            ],
             after: rustup_extra_steps(version, options),
         }),
         "cargo" => {
             reject_tool_extras(&normalized, options)?;
-            let mut args = vec!["install".to_string(), name.to_string()];
+            let mut args = vec![
+                "install".to_string(),
+                "--root".to_string(),
+                install_path.clone(),
+                name.to_string(),
+            ];
             if version != "latest" {
                 args.extend(["--version".to_string(), version.to_string()]);
             }
@@ -577,6 +596,7 @@ fn tool_install_command_for_backend(
                 backend: "cargo".to_string(),
                 program: "cargo".to_string(),
                 args,
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -588,8 +608,11 @@ fn tool_install_command_for_backend(
                 args: vec![
                     "install".to_string(),
                     "--global".to_string(),
+                    "--prefix".to_string(),
+                    install_path.clone(),
                     package_with_version(name, version),
                 ],
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -603,6 +626,10 @@ fn tool_install_command_for_backend(
                     "--global".to_string(),
                     package_with_version(name, version),
                 ],
+                env: vec![
+                    ("PNPM_HOME".to_string(), format!("{install_path}/bin")),
+                    ("NPM_CONFIG_PREFIX".to_string(), install_path.clone()),
+                ],
                 after: Vec::new(),
             })
         }
@@ -614,8 +641,11 @@ fn tool_install_command_for_backend(
                 args: vec![
                     "global".to_string(),
                     "add".to_string(),
+                    "--prefix".to_string(),
+                    install_path.clone(),
                     package_with_version(name, version),
                 ],
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -626,8 +656,13 @@ fn tool_install_command_for_backend(
                 program: "pipx".to_string(),
                 args: vec![
                     "install".to_string(),
+                    "--install-dir".to_string(),
+                    format!("{install_path}/venvs"),
+                    "--bin-dir".to_string(),
+                    format!("{install_path}/bin"),
                     python_package_with_version(name, version),
                 ],
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -640,6 +675,10 @@ fn tool_install_command_for_backend(
                     "install".to_string(),
                     go_package_with_version(name, version),
                 ],
+                env: vec![
+                    ("GOBIN".to_string(), format!("{install_path}/bin")),
+                    ("GOPATH".to_string(), format!("{install_path}/go")),
+                ],
                 after: Vec::new(),
             })
         }
@@ -649,6 +688,7 @@ fn tool_install_command_for_backend(
                 backend: "mise".to_string(),
                 program: "mise".to_string(),
                 args: vec!["install".to_string(), format!("{name}@{version}")],
+                env: vec![("MISE_DATA_DIR".to_string(), format!("{install_path}/mise"))],
                 after: Vec::new(),
             })
         }
@@ -658,6 +698,7 @@ fn tool_install_command_for_backend(
                 backend: "asdf".to_string(),
                 program: "asdf".to_string(),
                 args: vec!["install".to_string(), name.to_string(), version.to_string()],
+                env: vec![("ASDF_DATA_DIR".to_string(), format!("{install_path}/asdf"))],
                 after: Vec::new(),
             })
         }
@@ -667,6 +708,7 @@ fn tool_install_command_for_backend(
                 backend: "aqua".to_string(),
                 program: "aqua".to_string(),
                 args: vec!["install".to_string(), package_with_version(name, version)],
+                env: vec![("AQUA_ROOT_DIR".to_string(), format!("{install_path}/aqua"))],
                 after: Vec::new(),
             })
         }
@@ -676,6 +718,12 @@ fn tool_install_command_for_backend(
         .into()),
         _ => unsupported_tool_backend(&normalized),
     }
+}
+
+fn tool_install_path(item: &InstallItemRequest) -> PathBuf {
+    System::tool_dir()
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str())
 }
 
 fn rustup_extra_steps(version: &str, options: &ToolInstallOptions) -> Vec<ToolInstallStep> {
@@ -1913,6 +1961,12 @@ mod tests {
 
         assert_eq!(command.program, "rustup");
         assert_eq!(command.args, ["toolchain", "install", "stable"]);
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "RUSTUP_HOME" && value.ends_with("/tools/rust/stable/rustup")
+        }));
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "CARGO_HOME" && value.ends_with("/tools/rust/stable/cargo")
+        }));
     }
 
     #[test]
@@ -1929,6 +1983,7 @@ mod tests {
         let command = tool_install_command(&item).unwrap();
 
         assert_eq!(command.args, ["toolchain", "install", "stable"]);
+        assert!(command.env.iter().any(|(key, _)| key == "RUSTUP_HOME"));
         assert_eq!(
             command.after,
             [
@@ -2005,11 +2060,58 @@ mod tests {
 
         assert_eq!(
             cargo.args,
-            ["install", "cargo-nextest", "--version", "0.9.99"]
+            [
+                "install",
+                "--root",
+                System::tool_dir()
+                    .join("cargo-nextest")
+                    .join("0.9.99")
+                    .to_str()
+                    .unwrap(),
+                "cargo-nextest",
+                "--version",
+                "0.9.99"
+            ]
         );
-        assert_eq!(npm.args, ["install", "--global", "typescript@5.8.0"]);
-        assert_eq!(pipx.args, ["install", "ruff==0.11.0"]);
+        assert_eq!(
+            npm.args,
+            [
+                "install",
+                "--global",
+                "--prefix",
+                System::tool_dir()
+                    .join("typescript")
+                    .join("5.8.0")
+                    .to_str()
+                    .unwrap(),
+                "typescript@5.8.0"
+            ]
+        );
+        assert_eq!(
+            pipx.args,
+            [
+                "install",
+                "--install-dir",
+                System::tool_dir()
+                    .join("ruff")
+                    .join("0.11.0")
+                    .join("venvs")
+                    .to_str()
+                    .unwrap(),
+                "--bin-dir",
+                System::tool_dir()
+                    .join("ruff")
+                    .join("0.11.0")
+                    .join("bin")
+                    .to_str()
+                    .unwrap(),
+                "ruff==0.11.0"
+            ]
+        );
         assert_eq!(go.args, ["install", "stringer@latest"]);
+        assert!(go.env.iter().any(|(key, value)| {
+            key == "GOBIN" && value.ends_with("/tools/stringer/latest/bin")
+        }));
     }
 
     #[test]
@@ -2036,6 +2138,9 @@ mod tests {
         assert_eq!(mise.args, ["install", "node@22"]);
         assert_eq!(asdf.args, ["install", "node", "22"]);
         assert_eq!(aqua.args, ["install", "ripgrep@14.1.1"]);
+        assert!(mise.env.iter().any(|(key, _)| key == "MISE_DATA_DIR"));
+        assert!(asdf.env.iter().any(|(key, _)| key == "ASDF_DATA_DIR"));
+        assert!(aqua.env.iter().any(|(key, _)| key == "AQUA_ROOT_DIR"));
     }
 
     #[test]
