@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::error::EngineError;
+use crate::platform::PlatformId;
 
 /// Parsed project or global Still config.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -195,7 +196,13 @@ fn validate_config(config: &StillConfig) -> Result<()> {
             }
             .into());
         }
+        if let ToolEntry::Expanded(tool) = entry {
+            validate_platform_map(&format!("tool \"{name}\" backends"), &tool.backends)?;
+        }
     }
+
+    validate_package_map("package", &config.packages)?;
+    validate_package_map("app", &config.apps)?;
 
     for (name, entry) in &config.services {
         if let ServiceEntry::Expanded(service) = entry
@@ -231,6 +238,41 @@ fn validate_config(config: &StillConfig) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
+    for (name, entry) in &map.entries {
+        let PackageEntry::Expanded(package) = entry;
+        validate_platform_map(&format!("{kind} \"{name}\" backends"), &package.backends)?;
+        validate_platform_map(&format!("{kind} \"{name}\" names"), &package.names)?;
+        for field in &package.platforms {
+            validate_platform_value(&format!("{kind} \"{name}\" platforms"), field)?;
+        }
+        if let Some(ignore) = &package.ignore {
+            validate_platform_value(&format!("{kind} \"{name}\" ignore"), ignore)?;
+        }
+        if let Some(only) = &package.only {
+            validate_platform_value(&format!("{kind} \"{name}\" only"), only)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_platform_map(label: &str, map: &BTreeMap<String, String>) -> Result<()> {
+    for key in map.keys() {
+        validate_platform_value(label, key)?;
+    }
+    Ok(())
+}
+
+fn validate_platform_value(label: &str, value: &str) -> Result<()> {
+    if value.parse::<PlatformId>().is_err() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("{label} contains unsupported platform \"{value}\""),
+        }
+        .into());
+    }
     Ok(())
 }
 
@@ -388,6 +430,56 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("service \"web\" must define preset, task, start, or check")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_platform_in_tool_backends() {
+        let err = parse_still_toml(
+            r#"
+            [tools.rust]
+            version = "stable"
+            backends = { freebsd = "pkg" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("tool \"rust\" backends contains unsupported platform \"freebsd\"")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_platform_in_package_metadata() {
+        let err = parse_still_toml(
+            r#"
+            [packages.fd.names]
+            freebsd = "fd"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package \"fd\" names contains unsupported platform \"freebsd\"")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_platform_in_app_filters() {
+        let err = parse_still_toml(
+            r#"
+            [apps.zed]
+            version = "latest"
+            only = "freebsd"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("app \"zed\" only contains unsupported platform \"freebsd\"")
         );
     }
 }
