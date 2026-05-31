@@ -406,6 +406,16 @@ mod tests {
     }
 
     #[test]
+    fn schema_allows_service_task_reference_shape() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../examples/still.schema.json")).unwrap();
+        let service_map = &schema["$defs"]["serviceMap"]["additionalProperties"];
+
+        assert!(service_map.get("anyOf").is_some());
+        assert!(service_map.get("oneOf").is_none());
+    }
+
+    #[test]
     fn rejects_expanded_tool_without_version() {
         let err = parse_still_toml(
             r#"
