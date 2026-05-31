@@ -148,7 +148,14 @@ fn validate_lockfile_item(index: usize, item: &LockfileItem) -> Result<()> {
     if item.checksum.trim().is_empty() {
         bail!("lockfile item {index} has an empty checksum");
     }
+    if !is_sha256_hex(&item.checksum) {
+        bail!("lockfile item {index} has an invalid checksum");
+    }
     Ok(())
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn toml_string(value: &str) -> String {
@@ -320,11 +327,12 @@ mod tests {
             version = "stable"
             backend = "rustup"
             source = "backend:rustup"
-            checksum = "abc123"
+            checksum = "{}"
             outputs = ["/still/tools/rust/stable"]
             linked_executables = []
             "#,
-            current_platform()
+            current_platform(),
+            "a".repeat(64)
         );
 
         validate_lockfile(&content).unwrap();
@@ -339,12 +347,33 @@ mod tests {
             platform = "plan9"
             version = "stable"
             source = "backend:auto"
-            checksum = "abc123"
+            checksum = "{}"
         "#;
+        let content = content.replace("{}", &"a".repeat(64));
 
-        let err = validate_lockfile(content).unwrap_err();
+        let err = validate_lockfile(&content).unwrap_err();
 
         assert!(err.to_string().contains("invalid kind"));
+    }
+
+    #[test]
+    fn rejects_invalid_lockfile_checksums() {
+        let content = format!(
+            r#"
+            [[items]]
+            kind = "package"
+            name = "openssl"
+            platform = "{}"
+            version = "latest"
+            source = "backend:auto"
+            checksum = "abc123"
+            "#,
+            current_platform()
+        );
+
+        let err = validate_lockfile(&content).unwrap_err();
+
+        assert!(err.to_string().contains("invalid checksum"));
     }
 
     fn item(kind: ItemKind, spec: &str) -> SyncItem {

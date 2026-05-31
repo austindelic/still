@@ -569,6 +569,43 @@ mod tests {
     }
 
     #[test]
+    fn doctor_reports_invalid_lockfile_checksum() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[packages]\nlatest = [\"openssl\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("still.lock.toml"),
+            r#"
+            [[items]]
+            kind = "package"
+            name = "openssl"
+            platform = "linux"
+            version = "latest"
+            source = "backend:auto"
+            checksum = "abc123"
+            "#,
+        )
+        .unwrap();
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "lockfile")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Error);
+        assert!(check.detail.contains("invalid checksum"));
+    }
+
+    #[test]
     fn doctor_reports_path_readiness_and_path_activation() {
         let temp = tempfile::tempdir().unwrap();
 
