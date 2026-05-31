@@ -101,7 +101,18 @@ impl CliRuntime for RealRuntime {
             prepare_install_config_write(&install_request, request.global, request.force)?;
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         let result = runtime.block_on(engine::actions::install::run(request.install))?;
-        record_install_items(pending_config)?;
+        if let Err(err) = record_install_items(pending_config) {
+            if let Err(rollback_err) = runtime.block_on(
+                engine::actions::install::rollback_installed_items(&result.installed),
+            ) {
+                return Err(err.context(format!(
+                    "failed to roll back installed artifacts after config recording failed: {rollback_err}"
+                )));
+            }
+            return Err(
+                err.context("failed to record installed items; rolled back installed artifacts")
+            );
+        }
         Ok(result)
     }
 

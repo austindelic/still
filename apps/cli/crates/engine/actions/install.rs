@@ -142,6 +142,16 @@ pub async fn run_with_installer(
     run_with_installer_and_rollback_roots(request, installer, &RollbackRoots::system()).await
 }
 
+/// Removes installed outputs returned by a completed install request.
+/// # Errors
+/// Fails when a Still-managed output or linked executable cannot be removed.
+/// # Side Effects
+/// Deletes files, directories, and links recorded in install results when they
+/// are under Still-managed install roots.
+pub async fn rollback_installed_items(installed: &[InstalledItemResult]) -> Result<()> {
+    rollback_installed_items_at(installed, &RollbackRoots::system()).await
+}
+
 async fn run_with_installer_and_rollback_roots(
     request: InstallRequest,
     installer: &mut impl ItemInstaller,
@@ -1271,6 +1281,42 @@ mod tests {
         assert_eq!(result.installed.len(), 2);
         assert!(roots.tool_root.join("ripgrep/latest").exists());
         assert!(roots.package_root.join("openssl/latest").exists());
+    }
+
+    #[tokio::test]
+    async fn rollback_removes_completed_install_outputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = RollbackRoots {
+            tool_root: temp.path().join("tools"),
+            package_root: temp.path().join("packages"),
+            app_root: temp.path().join("apps"),
+            bin_dir: temp.path().join("bin"),
+        };
+        let mut installer = FakeItemInstaller {
+            roots: roots.clone(),
+            calls: 0,
+            fail_on_call: None,
+        };
+
+        let result = run_with_installer_and_rollback_roots(
+            InstallRequest {
+                items: vec![install_item(ItemKind::Tool, "ripgrep")],
+            },
+            &mut installer,
+            &roots,
+        )
+        .await
+        .unwrap();
+
+        assert!(roots.tool_root.join("ripgrep/latest").exists());
+        assert!(roots.bin_dir.join("ripgrep").exists());
+
+        rollback_installed_items_at(&result.installed, &roots)
+            .await
+            .unwrap();
+
+        assert!(!roots.tool_root.join("ripgrep/latest").exists());
+        assert!(!roots.bin_dir.join("ripgrep").exists());
     }
 
     #[test]
