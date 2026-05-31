@@ -23,6 +23,7 @@ use crate::trust::assert_config_trusted;
 const MANAGED_MARKER: &str = ".still-managed";
 const SOURCE_METADATA: &str = "source.toml";
 const CONTENT_DIR: &str = "content";
+const TARGET_MANIFEST_MARKER: &str = "managed_by = \"still\"";
 
 /// Agent operation requested by a caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,7 @@ pub struct AgentsResult {
     pub agents: NormalizedAgents,
     pub gitignore: String,
     pub gitignore_path: Option<PathBuf>,
+    pub target_manifests: Vec<PathBuf>,
     pub auto_added: Vec<InstallItemRequest>,
     pub missing_dependencies: Vec<InstallItemRequest>,
 }
@@ -71,6 +73,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
     let gitignore = managed_skills_gitignore(&agents.skills)?;
     let mut auto_added = Vec::new();
     let mut missing_dependencies = missing_skill_dependencies(&agents.skills, &config, false);
+    let mut target_manifests = Vec::new();
     let gitignore_path = if request.operation == AgentsOperation::Sync {
         assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
         auto_added = auto_dependency_items(&agents.skills, &config);
@@ -88,14 +91,16 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
             missing_dependencies =
                 missing_skill_dependencies(&agents.skills, &updated_config, false);
         }
-        let skills_dir = resolved
+        let project_root = resolved
             .path
             .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(".agents")
-            .join("skills");
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let skills_dir = project_root.join(".agents").join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
         prune_stale_managed_skills(&skills_dir, &agents.skills).await?;
+        target_manifests =
+            materialize_target_manifests(&project_root.join(".agents").join("targets"), &agents)
+                .await?;
         let path = skills_dir.join(".gitignore");
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -111,6 +116,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
         agents,
         gitignore,
         gitignore_path,
+        target_manifests,
         auto_added,
         missing_dependencies,
     })
@@ -238,6 +244,86 @@ async fn prune_stale_managed_skills(root: &Path, skills: &[NormalizedSkill]) -> 
     Ok(())
 }
 
+async fn materialize_target_manifests(
+    root: &Path,
+    agents: &NormalizedAgents,
+) -> Result<Vec<PathBuf>> {
+    if agents.targets.is_empty() {
+        prune_stale_target_manifests(root, &[]).await?;
+        return Ok(Vec::new());
+    }
+
+    tokio::fs::create_dir_all(root).await?;
+    let mut written = Vec::new();
+    for target in &agents.targets {
+        let path = root.join(format!("{target}.toml"));
+        refuse_unmanaged_target_manifest(&path).await?;
+        tokio::fs::write(&path, target_manifest(target, agents)?).await?;
+        written.push(path);
+    }
+    prune_stale_target_manifests(root, &agents.targets).await?;
+    Ok(written)
+}
+
+async fn refuse_unmanaged_target_manifest(path: &Path) -> Result<()> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) if content.contains(TARGET_MANIFEST_MARKER) => Ok(()),
+        Ok(_) => Err(EngineError::Conflict {
+            message: format!(
+                "refusing to overwrite unmanaged agent target {}",
+                path.display()
+            ),
+        }
+        .into()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn prune_stale_target_manifests(root: &Path, targets: &[String]) -> Result<()> {
+    let Ok(mut entries) = tokio::fs::read_dir(root).await else {
+        return Ok(());
+    };
+    let desired = targets
+        .iter()
+        .map(|target| format!("{target}.toml"))
+        .collect::<BTreeSet<_>>();
+    while let Some(entry) = entries.next_entry().await? {
+        let metadata = entry.metadata().await?;
+        if !metadata.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if desired.contains(&name) || !name.ends_with(".toml") {
+            continue;
+        }
+        let path = entry.path();
+        let content = tokio::fs::read_to_string(&path).await?;
+        if content.contains(TARGET_MANIFEST_MARKER) {
+            tokio::fs::remove_file(path).await?;
+        }
+    }
+    Ok(())
+}
+
+fn target_manifest(target: &str, agents: &NormalizedAgents) -> Result<String> {
+    let skills = agents
+        .skills
+        .iter()
+        .map(|skill| managed_skill_dir_name(&skill.name))
+        .collect::<crate::error::EngineResult<Vec<_>>>()?
+        .into_iter()
+        .map(|name| format!(".agents/skills/{name}"))
+        .collect();
+    toml_edit::ser::to_string(&AgentTargetManifest {
+        managed_by: "still",
+        target,
+        instructions: agents.instructions.as_deref(),
+        skills,
+    })
+    .map_err(Into::into)
+}
+
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
         NormalizedSkillSource::Official { .. } => Ok(()),
@@ -358,6 +444,14 @@ struct ManagedSkillMarker<'a> {
 }
 
 #[derive(Debug, Serialize)]
+struct AgentTargetManifest<'a> {
+    managed_by: &'a str,
+    target: &'a str,
+    instructions: Option<&'a str>,
+    skills: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct ManagedSkillMetadata {
     name: String,
     source_kind: &'static str,
@@ -469,6 +563,100 @@ mod tests {
         let metadata = fs::read_to_string(skill_dir.join("source.toml")).unwrap();
         assert!(metadata.contains("source_kind = \"official\""));
         assert!(metadata.contains("source = \"rust-review\""));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_writes_target_manifests() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents]
+            targets = ["claude", "codex"]
+            instructions = "AGENTS.md"
+            skills = ["rust-review", "repo-auditor"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let claude = temp.path().join(".agents/targets/claude.toml");
+        let codex = temp.path().join(".agents/targets/codex.toml");
+        assert_eq!(result.target_manifests, [claude.clone(), codex.clone()]);
+        let content = fs::read_to_string(claude).unwrap();
+        assert!(content.contains("managed_by = \"still\""));
+        assert!(content.contains("target = \"claude\""));
+        assert!(content.contains("instructions = \"AGENTS.md\""));
+        assert!(content.contains("\".agents/skills/rust-review\""));
+        assert!(content.contains("\".agents/skills/repo-auditor\""));
+        assert!(
+            fs::read_to_string(codex)
+                .unwrap()
+                .contains("target = \"codex\"")
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_sync_prunes_stale_managed_target_manifests_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents]
+            targets = ["codex"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        let targets = temp.path().join(".agents/targets");
+        fs::create_dir_all(&targets).unwrap();
+        fs::write(
+            targets.join("claude.toml"),
+            "managed_by = \"still\"\ntarget = \"claude\"\nskills = []\n",
+        )
+        .unwrap();
+        fs::write(targets.join("custom.toml"), "target = \"custom\"\n").unwrap();
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        assert!(!targets.join("claude.toml").exists());
+        assert!(targets.join("codex.toml").is_file());
+        assert!(targets.join("custom.toml").is_file());
+    }
+
+    #[tokio::test]
+    async fn agents_sync_refuses_unmanaged_target_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents]
+            targets = ["claude"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        let targets = temp.path().join(".agents/targets");
+        fs::create_dir_all(&targets).unwrap();
+        fs::write(targets.join("claude.toml"), "target = \"claude\"\n").unwrap();
+
+        let err = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("refusing to overwrite unmanaged"));
     }
 
     #[tokio::test]

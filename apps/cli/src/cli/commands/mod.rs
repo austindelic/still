@@ -284,6 +284,9 @@ where
                     if let Some(path) = result.gitignore_path {
                         output.success(&format!("Updated {}", path.display()));
                     }
+                    for path in result.target_manifests {
+                        output.success(&format!("Updated {}", path.display()));
+                    }
                     0
                 }
                 Err(e) => {
@@ -1016,6 +1019,10 @@ list failed: failed to read still.toml
                 },
                 gitignore: "# still-managed skills\n/rust-review/\n".to_string(),
                 gitignore_path: Some(PathBuf::from("/repo/.agents/skills/.gitignore")),
+                target_manifests: vec![
+                    PathBuf::from("/repo/.agents/targets/claude.toml"),
+                    PathBuf::from("/repo/.agents/targets/codex.toml"),
+                ],
                 auto_added: Vec::new(),
                 missing_dependencies: Vec::new(),
             })),
@@ -1053,6 +1060,8 @@ Instructions: AGENTS.md
 Skills:
   rust-review
 ✓ Updated /repo/.agents/skills/.gitignore
+✓ Updated /repo/.agents/targets/claude.toml
+✓ Updated /repo/.agents/targets/codex.toml
 "###);
         assert_eq!(output.stderr, "");
     }

@@ -4,6 +4,8 @@ use crate::error::{EngineError, EngineResult};
 use crate::specs::item::ItemSpec;
 use crate::specs::toml::{AgentSkills, AgentsConfig, SkillSource};
 
+const SUPPORTED_TARGETS: &[&str] = &["claude", "codex"];
+
 /// Normalized agent desired state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedAgents {
@@ -78,6 +80,7 @@ pub fn managed_skill_dir_name(name: &str) -> EngineResult<String> {
 
 /// Converts parsed `[agents]` config into command/planner friendly data.
 pub fn normalize_agents(config: AgentsConfig) -> EngineResult<NormalizedAgents> {
+    let targets = normalize_targets(config.targets)?;
     let skills = match config.skills {
         Some(AgentSkills::List(skills)) => skills
             .into_iter()
@@ -101,10 +104,27 @@ pub fn normalize_agents(config: AgentsConfig) -> EngineResult<NormalizedAgents> 
     };
 
     Ok(NormalizedAgents {
-        targets: config.targets,
+        targets,
         instructions: config.instructions,
         skills,
     })
+}
+
+fn normalize_targets(targets: Vec<String>) -> EngineResult<Vec<String>> {
+    let mut normalized = Vec::new();
+    for target in targets {
+        if !SUPPORTED_TARGETS.contains(&target.as_str()) {
+            return Err(EngineError::InvalidConfig {
+                reason: format!(
+                    "unsupported agent target \"{target}\"; supported targets are claude, codex"
+                ),
+            });
+        }
+        if !normalized.contains(&target) {
+            normalized.push(target);
+        }
+    }
+    Ok(normalized)
 }
 
 fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<NormalizedSkill> {
@@ -294,6 +314,34 @@ mod tests {
         let err = normalize_agents(config).unwrap_err();
 
         assert!(err.to_string().contains("cannot set both source and url"));
+    }
+
+    #[test]
+    fn rejects_unknown_agent_targets() {
+        let config = AgentsConfig {
+            targets: vec!["claude".to_string(), "unknown".to_string()],
+            ..AgentsConfig::default()
+        };
+
+        let err = normalize_agents(config).unwrap_err();
+
+        assert!(err.to_string().contains("unsupported agent target"));
+    }
+
+    #[test]
+    fn dedupes_agent_targets_in_input_order() {
+        let config = AgentsConfig {
+            targets: vec![
+                "codex".to_string(),
+                "claude".to_string(),
+                "codex".to_string(),
+            ],
+            ..AgentsConfig::default()
+        };
+
+        let agents = normalize_agents(config).unwrap();
+
+        assert_eq!(agents.targets, ["codex", "claude"]);
     }
 
     #[test]
