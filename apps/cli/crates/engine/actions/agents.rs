@@ -105,6 +105,11 @@ pub async fn run_with_installer(
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
     let mut agents = normalize_agents(config.agents.clone().unwrap_or_default())?;
+    let project_root = resolved
+        .path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    validate_instructions_file(project_root, agents.instructions.as_deref()).await?;
     let gitignore = managed_skills_gitignore(&agents.skills)?;
     let mut dependency_skills = agents.skills.clone();
     let mut pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
@@ -127,10 +132,6 @@ pub async fn run_with_installer(
     }
     let gitignore_path = if request.operation == AgentsOperation::Sync {
         assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
-        let project_root = resolved
-            .path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
         let skills_dir = project_root.join(".agents").join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
         dependency_skills = skills_with_manifest_dependencies(&skills_dir, &agents.skills).await?;
@@ -485,6 +486,29 @@ fn target_manifest(target: &str, agents: &NormalizedAgents) -> Result<String> {
     .map_err(Into::into)
 }
 
+async fn validate_instructions_file(project_root: &Path, instructions: Option<&str>) -> Result<()> {
+    let Some(instructions) = instructions else {
+        return Ok(());
+    };
+    let path = project_root.join(instructions);
+    let metadata = tokio::fs::metadata(&path).await.with_context(|| {
+        format!(
+            "failed to read configured agent instructions {}",
+            path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!(
+                "configured agent instructions {} is not a file",
+                path.display()
+            ),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
         NormalizedSkillSource::Official { .. } => Ok(()),
@@ -713,6 +737,7 @@ mod tests {
             "#,
         )
         .unwrap();
+        fs::write(temp.path().join("AGENTS.md"), "# Project instructions\n").unwrap();
 
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
@@ -774,6 +799,7 @@ mod tests {
             skills = ["rust-review", "repo-auditor"]
             "#;
         fs::write(&config_path, config).unwrap();
+        fs::write(temp.path().join("AGENTS.md"), "# Project instructions\n").unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
@@ -797,6 +823,32 @@ mod tests {
             fs::read_to_string(codex)
                 .unwrap()
                 .contains("target = \"codex\"")
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_check_rejects_missing_instructions_file() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents]
+            instructions = "AGENTS.md"
+            "#,
+        )
+        .unwrap();
+
+        let err = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("failed to read configured agent instructions")
         );
     }
 
