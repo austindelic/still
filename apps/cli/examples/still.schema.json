@@ -350,7 +350,6 @@
           "items": {
             "$ref": "#/$defs/agentTarget"
           },
-          "minItems": 1,
           "uniqueItems": true
         },
         "instructions": {
