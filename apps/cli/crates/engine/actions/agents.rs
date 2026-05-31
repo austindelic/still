@@ -109,7 +109,9 @@ pub async fn run_with_installer(
         .path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
-    validate_instructions_file(project_root, agents.instructions.as_deref()).await?;
+    if request.operation != AgentsOperation::List {
+        validate_instructions_file(project_root, agents.instructions.as_deref()).await?;
+    }
     let gitignore = managed_skills_gitignore(&agents.skills)?;
     let mut dependency_skills = agents.skills.clone();
     let mut pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
@@ -850,6 +852,31 @@ mod tests {
             err.to_string()
                 .contains("failed to read configured agent instructions")
         );
+    }
+
+    #[tokio::test]
+    async fn agents_list_allows_missing_instructions_file() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents]
+            instructions = "AGENTS.md"
+            skills = ["rust-review"]
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::List,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.agents.instructions.as_deref(), Some("AGENTS.md"));
+        assert_eq!(result.agents.skills[0].name, "rust-review");
     }
 
     #[tokio::test]
