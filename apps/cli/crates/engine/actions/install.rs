@@ -706,6 +706,11 @@ fn app_install_command_for_platform(
                     name.to_string(),
                 ],
             }),
+            "mas" => Ok(AppInstallCommand {
+                backend: "mas".to_string(),
+                program: "mas".to_string(),
+                args: vec!["install".to_string(), name.to_string()],
+            }),
             _ => unsupported_app_backend(backend),
         },
         PlatformId::Linux => match backend {
@@ -1324,6 +1329,16 @@ mod tests {
         assert_eq!(command.backend, "scoop");
         assert_eq!(command.program, "scoop");
         assert_eq!(command.args, ["install", "firefox"]);
+    }
+
+    #[test]
+    fn app_install_command_plans_macos_mas() {
+        let command =
+            app_install_command_for_platform("497799835", "mas", PlatformId::Macos).unwrap();
+
+        assert_eq!(command.backend, "mas");
+        assert_eq!(command.program, "mas");
+        assert_eq!(command.args, ["install", "497799835"]);
     }
 
     #[test]
