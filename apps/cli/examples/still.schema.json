@@ -267,10 +267,6 @@
     "serviceAction": {
       "oneOf": [
         {
-          "type": "string",
-          "minLength": 1
-        },
-        {
           "$ref": "#/$defs/taskRef"
         },
         {
