@@ -30,9 +30,11 @@ pub struct NormalizedSkill {
 pub enum NormalizedSkillSource {
     Official {
         name: String,
+        version: Option<String>,
     },
     GitHub {
         path: String,
+        version: Option<String>,
     },
     Url {
         url: String,
@@ -161,7 +163,7 @@ fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<Norm
             let source = match (expanded.source, expanded.url) {
                 (Some(source), None) => {
                     validate_non_empty(&format!("agent skill \"{name}\" source"), &source)?;
-                    source_from_shorthand(&source)
+                    source_from_shorthand_with_version(&source, expanded.version)
                 }
                 (None, Some(url)) => NormalizedSkillSource::Url {
                     url: {
@@ -170,7 +172,7 @@ fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<Norm
                     },
                     version: expanded.version,
                 },
-                (None, None) => source_from_shorthand(&name),
+                (None, None) => source_from_shorthand_with_version(&name, expanded.version),
                 (Some(_), Some(_)) => {
                     return Err(EngineError::InvalidConfig {
                         reason: format!("agent skill \"{name}\" cannot set both source and url"),
@@ -200,19 +202,31 @@ fn validate_non_empty(label: &str, value: &str) -> EngineResult<()> {
 }
 
 fn source_from_shorthand(value: &str) -> NormalizedSkillSource {
+    source_from_shorthand_with_version(value, None)
+}
+
+fn source_from_shorthand_with_version(
+    value: &str,
+    explicit_version: Option<String>,
+) -> NormalizedSkillSource {
     if value.contains("://") {
         let (url, version) = split_url_version(value);
-        return NormalizedSkillSource::Url { url, version };
+        return NormalizedSkillSource::Url {
+            url,
+            version: explicit_version.or(version),
+        };
     }
 
     if value.contains('/') {
         return NormalizedSkillSource::GitHub {
             path: value.to_string(),
+            version: explicit_version,
         };
     }
 
     NormalizedSkillSource::Official {
         name: value.to_string(),
+        version: explicit_version,
     }
 }
 
@@ -289,13 +303,15 @@ mod tests {
         assert_eq!(
             agents.skills[0].source,
             NormalizedSkillSource::Official {
-                name: "rust-review".to_string()
+                name: "rust-review".to_string(),
+                version: None
             }
         );
         assert_eq!(
             agents.skills[1].source,
             NormalizedSkillSource::GitHub {
-                path: "owner/repo-auditor".to_string()
+                path: "owner/repo-auditor".to_string(),
+                version: None
             }
         );
     }
@@ -312,6 +328,8 @@ mod tests {
             pinned = "https://example.com/skill:2.0.0"
             latest = "https://example.com/skill"
             rust-review = { source = "rust-review", auto = true, tools = ["rust@stable@rustup"], packages = ["llvm"] }
+            pinned-official = { source = "repo-auditor", version = "v1.2.3" }
+            pinned-github = { source = "owner/repo-auditor", version = "abcdef" }
             "#,
         )
         .unwrap()
@@ -337,6 +355,22 @@ mod tests {
         assert_eq!(rust.tools[0].name, "rust");
         assert_eq!(rust.tools[0].backend.as_ref().unwrap().as_str(), "rustup");
         assert_eq!(rust.packages[0].name, "llvm");
+        assert!(agents.skills.iter().any(|skill| {
+            skill.name == "pinned-official"
+                && skill.source
+                    == NormalizedSkillSource::Official {
+                        name: "repo-auditor".to_string(),
+                        version: Some("v1.2.3".to_string()),
+                    }
+        }));
+        assert!(agents.skills.iter().any(|skill| {
+            skill.name == "pinned-github"
+                && skill.source
+                    == NormalizedSkillSource::GitHub {
+                        path: "owner/repo-auditor".to_string(),
+                        version: Some("abcdef".to_string()),
+                    }
+        }));
     }
 
     #[test]
@@ -460,6 +494,7 @@ mod tests {
             name: name.to_string(),
             source: NormalizedSkillSource::Official {
                 name: name.to_string(),
+                version: None,
             },
             auto: false,
             tools: Vec::new(),

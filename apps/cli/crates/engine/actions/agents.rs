@@ -547,7 +547,7 @@ async fn validate_instructions_file(project_root: &Path, instructions: Option<&s
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
         NormalizedSkillSource::Official { .. } => Ok(()),
-        NormalizedSkillSource::GitHub { path: repo } => {
+        NormalizedSkillSource::GitHub { path: repo, .. } => {
             let url = format!("https://github.com/{repo}.git");
             clone_skill_source(&url, path).await
         }
@@ -746,8 +746,12 @@ struct ManagedSkillMetadata {
 impl From<&NormalizedSkill> for ManagedSkillMetadata {
     fn from(skill: &NormalizedSkill) -> Self {
         let (source_kind, source, version) = match &skill.source {
-            NormalizedSkillSource::Official { name } => ("official", name.clone(), None),
-            NormalizedSkillSource::GitHub { path } => ("github", path.clone(), None),
+            NormalizedSkillSource::Official { name, version } => {
+                ("official", name.clone(), version.clone())
+            }
+            NormalizedSkillSource::GitHub { path, version } => {
+                ("github", path.clone(), version.clone())
+            }
             NormalizedSkillSource::Url { url, version } => ("url", url.clone(), version.clone()),
         };
 
@@ -868,6 +872,32 @@ mod tests {
         let metadata = fs::read_to_string(skill_dir.join("source.toml")).unwrap();
         assert!(metadata.contains("source_kind = \"official\""));
         assert!(metadata.contains("source = \"rust-review\""));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_records_pinned_official_skill_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents.skills]
+            rust-review = { source = "rust-review", version = "v1.2.3" }
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let metadata =
+            fs::read_to_string(temp.path().join(".agents/skills/rust-review/source.toml")).unwrap();
+        assert!(metadata.contains("source_kind = \"official\""));
+        assert!(metadata.contains("source = \"rust-review\""));
+        assert!(metadata.contains("version = \"v1.2.3\""));
     }
 
     #[tokio::test]

@@ -2179,6 +2179,7 @@ Removed artifact /opt/still/packages/openssl
             name: name.to_string(),
             source: NormalizedSkillSource::Official {
                 name: name.to_string(),
+                version: None,
             },
             auto: false,
             tools: Vec::new(),
