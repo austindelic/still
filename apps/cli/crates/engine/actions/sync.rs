@@ -37,6 +37,7 @@ pub struct SyncResult {
 pub struct SyncItem {
     pub kind: ItemKind,
     pub spec: ItemSpec,
+    pub desired_state: String,
 }
 
 /// Drift detected before writing the new lockfile.
@@ -199,9 +200,11 @@ fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
     let platform = current_platform();
     let mut items = Vec::new();
     for (name, entry) in config.tools {
+        let desired_state = format!("tool:{name}:{entry:?}");
         items.push(SyncItem {
             kind: ItemKind::Tool,
             spec: tool_spec(name, entry, platform)?,
+            desired_state,
         });
     }
     items.extend(package_items(ItemKind::Package, config.packages, platform)?);
@@ -230,13 +233,16 @@ fn tool_spec(name: String, entry: ToolEntry, platform: PlatformId) -> Result<Ite
 fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Result<Vec<SyncItem>> {
     let mut items = Vec::new();
     for name in map.latest {
+        let desired_state = format!("{kind}:{name}:latest");
         items.push(SyncItem {
             kind,
             spec: item_spec(name, "latest".to_string(), None)?,
+            desired_state,
         });
     }
 
     for (name, entry) in map.entries {
+        let desired_state = format!("{kind}:{name}:{entry:?}");
         let PackageEntry::Expanded(package) = entry;
         let filter = PlatformFilter::from_config(
             &package.platforms,
@@ -255,6 +261,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
                 package.version.unwrap_or_else(|| "latest".to_string()),
                 backend_for_platform(package.backend, package.backends, platform)?,
             )?,
+            desired_state,
         });
     }
     Ok(items)
@@ -461,6 +468,38 @@ mod tests {
                 && item.spec.name == "openssl"
                 && item.spec.backend.as_ref().unwrap().as_str() == "apt"
         }));
+    }
+
+    #[tokio::test]
+    async fn sync_items_preserve_tool_metadata_for_lockfile_checksums() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools.rust]
+            version = "stable"
+            backend = "rustup"
+            components = ["rustfmt", "clippy"]
+            targets = ["wasm32-unknown-unknown"]
+            "#,
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        let rust = result
+            .items
+            .iter()
+            .find(|item| item.kind == ItemKind::Tool && item.spec.name == "rust")
+            .unwrap();
+        assert!(rust.desired_state.contains("rustfmt"));
+        assert!(rust.desired_state.contains("wasm32-unknown-unknown"));
     }
 
     #[tokio::test]

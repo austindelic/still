@@ -1924,6 +1924,7 @@ Removed artifact /opt/still/packages/openssl
         SyncItem {
             kind,
             spec: spec.parse().unwrap(),
+            desired_state: spec.to_string(),
         }
     }
 

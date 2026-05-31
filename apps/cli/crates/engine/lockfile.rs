@@ -155,13 +155,14 @@ fn desired_state_checksum(item: &SyncItem, source: &str) -> String {
         .map(ToString::to_string)
         .unwrap_or_else(|| "auto".to_string());
     let identity = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
         item.kind,
         item.spec.name,
         current_platform(),
         item.spec.version,
         backend,
-        source
+        source,
+        item.desired_state
     );
     Hashing::sha256(identity.as_bytes())
 }
@@ -198,6 +199,18 @@ mod tests {
         assert_ne!(
             desired_state_checksum(&rustup, &source_identity(&rustup)),
             desired_state_checksum(&mise, &source_identity(&mise))
+        );
+    }
+
+    #[test]
+    fn checksum_changes_when_desired_state_metadata_changes() {
+        let base = item(ItemKind::Tool, "rust@stable@rustup");
+        let mut with_component = item(ItemKind::Tool, "rust@stable@rustup");
+        with_component.desired_state = "tool:rust:components=[clippy]".to_string();
+
+        assert_ne!(
+            desired_state_checksum(&base, &source_identity(&base)),
+            desired_state_checksum(&with_component, &source_identity(&with_component))
         );
     }
 
@@ -263,6 +276,7 @@ mod tests {
         SyncItem {
             kind,
             spec: spec.parse().unwrap(),
+            desired_state: spec.to_string(),
         }
     }
 }
