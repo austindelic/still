@@ -469,9 +469,24 @@ fn should_use_tool_command_backend(item: &InstallItemRequest) -> bool {
 }
 
 async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallResult> {
-    let command = tool_install_command(item)?;
     let install_path = tool_install_path(item);
-    tokio::fs::create_dir_all(&install_path).await?;
+    let staging_path = tool_staging_path(item);
+    let result = install_tool_with_command_staged(item, &install_path, &staging_path).await;
+    if result.is_err() {
+        let _ = remove_path_if_exists(&staging_path).await;
+    }
+    result
+}
+
+async fn install_tool_with_command_staged(
+    item: &InstallItemRequest,
+    install_path: &Path,
+    staging_path: &Path,
+) -> Result<InstallResult> {
+    let command = tool_install_command_at(item, staging_path)?;
+    let backup_path = tool_backup_path(item);
+    remove_path_if_exists(staging_path).await?;
+    tokio::fs::create_dir_all(staging_path).await?;
     for step in command.steps() {
         let mut process = Command::new(&step.program);
         process.args(&step.args);
@@ -491,29 +506,91 @@ async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallR
         }
     }
 
-    let binary_path = System::find_binary_recursive(&install_path, &item.spec.name).await?;
-    let linked_executables = link_binary(&binary_path)
-        .await?
-        .into_iter()
-        .collect::<Vec<_>>();
-    write_install_marker(
-        &install_path,
+    let had_previous = promote_staged_install(staging_path, install_path, &backup_path).await?;
+    let binary_path = match System::find_binary_recursive(install_path, &item.spec.name).await {
+        Ok(binary_path) => binary_path,
+        Err(err) => {
+            rollback_promoted_install(install_path, &backup_path, had_previous).await?;
+            return Err(err);
+        }
+    };
+    let linked_executables = match link_binary(&binary_path).await {
+        Ok(linked) => linked.into_iter().collect::<Vec<_>>(),
+        Err(err) => {
+            rollback_promoted_install(install_path, &backup_path, had_previous).await?;
+            return Err(err);
+        }
+    };
+    if let Err(err) = write_install_marker(
+        install_path,
         item,
         &command.backend,
-        &[install_path.clone()],
+        &[install_path.to_path_buf()],
         &linked_executables,
     )
-    .await?;
+    .await
+    {
+        for linked in &linked_executables {
+            let _ = remove_path_if_exists(linked).await;
+        }
+        rollback_promoted_install(install_path, &backup_path, had_previous).await?;
+        return Err(err);
+    }
+    let _ = remove_path_if_exists(&backup_path).await;
 
     Ok(InstallResult {
         tool_name: item.spec.name.clone(),
         version: item.spec.version.to_string(),
-        install_path: install_path.clone(),
+        install_path: install_path.to_path_buf(),
         binary_path,
-        outputs: vec![install_path],
+        outputs: vec![install_path.to_path_buf()],
         linked_executables,
         installed: Vec::new(),
     })
+}
+
+async fn promote_staged_install(
+    staging_path: &Path,
+    install_path: &Path,
+    backup_path: &Path,
+) -> Result<bool> {
+    remove_path_if_exists(backup_path).await?;
+    if let Some(parent) = install_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let had_previous = install_path.exists();
+    if had_previous {
+        tokio::fs::rename(install_path, backup_path)
+            .await
+            .with_context(|| format!("failed to back up {}", install_path.display()))?;
+    }
+
+    if let Err(err) = tokio::fs::rename(staging_path, install_path).await {
+        if had_previous {
+            let _ = tokio::fs::rename(backup_path, install_path).await;
+        }
+        return Err(err)
+            .with_context(|| format!("failed to promote install to {}", install_path.display()));
+    }
+
+    Ok(had_previous)
+}
+
+async fn rollback_promoted_install(
+    install_path: &Path,
+    backup_path: &Path,
+    had_previous: bool,
+) -> Result<()> {
+    remove_path_if_exists(install_path).await?;
+    if had_previous {
+        tokio::fs::rename(backup_path, install_path)
+            .await
+            .with_context(|| format!("failed to restore {}", install_path.display()))?;
+    } else {
+        remove_path_if_exists(backup_path).await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -542,7 +619,15 @@ impl ToolInstallCommand {
     }
 }
 
+#[cfg(test)]
 fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand> {
+    tool_install_command_at(item, &tool_install_path(item))
+}
+
+fn tool_install_command_at(
+    item: &InstallItemRequest,
+    install_path: &Path,
+) -> Result<ToolInstallCommand> {
     let backend = install_backend(
         ItemKind::Tool,
         item.spec.backend.as_ref().map(|backend| backend.as_str()),
@@ -553,7 +638,7 @@ fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand>
         item.spec.version.as_str(),
         &backend,
         &item.tool,
-        &tool_install_path(item),
+        install_path,
     )
 }
 
@@ -724,6 +809,18 @@ fn tool_install_path(item: &InstallItemRequest) -> PathBuf {
     System::tool_dir()
         .join(&item.spec.name)
         .join(item.spec.version.as_str())
+}
+
+fn tool_staging_path(item: &InstallItemRequest) -> PathBuf {
+    System::tool_dir()
+        .join(&item.spec.name)
+        .join(format!(".{}.staging", item.spec.version.as_str()))
+}
+
+fn tool_backup_path(item: &InstallItemRequest) -> PathBuf {
+    System::tool_dir()
+        .join(&item.spec.name)
+        .join(format!(".{}.previous", item.spec.version.as_str()))
 }
 
 fn rustup_extra_steps(version: &str, options: &ToolInstallOptions) -> Vec<ToolInstallStep> {
@@ -2141,6 +2238,97 @@ mod tests {
         assert!(mise.env.iter().any(|(key, _)| key == "MISE_DATA_DIR"));
         assert!(asdf.env.iter().any(|(key, _)| key == "ASDF_DATA_DIR"));
         assert!(aqua.env.iter().any(|(key, _)| key == "AQUA_ROOT_DIR"));
+    }
+
+    #[test]
+    fn command_backed_tool_install_can_scope_backend_to_staging_path() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "typescript@5.8.0@npm".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+        let staging_path = tool_staging_path(&item);
+
+        let command = tool_install_command_at(&item, &staging_path).unwrap();
+
+        assert_eq!(
+            command.args,
+            [
+                "install",
+                "--global",
+                "--prefix",
+                staging_path.to_str().unwrap(),
+                "typescript@5.8.0"
+            ]
+        );
+        assert!(staging_path.ends_with("typescript/.5.8.0.staging"));
+    }
+
+    #[tokio::test]
+    async fn promote_staged_install_keeps_backup_until_finalized() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging_path = temp.path().join(".latest.staging");
+        let install_path = temp.path().join("latest");
+        let backup_path = temp.path().join(".latest.previous");
+        tokio::fs::create_dir_all(&staging_path).await.unwrap();
+        tokio::fs::write(staging_path.join("new.txt"), "new")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(&install_path).await.unwrap();
+        tokio::fs::write(install_path.join("old.txt"), "old")
+            .await
+            .unwrap();
+
+        let had_previous = promote_staged_install(&staging_path, &install_path, &backup_path)
+            .await
+            .unwrap();
+
+        assert!(had_previous);
+        assert!(install_path.join("new.txt").is_file());
+        assert!(!install_path.join("old.txt").exists());
+        assert!(!staging_path.exists());
+        assert!(backup_path.join("old.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn rollback_promoted_install_restores_previous_install() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_path = temp.path().join("latest");
+        let backup_path = temp.path().join(".latest.previous");
+        tokio::fs::create_dir_all(&install_path).await.unwrap();
+        tokio::fs::write(install_path.join("new.txt"), "new")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(&backup_path).await.unwrap();
+        tokio::fs::write(backup_path.join("old.txt"), "old")
+            .await
+            .unwrap();
+
+        rollback_promoted_install(&install_path, &backup_path, true)
+            .await
+            .unwrap();
+
+        assert!(install_path.join("old.txt").is_file());
+        assert!(!install_path.join("new.txt").exists());
+        assert!(!backup_path.exists());
+    }
+
+    #[tokio::test]
+    async fn rollback_promoted_install_removes_new_install_without_previous() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_path = temp.path().join("latest");
+        let backup_path = temp.path().join(".latest.previous");
+        tokio::fs::create_dir_all(&install_path).await.unwrap();
+        tokio::fs::write(install_path.join("new.txt"), "new")
+            .await
+            .unwrap();
+
+        rollback_promoted_install(&install_path, &backup_path, false)
+            .await
+            .unwrap();
+
+        assert!(!install_path.exists());
+        assert!(!backup_path.exists());
     }
 
     #[test]
