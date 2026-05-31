@@ -6,7 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::parse_still_toml;
 use crate::system::System;
@@ -86,15 +86,44 @@ pub(crate) async fn resolve_env_with_scope(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    let content = tokio::fs::read_to_string(&resolved.path)
-        .await
-        .with_context(|| format!("failed to read {}", resolved.path.display()))?;
-    let config = parse_still_toml(&content)?;
-    if resolved.scope == ConfigScope::Project && !config.env.files.is_empty() {
-        assert_config_trusted(&resolved.path, content.as_bytes(), "env file loading").await?;
-    }
     let mut vars = BTreeMap::new();
+    if scope == ConfigScope::Project && resolved.scope == ConfigScope::Project {
+        let global_path = global_config_path(home_dir);
+        if let Some(global_vars) = load_env_vars(&global_path, false).await? {
+            vars.extend(global_vars);
+        }
+    }
 
+    if let Some(config_vars) =
+        load_env_vars(&resolved.path, resolved.scope == ConfigScope::Project).await?
+    {
+        vars.extend(config_vars);
+    }
+    vars.insert("PATH".to_string(), managed_path());
+
+    Ok(ResolvedRunEnv {
+        working_dir: config_dir,
+        vars,
+    })
+}
+
+async fn load_env_vars(
+    config_path: &Path,
+    trust_sensitive: bool,
+) -> Result<Option<BTreeMap<String, String>>> {
+    let content = match tokio::fs::read_to_string(config_path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", config_path.display()));
+        }
+    };
+    let config = parse_still_toml(&content)?;
+    if trust_sensitive && !config.env.files.is_empty() {
+        assert_config_trusted(config_path, content.as_bytes(), "env file loading").await?;
+    }
+    let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut vars = BTreeMap::new();
     for file in config.env.files {
         let path = config_dir.join(&file);
         let content = tokio::fs::read_to_string(&path)
@@ -103,12 +132,7 @@ pub(crate) async fn resolve_env_with_scope(
         vars.extend(parse_env_file(&content)?);
     }
     vars.extend(config.env.vars);
-    vars.insert("PATH".to_string(), managed_path());
-
-    Ok(ResolvedRunEnv {
-        working_dir: config_dir,
-        vars,
-    })
+    Ok(Some(vars))
 }
 
 fn managed_path() -> String {
@@ -277,6 +301,76 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.vars["GLOBAL_FILE"], "yes");
+    }
+
+    #[tokio::test]
+    async fn project_env_includes_global_defaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            r#"
+            [env]
+            PROJECT_ONLY = "project"
+            SHARED = "project"
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            r#"
+            [env]
+            GLOBAL_ONLY = "global"
+            SHARED = "global"
+            "#,
+        )
+        .unwrap();
+
+        let result = resolve_env(&project, temp.path()).await.unwrap();
+
+        assert_eq!(result.working_dir, project);
+        assert_eq!(result.vars["GLOBAL_ONLY"], "global");
+        assert_eq!(result.vars["PROJECT_ONLY"], "project");
+        assert_eq!(result.vars["SHARED"], "project");
+    }
+
+    #[tokio::test]
+    async fn project_env_files_override_global_env_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let project_config = project.join("still.toml");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        let project_content = r#"
+            [env]
+            files = [".env"]
+            "#;
+        fs::write(&project_config, project_content).unwrap();
+        fs::write(project.join(".env"), "SHARED=project\nPROJECT_FILE=yes\n").unwrap();
+        write_trust_marker(&project_config, project_content.as_bytes());
+        fs::write(
+            &global,
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            global.parent().unwrap().join(".env"),
+            "SHARED=global\nGLOBAL_FILE=yes\n",
+        )
+        .unwrap();
+
+        let result = resolve_env(&project, temp.path()).await.unwrap();
+
+        assert_eq!(result.vars["GLOBAL_FILE"], "yes");
+        assert_eq!(result.vars["PROJECT_FILE"], "yes");
+        assert_eq!(result.vars["SHARED"], "project");
     }
 
     #[tokio::test]
