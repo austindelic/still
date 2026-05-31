@@ -83,6 +83,9 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
     let mut sections = sections_from_config(config, resolved.scope)?;
+    if !request.global && resolved.scope == ConfigScope::Project {
+        merge_global_only_config_items(&mut sections, &request.home_dir).await?;
+    }
     if request.all {
         merge_inactive_config_items(
             &mut sections,
@@ -98,6 +101,23 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         path: resolved.path,
         sections,
     })
+}
+
+async fn merge_global_only_config_items(
+    sections: &mut [ListSection],
+    home_dir: &std::path::Path,
+) -> Result<()> {
+    let global_path = global_config_path(home_dir);
+    let content = match tokio::fs::read_to_string(&global_path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", global_path.display()));
+        }
+    };
+    let config = parse_still_toml(&content)?;
+    merge_global_only_items(sections, sections_from_config(config, ConfigScope::Global)?);
+    Ok(())
 }
 
 async fn merge_inactive_config_items(
@@ -374,6 +394,28 @@ async fn read_marker_item(kind: ItemKind, path: PathBuf) -> Result<Option<ListIt
         global: false,
         installed: true,
     }))
+}
+
+fn merge_global_only_items(sections: &mut [ListSection], global_sections: Vec<ListSection>) {
+    for global_section in global_sections {
+        let Some(section) = sections
+            .iter_mut()
+            .find(|section| section.kind == global_section.kind)
+        else {
+            continue;
+        };
+        for global_item in global_section.items {
+            if section
+                .items
+                .iter()
+                .any(|item| item.name == global_item.name)
+            {
+                continue;
+            }
+            section.items.push(global_item);
+        }
+        sort_items(&mut section.items);
+    }
 }
 
 fn merge_config_items(sections: &mut [ListSection], config_sections: Vec<ListSection>) {
@@ -792,6 +834,62 @@ mod tests {
             result.sections[2]
                 .items
                 .contains(&global_item("firefox", "latest", None))
+        );
+    }
+
+    #[tokio::test]
+    async fn list_active_merges_global_only_config_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(&global, "[tools]\nnode = \"22\"\n").unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.sections[0].items,
+            [
+                global_item("node", "22", None),
+                item("rust", "stable", None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_active_project_item_overrides_global_item() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(&global, "[tools]\nrust = \"1.80.0\"\nnode = \"22\"\n").unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.sections[0].items,
+            [
+                global_item("node", "22", None),
+                item("rust", "stable", None),
+            ]
         );
     }
 
