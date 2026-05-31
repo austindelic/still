@@ -37,6 +37,7 @@ pub struct SyncResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncItem {
     pub kind: ItemKind,
+    pub logical_name: String,
     pub spec: ItemSpec,
     pub desired_state: String,
 }
@@ -179,10 +180,9 @@ async fn sync_items_for_active_project_path(
 
 fn merge_global_only_items(items: &mut Vec<SyncItem>, global_items: Vec<SyncItem>) {
     for global_item in global_items {
-        if items
-            .iter()
-            .any(|item| item.kind == global_item.kind && item.spec.name == global_item.spec.name)
-        {
+        if items.iter().any(|item| {
+            item.kind == global_item.kind && item.logical_name == global_item.logical_name
+        }) {
             continue;
         }
         items.push(global_item);
@@ -241,6 +241,7 @@ fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
         let desired_state = format!("tool:{name}:{entry:?}");
         items.push(SyncItem {
             kind: ItemKind::Tool,
+            logical_name: name.clone(),
             spec: tool_spec(name, entry, platform)?,
             desired_state,
         });
@@ -274,6 +275,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
         let desired_state = format!("{kind}:{name}:latest");
         items.push(SyncItem {
             kind,
+            logical_name: name.clone(),
             spec: item_spec(name, "latest".to_string(), None)?,
             desired_state,
         });
@@ -291,9 +293,11 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
             continue;
         }
 
+        let logical_name = name.clone();
         let resolved_name = name_for_platform(name, package.names, platform)?;
         items.push(SyncItem {
             kind,
+            logical_name: logical_name.clone(),
             spec: item_spec(
                 resolved_name,
                 package.version.unwrap_or_else(|| "latest".to_string()),
@@ -769,6 +773,44 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == ItemKind::Tool && item.spec.name == "node")
         );
+    }
+
+    #[tokio::test]
+    async fn sync_project_items_override_global_items_by_logical_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let platform = current_platform().to_string();
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+                "#
+            ),
+        )
+        .unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"fd\"]\n").unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        let fd_items = result
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Package && item.logical_name == "fd")
+            .collect::<Vec<_>>();
+        assert_eq!(fd_items.len(), 1);
+        assert_eq!(fd_items[0].spec.name, "fd-find");
     }
 
     #[tokio::test]

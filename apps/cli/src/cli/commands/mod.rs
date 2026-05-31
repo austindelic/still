@@ -1964,6 +1964,7 @@ Removed artifact /opt/still/packages/openssl
 
     fn item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
         ListItem {
+            logical_name: name.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
@@ -1978,6 +1979,7 @@ Removed artifact /opt/still/packages/openssl
 
     fn installed_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
         ListItem {
+            logical_name: name.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
@@ -1992,6 +1994,7 @@ Removed artifact /opt/still/packages/openssl
 
     fn global_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
         ListItem {
+            logical_name: name.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
@@ -2005,9 +2008,11 @@ Removed artifact /opt/still/packages/openssl
     }
 
     fn sync_item(kind: ItemKind, spec: &str) -> SyncItem {
+        let parsed: engine::specs::item::ItemSpec = spec.parse().unwrap();
         SyncItem {
             kind,
-            spec: spec.parse().unwrap(),
+            logical_name: parsed.name.clone(),
+            spec: parsed,
             desired_state: spec.to_string(),
         }
     }

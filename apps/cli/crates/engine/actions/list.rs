@@ -42,6 +42,7 @@ pub struct ListSection {
 /// One configured desired-state item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListItem {
+    pub logical_name: String,
     pub name: String,
     pub version: String,
     pub backend: Option<String>,
@@ -182,6 +183,7 @@ fn tool_items(
         .into_iter()
         .map(|(name, entry)| match entry {
             ToolEntry::Version(version) => ListItem {
+                logical_name: name.clone(),
                 name,
                 version,
                 backend: None,
@@ -193,6 +195,7 @@ fn tool_items(
                 installed: false,
             },
             ToolEntry::Expanded(tool) => ListItem {
+                logical_name: name.clone(),
                 name,
                 version: if tool.version.is_empty() {
                     "latest".to_string()
@@ -227,6 +230,7 @@ fn package_items(
         items.insert(
             name.clone(),
             ListItem {
+                logical_name: name.clone(),
                 name,
                 version: "latest".to_string(),
                 backend: None,
@@ -250,10 +254,12 @@ fn package_items(
         if !filter.matches(platform) {
             continue;
         }
+        let logical_name = name.clone();
         let resolved_name = name_for_platform(name, package.names, platform)?;
         items.insert(
             resolved_name.clone(),
             ListItem {
+                logical_name,
                 name: resolved_name,
                 version: package.version.unwrap_or_else(|| "latest".to_string()),
                 backend: backend_for_platform(kind, package.backend, package.backends, platform),
@@ -384,6 +390,7 @@ async fn read_marker_item(kind: ItemKind, path: PathBuf) -> Result<Option<ListIt
         return Ok(None);
     }
     Ok(Some(ListItem {
+        logical_name: marker.name.clone(),
         name: marker.name,
         version: marker.version,
         backend: marker.backend,
@@ -408,7 +415,7 @@ fn merge_global_only_items(sections: &mut [ListSection], global_sections: Vec<Li
             if section
                 .items
                 .iter()
-                .any(|item| item.name == global_item.name)
+                .any(|item| item.logical_name == global_item.logical_name)
             {
                 continue;
             }
@@ -571,7 +578,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.sections[1].items, [item("fd-find", "latest", None)]);
+        assert_eq!(
+            result.sections[1].items,
+            [item_with_logical_name("fd", "fd-find", "latest", None)]
+        );
     }
 
     #[tokio::test]
@@ -777,6 +787,7 @@ mod tests {
             [
                 installed_item("fd", "10.2.0", Some("homebrew")),
                 ListItem {
+                    logical_name: "ripgrep".to_string(),
                     name: "ripgrep".to_string(),
                     version: "14.1.1".to_string(),
                     backend: Some("homebrew".to_string()),
@@ -894,6 +905,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_active_project_item_overrides_global_item_by_logical_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let platform = current_platform().to_string();
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+                "#
+            ),
+        )
+        .unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"fd\"]\n").unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.sections[1].items,
+            [item_with_logical_name("fd", "fd-find", "latest", None)]
+        );
+    }
+
+    #[tokio::test]
     async fn list_global_all_merges_project_config_items() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("repo");
@@ -933,7 +980,17 @@ mod tests {
     }
 
     fn item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
+        item_with_logical_name(name, name, version, backend)
+    }
+
+    fn item_with_logical_name(
+        logical_name: &str,
+        name: &str,
+        version: &str,
+        backend: Option<&str>,
+    ) -> ListItem {
         ListItem {
+            logical_name: logical_name.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
@@ -948,6 +1005,7 @@ mod tests {
 
     fn global_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
         ListItem {
+            logical_name: name.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),
@@ -962,6 +1020,7 @@ mod tests {
 
     fn installed_item(name: &str, version: &str, backend: Option<&str>) -> ListItem {
         ListItem {
+            logical_name: name.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             backend: backend.map(str::to_string),

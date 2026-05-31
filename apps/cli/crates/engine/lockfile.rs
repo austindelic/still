@@ -273,9 +273,11 @@ mod tests {
     }
 
     fn item(kind: ItemKind, spec: &str) -> SyncItem {
+        let parsed: crate::specs::item::ItemSpec = spec.parse().unwrap();
         SyncItem {
             kind,
-            spec: spec.parse().unwrap(),
+            logical_name: parsed.name.clone(),
+            spec: parsed,
             desired_state: spec.to_string(),
         }
     }
