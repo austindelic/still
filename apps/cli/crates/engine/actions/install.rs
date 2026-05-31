@@ -350,8 +350,8 @@ impl RollbackRoots {
     fn system() -> Self {
         Self {
             tool_root: System::tool_dir(),
-            package_root: System::root_dir().join("packages"),
-            app_root: System::apps_dir(),
+            package_root: native_receipt_root(ItemKind::Package),
+            app_root: native_receipt_root(ItemKind::App),
             bin_dir: System::bin_dir(),
         }
     }
@@ -761,10 +761,7 @@ async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
         .into());
     }
 
-    let install_path = System::root_dir()
-        .join("packages")
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str());
+    let install_path = native_receipt_path(item);
     write_install_marker(
         &install_path,
         item,
@@ -953,9 +950,22 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
 }
 
 fn app_install_path(item: &InstallItemRequest) -> PathBuf {
-    System::apps_dir()
+    native_receipt_path(item)
+}
+
+fn native_receipt_path(item: &InstallItemRequest) -> PathBuf {
+    native_receipt_root(item.kind)
         .join(&item.spec.name)
         .join(item.spec.version.as_str())
+}
+
+fn native_receipt_root(kind: ItemKind) -> PathBuf {
+    let folder = match kind {
+        ItemKind::Tool => "tools",
+        ItemKind::Package => "packages",
+        ItemKind::App => "apps",
+    };
+    System::root_dir().join("receipts").join(folder)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1757,7 +1767,7 @@ mod tests {
     }
 
     #[test]
-    fn app_install_path_uses_still_managed_app_storage() {
+    fn app_install_path_uses_still_managed_receipt_storage() {
         let item = InstallItemRequest {
             kind: ItemKind::App,
             spec: "firefox@latest@flatpak".parse::<ItemSpec>().unwrap(),
@@ -1766,7 +1776,27 @@ mod tests {
 
         assert_eq!(
             app_install_path(&item),
-            System::apps_dir().join("firefox").join("latest")
+            System::root_dir()
+                .join("receipts/apps")
+                .join("firefox")
+                .join("latest")
+        );
+    }
+
+    #[test]
+    fn package_install_path_uses_still_managed_receipt_storage() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@3@homebrew".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        assert_eq!(
+            native_receipt_path(&item),
+            System::root_dir()
+                .join("receipts/packages")
+                .join("openssl")
+                .join("3")
         );
     }
 

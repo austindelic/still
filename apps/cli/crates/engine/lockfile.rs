@@ -269,8 +269,8 @@ fn toml_string_array(values: &[String]) -> String {
 fn expected_output_path(item: &SyncItem) -> PathBuf {
     let root = match item.kind {
         ItemKind::Tool => System::tool_dir(),
-        ItemKind::Package => System::root_dir().join("packages"),
-        ItemKind::App => System::apps_dir(),
+        ItemKind::Package => System::root_dir().join("receipts").join("packages"),
+        ItemKind::App => System::root_dir().join("receipts").join("apps"),
     };
     root.join(&item.spec.name).join(item.spec.version.as_str())
 }

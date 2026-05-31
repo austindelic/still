@@ -307,8 +307,8 @@ fn is_safe_link_path(bin_dir: &Path, path: &Path) -> bool {
 fn install_root(kind: ItemKind) -> PathBuf {
     let install_root = match kind {
         ItemKind::Tool => System::tool_dir(),
-        ItemKind::Package => System::root_dir().join("packages"),
-        ItemKind::App => System::apps_dir(),
+        ItemKind::Package => System::root_dir().join("receipts").join("packages"),
+        ItemKind::App => System::root_dir().join("receipts").join("apps"),
     };
     install_root
 }
