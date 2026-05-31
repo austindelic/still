@@ -312,12 +312,17 @@ async fn missing_items(items: &[SyncItem]) -> Result<Vec<SyncItem>> {
 }
 
 fn installed_path(item: &SyncItem) -> PathBuf {
-    let root = match item.kind {
+    installed_root(item.kind)
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str())
+}
+
+fn installed_root(kind: ItemKind) -> PathBuf {
+    match kind {
         ItemKind::Tool => System::tool_dir(),
-        ItemKind::Package => System::root_dir().join("packages"),
-        ItemKind::App => System::apps_dir(),
-    };
-    root.join(&item.spec.name).join(item.spec.version.as_str())
+        ItemKind::Package => System::root_dir().join("receipts").join("packages"),
+        ItemKind::App => System::root_dir().join("receipts").join("apps"),
+    }
 }
 
 pub(crate) fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
@@ -499,6 +504,19 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[test]
+    fn native_items_are_detected_from_receipt_roots() {
+        assert_eq!(installed_root(ItemKind::Tool), System::tool_dir());
+        assert_eq!(
+            installed_root(ItemKind::Package),
+            System::root_dir().join("receipts/packages")
+        );
+        assert_eq!(
+            installed_root(ItemKind::App),
+            System::root_dir().join("receipts/apps")
+        );
     }
 
     #[tokio::test]

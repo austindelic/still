@@ -356,11 +356,19 @@ fn backend_for_platform(
 
 async fn discover_installed_items() -> Result<Vec<ListSection>> {
     discover_installed_items_from_roots(
-        System::tool_dir(),
-        System::root_dir().join("packages"),
-        System::apps_dir(),
+        installed_root(ItemKind::Tool),
+        installed_root(ItemKind::Package),
+        installed_root(ItemKind::App),
     )
     .await
+}
+
+fn installed_root(kind: ItemKind) -> PathBuf {
+    match kind {
+        ItemKind::Tool => System::tool_dir(),
+        ItemKind::Package => System::root_dir().join("receipts").join("packages"),
+        ItemKind::App => System::root_dir().join("receipts").join("apps"),
+    }
 }
 
 async fn discover_installed_items_from_roots(
@@ -886,6 +894,19 @@ mod tests {
                     current_platform()
                 ))
             )]
+        );
+    }
+
+    #[test]
+    fn native_installed_items_are_discovered_from_receipt_roots() {
+        assert_eq!(installed_root(ItemKind::Tool), System::tool_dir());
+        assert_eq!(
+            installed_root(ItemKind::Package),
+            System::root_dir().join("receipts/packages")
+        );
+        assert_eq!(
+            installed_root(ItemKind::App),
+            System::root_dir().join("receipts/apps")
         );
     }
 
