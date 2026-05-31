@@ -1,5 +1,6 @@
 //! Engine action for inspecting and syncing agent config.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -94,6 +95,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
             .join(".agents")
             .join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
+        prune_stale_managed_skills(&skills_dir, &agents.skills).await?;
         let path = skills_dir.join(".gitignore");
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -209,6 +211,29 @@ async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<(
         tokio::fs::write(path.join(MANAGED_MARKER), managed_marker(skill)?).await?;
         tokio::fs::write(path.join(SOURCE_METADATA), source_metadata(skill)?).await?;
         materialize_skill_source(skill, &path).await?;
+    }
+    Ok(())
+}
+
+async fn prune_stale_managed_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<()> {
+    let mut desired = BTreeSet::new();
+    for skill in skills {
+        desired.insert(managed_skill_dir_name(&skill.name)?);
+    }
+    let mut entries = tokio::fs::read_dir(root).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let metadata = entry.metadata().await?;
+        if !metadata.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if desired.contains(&name) {
+            continue;
+        }
+        let path = entry.path();
+        if tokio::fs::metadata(path.join(MANAGED_MARKER)).await.is_ok() {
+            tokio::fs::remove_dir_all(path).await?;
+        }
     }
     Ok(())
 }
@@ -473,6 +498,42 @@ mod tests {
 
         assert!(err.to_string().contains("refusing to overwrite"));
         assert!(temp.path().join(".agents/skills/custom/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn agents_sync_prunes_only_stale_managed_skill_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents]
+            skills = ["rust-review"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let stale = temp.path().join(".agents/skills/old-managed");
+        fs::create_dir_all(&stale).unwrap();
+        fs::write(stale.join(".still-managed"), "managed\n").unwrap();
+        fs::write(stale.join("SKILL.md"), "# Old\n").unwrap();
+        let custom = temp.path().join(".agents/skills/custom");
+        fs::create_dir_all(&custom).unwrap();
+        fs::write(custom.join("SKILL.md"), "# Custom\n").unwrap();
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        assert!(!stale.exists());
+        assert!(custom.join("SKILL.md").is_file());
+        assert!(temp.path().join(".agents/skills/rust-review").is_dir());
+        assert_eq!(
+            fs::read_to_string(temp.path().join(".agents/skills/.gitignore")).unwrap(),
+            "# still-managed skills\n/rust-review/\n"
+        );
     }
 
     #[tokio::test]
