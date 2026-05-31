@@ -131,9 +131,12 @@ fn normalize_targets(targets: Vec<String>) -> EngineResult<Vec<String>> {
                 ),
             });
         }
-        if !normalized.contains(&target) {
-            normalized.push(target);
+        if normalized.contains(&target) {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("duplicate agent target \"{target}\""),
+            });
         }
+        normalized.push(target);
     }
     Ok(normalized)
 }
@@ -410,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn dedupes_agent_targets_in_input_order() {
+    fn rejects_duplicate_agent_targets() {
         let config = AgentsConfig {
             targets: vec![
                 "codex".to_string(),
@@ -420,9 +423,9 @@ mod tests {
             ..AgentsConfig::default()
         };
 
-        let agents = normalize_agents(config).unwrap();
+        let err = normalize_agents(config).unwrap_err();
 
-        assert_eq!(agents.targets, ["codex", "claude"]);
+        assert!(err.to_string().contains("duplicate agent target \"codex\""));
     }
 
     #[test]
