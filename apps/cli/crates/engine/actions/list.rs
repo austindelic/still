@@ -9,6 +9,7 @@ use serde::Deserialize;
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
+use crate::error::EngineError;
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::backend::normalize_auto_backend;
 use crate::specs::item::ItemKind;
@@ -239,7 +240,9 @@ fn package_items(
     include_inactive_platforms: bool,
 ) -> Result<Vec<ListItem>> {
     let mut items = BTreeMap::new();
+    let mut resolved_names = BTreeMap::new();
     for name in map.latest {
+        reject_duplicate_resolved_name(kind, &mut resolved_names, &name, &name)?;
         items.insert(
             name.clone(),
             ListItem {
@@ -269,6 +272,7 @@ fn package_items(
         }
         let logical_name = name.clone();
         let resolved_name = name_for_platform(name, package.names, platform)?;
+        reject_duplicate_resolved_name(kind, &mut resolved_names, &logical_name, &resolved_name)?;
         items.insert(
             resolved_name.clone(),
             ListItem {
@@ -287,6 +291,26 @@ fn package_items(
     }
 
     Ok(items.into_values().collect())
+}
+
+fn reject_duplicate_resolved_name(
+    kind: ItemKind,
+    resolved_names: &mut BTreeMap<String, String>,
+    logical_name: &str,
+    resolved_name: &str,
+) -> Result<()> {
+    if let Some(existing) =
+        resolved_names.insert(resolved_name.to_string(), logical_name.to_string())
+        && existing != logical_name
+    {
+        return Err(EngineError::Conflict {
+            message: format!(
+                "{kind} \"{logical_name}\" resolves to \"{resolved_name}\", already used by \"{existing}\""
+            ),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn name_for_platform(
@@ -602,6 +626,38 @@ mod tests {
             result.sections[1].items,
             [item_with_logical_name("fd", "fd-find", "latest", None)]
         );
+    }
+
+    #[tokio::test]
+    async fn list_rejects_duplicate_resolved_package_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let platform = current_platform().to_string();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+
+                [packages.fd-find]
+                version = "latest"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let err = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("resolves to \"fd-find\""));
+        assert!(err.to_string().contains("already used"));
     }
 
     #[tokio::test]

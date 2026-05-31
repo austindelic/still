@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
+use crate::error::EngineError;
 use crate::lockfile::{lockfile_path, render_merged_lockfile};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::backend::normalize_auto_backend;
@@ -271,7 +272,9 @@ fn tool_spec(name: String, entry: ToolEntry, platform: PlatformId) -> Result<Ite
 
 fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Result<Vec<SyncItem>> {
     let mut items = Vec::new();
+    let mut resolved_names = std::collections::BTreeMap::new();
     for name in map.latest {
+        reject_duplicate_resolved_name(kind, &mut resolved_names, &name, &name)?;
         let desired_state = format!("{kind}:{name}:latest");
         items.push(SyncItem {
             kind,
@@ -295,6 +298,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
 
         let logical_name = name.clone();
         let resolved_name = name_for_platform(name, package.names, platform)?;
+        reject_duplicate_resolved_name(kind, &mut resolved_names, &logical_name, &resolved_name)?;
         items.push(SyncItem {
             kind,
             logical_name: logical_name.clone(),
@@ -307,6 +311,26 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
         });
     }
     Ok(items)
+}
+
+fn reject_duplicate_resolved_name(
+    kind: ItemKind,
+    resolved_names: &mut std::collections::BTreeMap<String, String>,
+    logical_name: &str,
+    resolved_name: &str,
+) -> Result<()> {
+    if let Some(existing) =
+        resolved_names.insert(resolved_name.to_string(), logical_name.to_string())
+        && existing != logical_name
+    {
+        return Err(EngineError::Conflict {
+            message: format!(
+                "{kind} \"{logical_name}\" resolves to \"{resolved_name}\", already used by \"{existing}\""
+            ),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn name_for_platform(
@@ -634,6 +658,37 @@ mod tests {
                 .any(|item| { item.kind == ItemKind::App && item.spec.name == "firefox" })
         );
         assert!(!result.items.iter().any(|item| item.spec.name == "browser"));
+    }
+
+    #[tokio::test]
+    async fn sync_rejects_duplicate_resolved_package_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let platform = current_platform().to_string();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+
+                [packages.fd-find]
+                version = "latest"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let err = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("resolves to \"fd-find\""));
+        assert!(err.to_string().contains("already used"));
     }
 
     #[tokio::test]
