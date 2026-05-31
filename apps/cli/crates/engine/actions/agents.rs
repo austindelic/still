@@ -33,6 +33,7 @@ pub enum AgentsOperation {
     List,
     Check,
     Sync,
+    SyncAcceptAutoDependencies,
 }
 
 /// Request to inspect or sync configured agents.
@@ -54,6 +55,7 @@ pub struct AgentsResult {
     pub pending_auto_dependencies: Vec<InstallItemRequest>,
     pub auto_added: Vec<InstallItemRequest>,
     pub missing_dependencies: Vec<InstallItemRequest>,
+    pub review_required: bool,
 }
 
 /// Installs auto-added skill dependencies after they become normal desired state.
@@ -134,7 +136,11 @@ pub async fn run_with_installer(
         pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
         missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
     }
-    let gitignore_path = if request.operation == AgentsOperation::Sync {
+    let mut review_required = false;
+    let gitignore_path = if matches!(
+        request.operation,
+        AgentsOperation::Sync | AgentsOperation::SyncAcceptAutoDependencies
+    ) {
         assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
         let skills_dir = project_root.join(".agents").join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
@@ -143,6 +149,21 @@ pub async fn run_with_installer(
         pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
         missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
         auto_added = pending_auto_dependencies.clone();
+        if !auto_added.is_empty() && request.operation == AgentsOperation::Sync {
+            review_required = true;
+            auto_added.clear();
+            return Ok(AgentsResult {
+                path: resolved.path,
+                agents,
+                gitignore,
+                gitignore_path: None,
+                target_manifests,
+                pending_auto_dependencies,
+                auto_added,
+                missing_dependencies,
+                review_required,
+            });
+        }
         if !auto_added.is_empty() {
             let lockfile_path = lockfile_path(&resolved.path);
             let original_lockfile = read_optional_file(&lockfile_path).await?;
@@ -213,6 +234,7 @@ pub async fn run_with_installer(
         pending_auto_dependencies,
         auto_added,
         missing_dependencies,
+        review_required,
     })
 }
 
@@ -1214,7 +1236,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
-                operation: AgentsOperation::Sync,
+                operation: AgentsOperation::SyncAcceptAutoDependencies,
             },
             &mut installer,
         )
@@ -1242,6 +1264,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agents_sync_reports_auto_dependencies_without_writing_until_accepted() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents]
+
+            [agents.skills]
+            rust-review = { auto = true, tools = ["cargo-nextest"], packages = ["llvm"], apps = ["zed"] }
+        "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        let mut installer = FakeInstaller::default();
+
+        let result = run_with_installer(
+            AgentsRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                operation: AgentsOperation::Sync,
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.review_required);
+        assert_eq!(result.pending_auto_dependencies.len(), 3);
+        assert_eq!(result.auto_added, []);
+        assert_eq!(installer.installed, []);
+        assert_eq!(fs::read_to_string(&config_path).unwrap(), config);
+        assert!(!temp.path().join("still.lock.toml").exists());
+    }
+
+    #[tokio::test]
     async fn agents_sync_restores_config_and_lockfile_when_auto_dependency_install_fails() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
@@ -1265,7 +1320,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
-                operation: AgentsOperation::Sync,
+                operation: AgentsOperation::SyncAcceptAutoDependencies,
             },
             &mut installer,
         )
@@ -1315,7 +1370,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
-                operation: AgentsOperation::Sync,
+                operation: AgentsOperation::SyncAcceptAutoDependencies,
             },
             &mut installer,
         )

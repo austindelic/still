@@ -255,7 +255,12 @@ where
             let operation = match args.command.unwrap_or(AgentsCommand::List) {
                 AgentsCommand::List => engine::actions::agents::AgentsOperation::List,
                 AgentsCommand::Check => engine::actions::agents::AgentsOperation::Check,
-                AgentsCommand::Sync => engine::actions::agents::AgentsOperation::Sync,
+                AgentsCommand::Sync {
+                    accept_auto_deps: false,
+                } => engine::actions::agents::AgentsOperation::Sync,
+                AgentsCommand::Sync {
+                    accept_auto_deps: true,
+                } => engine::actions::agents::AgentsOperation::SyncAcceptAutoDependencies,
             };
             match runtime.agents(operation) {
                 Ok(result) => {
@@ -275,8 +280,11 @@ where
                     for skill in result.agents.skills {
                         output.info(&format!("  {}", skill.name));
                     }
-                    if operation == engine::actions::agents::AgentsOperation::Sync
-                        && !result.auto_added.is_empty()
+                    if matches!(
+                        operation,
+                        engine::actions::agents::AgentsOperation::Sync
+                            | engine::actions::agents::AgentsOperation::SyncAcceptAutoDependencies
+                    ) && !result.auto_added.is_empty()
                     {
                         output.info("Auto-added dependencies:");
                         for item in result.auto_added {
@@ -299,6 +307,12 @@ where
                     }
                     for path in result.target_manifests {
                         output.success(&format!("Updated {}", path.display()));
+                    }
+                    if result.review_required {
+                        output.error(
+                            "agents sync needs --accept-auto-deps before writing auto dependencies",
+                        );
+                        return 1;
                     }
                     0
                 }
@@ -1069,6 +1083,7 @@ list failed: failed to read still.toml
                 pending_auto_dependencies: Vec::new(),
                 auto_added: Vec::new(),
                 missing_dependencies: Vec::new(),
+                review_required: false,
             })),
             agents_operations: Vec::new(),
             run_result: None,
@@ -1089,7 +1104,9 @@ list failed: failed to read still.toml
 
         let code = run_cli(
             Command::Agents(crate::cli::args::AgentsArgs {
-                command: Some(AgentsCommand::Sync),
+                command: Some(AgentsCommand::Sync {
+                    accept_auto_deps: false,
+                }),
             }),
             &mut runtime,
             &mut output,
@@ -1138,6 +1155,7 @@ Skills:
                 }],
                 auto_added: Vec::new(),
                 missing_dependencies: Vec::new(),
+                review_required: false,
             })),
             agents_operations: Vec::new(),
             run_result: None,
@@ -1176,6 +1194,79 @@ Auto dependencies to add on sync:
   tool cargo-nextest@0.9.99@cargo
 "###);
         assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn agents_sync_requires_auto_dependency_review_acknowledgement() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: Some(Ok(AgentsResult {
+                path: PathBuf::from("/repo/still.toml"),
+                agents: NormalizedAgents {
+                    targets: vec!["codex".to_string()],
+                    instructions: Some("AGENTS.md".to_string()),
+                    skills: vec![normalized_skill("rust-review")],
+                },
+                gitignore: "# still-managed skills\n/rust-review/\n".to_string(),
+                gitignore_path: None,
+                target_manifests: Vec::new(),
+                pending_auto_dependencies: vec![InstallItemRequest {
+                    kind: ItemKind::Package,
+                    spec: "llvm".parse().unwrap(),
+                    tool: Default::default(),
+                }],
+                auto_added: Vec::new(),
+                missing_dependencies: Vec::new(),
+                review_required: true,
+            })),
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
+            trust_result: None,
+            uninstall_result: None,
+            uninstall_targets: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Agents(crate::cli::args::AgentsArgs {
+                command: Some(AgentsCommand::Sync {
+                    accept_auto_deps: false,
+                }),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(runtime.agents_operations, [AgentsOperation::Sync]);
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+Targets: codex
+Instructions: AGENTS.md
+Skills:
+  rust-review
+Auto dependencies to add on sync:
+  package llvm@latest
+"###);
+        insta::assert_snapshot!(output.stderr, @r###"
+agents sync needs --accept-auto-deps before writing auto dependencies
+"###);
     }
 
     #[test]

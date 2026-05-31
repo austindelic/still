@@ -226,7 +226,11 @@ pub struct AgentsArgs {
 #[derive(Subcommand, Debug, Clone)]
 pub enum AgentsCommand {
     List,
-    Sync,
+    Sync {
+        /// Allow sync to write missing auto dependencies after reviewing `agents check`.
+        #[arg(long)]
+        accept_auto_deps: bool,
+    },
     Check,
 }
 
@@ -449,6 +453,21 @@ For more information, try '--help'.
         };
 
         assert_eq!(args.command, ["cargo", "test", "--", "--quiet"]);
+    }
+
+    #[test]
+    fn agents_sync_accepts_auto_dependency_acknowledgement() {
+        let cli = Cli::try_parse_from(["still", "agents", "sync", "--accept-auto-deps"])
+            .expect("agents sync args should parse auto dependency acknowledgement");
+
+        let Some(Command::Agents(args)) = cli.command else {
+            panic!("expected agents command");
+        };
+        let Some(AgentsCommand::Sync { accept_auto_deps }) = args.command else {
+            panic!("expected agents sync command");
+        };
+
+        assert!(accept_auto_deps);
     }
 
     fn names(items: &[ToolSpec]) -> Vec<&str> {

@@ -398,6 +398,8 @@ Auto dependency behavior:
 - If `auto` is absent or false, Still should report missing skill dependencies but not mutate config automatically.
 - Auto-added dependencies use the same config write rules as `still install`: latest shorthand where possible, keyed entries for pinned versions or explicit backends.
 - Auto-added dependencies should be visible in review output before writing.
+- `agents check` reports pending auto dependencies without writing them.
+- `agents sync` must not write auto dependencies unless the user passes `--accept-auto-deps`.
 - Removing a skill should not automatically remove tools/packages/apps unless a future garbage-collection command can prove nothing else needs them.
 - In v0.1, Still materializes all managed skills under `.agents/skills`; target-specific directories can be generated from that source later.
 - `targets` has no per-target settings in v0.1. Future per-target settings should be added under target-specific tables without changing the shared skill source model.
