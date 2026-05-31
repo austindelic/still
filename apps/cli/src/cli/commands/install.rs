@@ -148,7 +148,7 @@ fn infer_item_kind(spec: &ToolSpec) -> anyhow::Result<ItemKind> {
         "rustup" | "mise" | "asdf" | "aqua" | "npm" | "pnpm" | "yarn" | "cargo" | "go" | "pipx" => {
             Ok(ItemKind::Tool)
         }
-        "homebrew" | "brew" | "apt" | "dnf" | "pacman" | "nix" => Ok(ItemKind::Package),
+        "homebrew" | "brew" | "apt" | "apt-get" | "dnf" | "pacman" | "nix" => Ok(ItemKind::Package),
         "homebrew-cask" | "brew-cask" | "flatpak" | "snap" | "mas" => Ok(ItemKind::App),
         backend => anyhow::bail!(
             "cannot infer whether {}@{}@{} is a tool, package, or app; use --tool, --package, or --app",
@@ -404,7 +404,7 @@ install failed: formula.json not found
         args.tools.clear();
         args.items = vec![
             "rust@stable@rustup".parse().unwrap(),
-            "openssl@latest@homebrew".parse().unwrap(),
+            "openssl@latest@apt-get".parse().unwrap(),
             "firefox@latest@homebrew-cask".parse().unwrap(),
         ];
         let mut runtime = FakeRuntime {
@@ -435,7 +435,7 @@ install failed: formula.json not found
                     ItemKind::Package,
                     "openssl".to_string(),
                     "latest".to_string(),
-                    Some("homebrew".to_string())
+                    Some("apt-get".to_string())
                 ),
                 (
                     ItemKind::App,
