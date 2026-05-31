@@ -162,7 +162,11 @@ mod tests {
             panic!("list should not run in these routing tests");
         }
 
-        fn agents(&mut self, _operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+        fn agents(
+            &mut self,
+            _operation: AgentsOperation,
+            _global: bool,
+        ) -> anyhow::Result<AgentsResult> {
             panic!("agents should not run in these routing tests");
         }
 

@@ -264,7 +264,7 @@ where
                     accept_auto_deps: true,
                 } => engine::actions::agents::AgentsOperation::SyncAcceptAutoDependencies,
             };
-            match runtime.agents(operation) {
+            match runtime.agents(operation, args.global) {
                 Ok(result) => {
                     output.info(&format!("Config: {}", result.path.display()));
                     if result.agents.targets.is_empty() {
@@ -539,6 +539,7 @@ mod tests {
         list_alls: Vec<bool>,
         agents_result: Option<anyhow::Result<AgentsResult>>,
         agents_operations: Vec<AgentsOperation>,
+        agents_globals: Vec<bool>,
         run_result: Option<anyhow::Result<RunResult>>,
         run_commands: Vec<Vec<String>>,
         run_globals: Vec<bool>,
@@ -593,8 +594,13 @@ mod tests {
                 .expect("test runtime list result was not configured")
         }
 
-        fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+        fn agents(
+            &mut self,
+            operation: AgentsOperation,
+            global: bool,
+        ) -> anyhow::Result<AgentsResult> {
             self.agents_operations.push(operation);
+            self.agents_globals.push(global);
             self.agents_result
                 .take()
                 .expect("test runtime agents result was not configured")
@@ -686,6 +692,7 @@ mod tests {
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -735,6 +742,7 @@ mod tests {
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -786,6 +794,7 @@ config check failed: failed to parse still.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -832,6 +841,7 @@ config check failed: failed to parse still.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -882,6 +892,7 @@ init failed: still.toml already exists
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -930,6 +941,7 @@ RUST_LOG=debug
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -998,6 +1010,7 @@ env failed: failed to read still.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1057,6 +1070,7 @@ Apps:
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1123,6 +1137,7 @@ list failed: failed to read still.toml
                 review_required: false,
             })),
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1144,6 +1159,7 @@ list failed: failed to read still.toml
 
         let code = run_cli(
             Command::Agents(crate::cli::args::AgentsArgs {
+                global: false,
                 command: Some(AgentsCommand::Sync {
                     accept_auto_deps: false,
                 }),
@@ -1154,6 +1170,7 @@ list failed: failed to read still.toml
 
         assert_eq!(code, 0);
         assert_eq!(runtime.agents_operations, [AgentsOperation::Sync]);
+        assert_eq!(runtime.agents_globals, [false]);
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Targets: claude, codex
@@ -1198,6 +1215,7 @@ Skills:
                 review_required: false,
             })),
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1219,6 +1237,7 @@ Skills:
 
         let code = run_cli(
             Command::Agents(crate::cli::args::AgentsArgs {
+                global: true,
                 command: Some(AgentsCommand::Check),
             }),
             &mut runtime,
@@ -1227,6 +1246,7 @@ Skills:
 
         assert_eq!(code, 0);
         assert_eq!(runtime.agents_operations, [AgentsOperation::Check]);
+        assert_eq!(runtime.agents_globals, [true]);
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Targets: codex
@@ -1270,6 +1290,7 @@ Auto dependencies to add on sync:
                 review_required: true,
             })),
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1291,6 +1312,7 @@ Auto dependencies to add on sync:
 
         let code = run_cli(
             Command::Agents(crate::cli::args::AgentsArgs {
+                global: false,
                 command: Some(AgentsCommand::Sync {
                     accept_auto_deps: false,
                 }),
@@ -1301,6 +1323,7 @@ Auto dependencies to add on sync:
 
         assert_eq!(code, 1);
         assert_eq!(runtime.agents_operations, [AgentsOperation::Sync]);
+        assert_eq!(runtime.agents_globals, [false]);
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Targets: codex
@@ -1328,6 +1351,7 @@ agents sync needs --accept-auto-deps before writing auto dependencies
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: Some(Ok(RunResult {
                 status: 7,
                 stdout: "hello\nworld\n".to_string(),
@@ -1396,6 +1420,7 @@ warn
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: Some(Err(anyhow!("failed to run cargo"))),
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1444,6 +1469,7 @@ run failed: failed to run cargo
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: Some(Ok(RunResult {
                 status: 0,
                 stdout: String::new(),
@@ -1505,6 +1531,7 @@ run failed: failed to run cargo
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1572,6 +1599,7 @@ Tasks:
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1635,6 +1663,7 @@ failed
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1688,6 +1717,7 @@ export PATH="/opt/still/bin:$PATH"
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1736,6 +1766,7 @@ activate failed: unsupported shell
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1795,6 +1826,7 @@ activate failed: unsupported shell
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1840,6 +1872,7 @@ doctor failed: home directory missing
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1907,6 +1940,7 @@ Sync plan:
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -1963,6 +1997,7 @@ Sync plan:
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -2026,6 +2061,7 @@ web: configured - echo web
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -2096,6 +2132,7 @@ web
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -2146,6 +2183,7 @@ Marker: /repo/.still/trust.toml
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -2214,6 +2252,7 @@ Removed artifact /opt/still/packages/openssl
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),
@@ -2278,6 +2317,7 @@ Removed artifact /opt/still/packages/openssl
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
             run_globals: Vec::new(),

@@ -53,7 +53,7 @@ pub trait CliRuntime {
     fn list(&mut self, all: bool, global: bool) -> anyhow::Result<ListResult>;
 
     /// Inspects or syncs configured agent state.
-    fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult>;
+    fn agents(&mut self, operation: AgentsOperation, global: bool) -> anyhow::Result<AgentsResult>;
 
     /// Runs a child command inside the managed environment.
     fn run_command(&mut self, command: Vec<String>, global: bool) -> anyhow::Result<RunResult>;
@@ -165,13 +165,14 @@ impl CliRuntime for RealRuntime {
         runtime.block_on(engine::actions::list::inspect(request))
     }
 
-    fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult> {
+    fn agents(&mut self, operation: AgentsOperation, global: bool) -> anyhow::Result<AgentsResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = AgentsRequest {
             start_dir,
             home_dir,
+            global,
             operation,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");

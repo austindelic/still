@@ -227,6 +227,9 @@ pub enum ServicesCommand {
 /// Arguments for agent operations.
 #[derive(clap::Args, Debug, Clone)]
 pub struct AgentsArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
     #[command(subcommand)]
     pub command: Option<AgentsCommand>,
 }
@@ -430,6 +433,13 @@ For more information, try '--help'.
         };
         assert!(activate.global);
         assert_eq!(activate.shell.as_deref(), Some("fish"));
+
+        let agents = Cli::try_parse_from(["still", "agents", "--global", "check"])
+            .expect("agents global args should parse");
+        let Some(Command::Agents(agents)) = agents.command else {
+            panic!("expected agents command");
+        };
+        assert!(agents.global);
     }
 
     #[test]

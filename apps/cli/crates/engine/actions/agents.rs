@@ -41,6 +41,7 @@ pub enum AgentsOperation {
 pub struct AgentsRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
     pub operation: AgentsOperation,
 }
 
@@ -100,7 +101,11 @@ pub async fn run_with_installer(
         &request.start_dir,
         &request.home_dir,
         ConfigSelection {
-            scope: ConfigScope::Project,
+            scope: if request.global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
             for_write: false,
         },
     )?;
@@ -886,6 +891,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -914,6 +920,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -946,6 +953,7 @@ mod tests {
         run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1018,6 +1026,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1054,6 +1063,7 @@ mod tests {
         let err = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1081,6 +1091,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::List,
         })
         .await
@@ -1088,6 +1099,46 @@ mod tests {
 
         assert_eq!(result.agents.instructions.as_deref(), Some("AGENTS.md"));
         assert_eq!(result.agents.skills[0].name, "rust-review");
+    }
+
+    #[tokio::test]
+    async fn agents_global_reads_global_config_when_project_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            r#"
+            [agents]
+            targets = ["codex"]
+            skills = ["project-skill"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            r#"
+            [agents]
+            targets = ["claude"]
+            skills = ["global-skill"]
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            operation: AgentsOperation::List,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        assert_eq!(result.agents.targets, ["claude"]);
+        assert_eq!(result.agents.skills[0].name, "global-skill");
     }
 
     #[tokio::test]
@@ -1112,6 +1163,7 @@ mod tests {
         run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1139,6 +1191,7 @@ mod tests {
         let err = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1167,6 +1220,7 @@ mod tests {
         let err = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1198,6 +1252,7 @@ mod tests {
         run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1236,6 +1291,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
+                global: false,
                 operation: AgentsOperation::SyncAcceptAutoDependencies,
             },
             &mut installer,
@@ -1281,6 +1337,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
+                global: false,
                 operation: AgentsOperation::Sync,
             },
             &mut installer,
@@ -1320,6 +1377,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
+                global: false,
                 operation: AgentsOperation::SyncAcceptAutoDependencies,
             },
             &mut installer,
@@ -1370,6 +1428,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
+                global: false,
                 operation: AgentsOperation::SyncAcceptAutoDependencies,
             },
             &mut installer,
@@ -1426,6 +1485,7 @@ mod tests {
             AgentsRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
+                global: false,
                 operation: AgentsOperation::Sync,
             },
             &mut installer,
@@ -1461,6 +1521,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1504,6 +1565,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1553,6 +1615,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1578,6 +1641,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1631,6 +1695,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1677,6 +1742,7 @@ mod tests {
         let err = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1703,6 +1769,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::List,
         })
         .await
@@ -1744,6 +1811,7 @@ mod tests {
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Check,
         })
         .await
@@ -1783,6 +1851,7 @@ mod tests {
         run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
@@ -1814,6 +1883,7 @@ mod tests {
         let err = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: AgentsOperation::Sync,
         })
         .await
