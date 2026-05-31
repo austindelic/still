@@ -10,6 +10,7 @@ use crate::config::{
 use crate::lockfile::lockfile_path;
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::toml::parse_still_toml;
+use crate::trust::{TrustMarker, config_fingerprint, trust_marker_path};
 
 /// Request to diagnose local Still state.
 #[derive(Debug, Clone)]
@@ -51,6 +52,7 @@ pub fn inspect(request: DoctorRequest) -> Result<DoctorResult> {
     checks.push(project_config_check(project_config.as_deref()));
     if let Some(path) = project_config.as_deref() {
         checks.push(config_parse_check("project config syntax", path));
+        checks.push(trust_check(path));
         checks.push(lockfile_check(path));
     }
     checks.push(global_config_check(&request.start_dir, &request.home_dir)?);
@@ -153,6 +155,62 @@ fn lockfile_check(config_path: &Path) -> DoctorCheck {
             status: DoctorStatus::Error,
             detail: format!("failed to read {}: {err}", path.display()),
         },
+    }
+}
+
+fn trust_check(config_path: &Path) -> DoctorCheck {
+    let marker_path = trust_marker_path(config_path);
+    let content = match std::fs::read(config_path) {
+        Ok(content) => content,
+        Err(err) => {
+            return DoctorCheck {
+                name: "trust".to_string(),
+                status: DoctorStatus::Error,
+                detail: format!("failed to read {}: {err}", config_path.display()),
+            };
+        }
+    };
+    let marker_content = match std::fs::read_to_string(&marker_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return DoctorCheck {
+                name: "trust".to_string(),
+                status: DoctorStatus::Warning,
+                detail: format!("{} is missing; run `still trust`", marker_path.display()),
+            };
+        }
+        Err(err) => {
+            return DoctorCheck {
+                name: "trust".to_string(),
+                status: DoctorStatus::Error,
+                detail: format!("failed to read {}: {err}", marker_path.display()),
+            };
+        }
+    };
+    let marker = match toml_edit::de::from_str::<TrustMarker>(&marker_content) {
+        Ok(marker) => marker,
+        Err(err) => {
+            return DoctorCheck {
+                name: "trust".to_string(),
+                status: DoctorStatus::Error,
+                detail: format!("{}: {err}", marker_path.display()),
+            };
+        }
+    };
+
+    let expected_config = config_path.display().to_string();
+    if marker.config != expected_config || marker.fingerprint != config_fingerprint(&content) {
+        return DoctorCheck {
+            name: "trust".to_string(),
+            status: DoctorStatus::Warning,
+            detail: format!("{} is stale; run `still trust`", marker_path.display()),
+        };
+    }
+
+    DoctorCheck {
+        name: "trust".to_string(),
+        status: DoctorStatus::Ok,
+        detail: marker_path.display().to_string(),
     }
 }
 
@@ -280,6 +338,8 @@ fn platform_paths(home_dir: &Path) -> DoctorPaths {
 mod tests {
     use std::fs;
 
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
     use super::*;
 
     #[test]
@@ -311,6 +371,12 @@ mod tests {
         assert!(result.checks.iter().any(|check| {
             check.name == "project config syntax" && check.status == DoctorStatus::Ok
         }));
+        assert!(
+            result
+                .checks
+                .iter()
+                .any(|check| { check.name == "trust" && check.status == DoctorStatus::Warning })
+        );
         assert!(
             result
                 .checks
@@ -362,6 +428,51 @@ mod tests {
     }
 
     #[test]
+    fn doctor_reports_trusted_project_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let content = b"[tasks]\ntest = \"cargo test\"\n";
+        fs::write(&config_path, content).unwrap();
+        write_trust_marker(&config_path, content);
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "trust")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert!(check.detail.contains(".still"));
+    }
+
+    #[test]
+    fn doctor_warns_when_trust_marker_is_stale() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        fs::write(&config_path, "[tasks]\ntest = \"cargo test\"\n").unwrap();
+        write_trust_marker(&config_path, b"old");
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "trust")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Warning);
+        assert!(check.detail.contains("still trust"));
+    }
+
+    #[test]
     fn doctor_warns_when_project_lockfile_is_missing() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("still.toml"), "[tools]\n").unwrap();
@@ -397,5 +508,19 @@ mod tests {
                 "missing {name} check"
             );
         }
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
     }
 }
