@@ -343,14 +343,30 @@ fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
         )?;
         validate_platform_map(&format!("{kind} \"{name}\" backends"), &package.backends)?;
         validate_platform_map(&format!("{kind} \"{name}\" names"), &package.names)?;
-        for field in &package.platforms {
-            validate_platform_value(&format!("{kind} \"{name}\" platforms"), field)?;
-        }
+        validate_platform_list(&format!("{kind} \"{name}\" platforms"), &package.platforms)?;
         if let Some(ignore) = &package.ignore {
             validate_platform_value(&format!("{kind} \"{name}\" ignore"), ignore)?;
         }
         if let Some(only) = &package.only {
             validate_platform_value(&format!("{kind} \"{name}\" only"), only)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_platform_list(label: &str, values: &[String]) -> Result<()> {
+    if values.is_empty() {
+        return Ok(());
+    }
+
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_platform_value(label, value)?;
+        if !seen.insert(value) {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("{label} contains duplicate platform \"{value}\""),
+            }
+            .into());
         }
     }
     Ok(())
@@ -791,6 +807,23 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("app \"zed\" only contains unsupported platform \"freebsd\"")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_platform_filters() {
+        let err = parse_still_toml(
+            r#"
+            [packages.watchman]
+            version = "latest"
+            platforms = ["macos", "macos"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package \"watchman\" platforms contains duplicate platform \"macos\"")
         );
     }
 
