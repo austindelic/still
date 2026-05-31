@@ -37,12 +37,15 @@ still task lint
 - `uninstall`: remove a tool, package, or app from desired state and remove related Still-managed artifacts.
 - `run <COMMAND...>`: run an arbitrary command with Still-managed PATH/env and return the child exit code.
 - `task <NAME>`: run a named task from config; no name should list available tasks.
+- `services`: inspect, start, stop, and check configured services.
+- `agents`: inspect, sync, and validate configured agent instructions and skills.
 - `config check`: validate `still.toml` through the typed TOML parser and engine config validators.
 - `doctor`: diagnose machine, cache, config, permissions, and platform health.
 - `env`: print resolved environment/debug information.
 - `activate`: print shell-specific activation code or instructions.
 - `list`: list active tools/packages/apps and show which config selected each version.
 - `list --all`: list all known installed and configured items, including inactive project/global entries.
+- `--global`: force desired-state commands to read or write the global Still config where supported.
 
 ## Trust Model
 
@@ -65,7 +68,7 @@ Use `examples/still.toml` and `examples/still.schema.json` as concept references
 Important decisions:
 
 - `auto` is backend selection, not a backend.
-- Config mutation should be explicit through commands like `install`, `use`, `add`, or `config set`.
+- Config mutation should be explicit. In v0.1, `install` and `uninstall` are the supported mutation commands.
 - `install` installs immediately and records requested items in config; `sync` reconciles from config.
 - `config check` validates config; `doctor` diagnoses the environment.
 

@@ -1,6 +1,6 @@
 # Still
 
-Still is a config-first project environment manager. It is built around one project file, one managed cache, and one CLI for tools, packages, apps, environment variables, tasks, and services.
+Still is a config-first project environment manager. It is built around one project file, one managed cache, and one CLI for tools, packages, apps, environment variables, tasks, services, and agent skills.
 
 Still is early. The current repository is shaping the CLI, config model, engine boundaries, and optional TUI.
 
@@ -27,7 +27,7 @@ still task lint
 The intended model is:
 
 - `still.toml` declares desired project state.
-- `still trust` allows project-defined tasks, services, hooks, and env-file behavior.
+- `still trust` allows project-defined tasks, services, agent skills, and env-file behavior.
 - `still sync` resolves and installs missing state.
 - `still run` executes an arbitrary command inside that environment.
 - `still task` runs named project tasks.
