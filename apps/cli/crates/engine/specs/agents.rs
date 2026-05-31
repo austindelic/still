@@ -160,19 +160,14 @@ fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<Norm
             if let Some(version) = expanded.version.as_deref() {
                 validate_non_empty(&format!("agent skill \"{name}\" version"), version)?;
             }
+            let explicit_version = expanded.version.clone();
             let source = match (expanded.source, expanded.url) {
                 (Some(source), None) => {
                     validate_non_empty(&format!("agent skill \"{name}\" source"), &source)?;
-                    source_from_shorthand_with_version(&source, expanded.version)
+                    source_from_shorthand_with_version(&source, explicit_version)
                 }
-                (None, Some(url)) => NormalizedSkillSource::Url {
-                    url: {
-                        validate_non_empty(&format!("agent skill \"{name}\" url"), &url)?;
-                        url
-                    },
-                    version: expanded.version,
-                },
-                (None, None) => source_from_shorthand_with_version(&name, expanded.version),
+                (None, Some(url)) => normalize_url_skill_source(&name, url, explicit_version)?,
+                (None, None) => source_from_shorthand_with_version(&name, explicit_version),
                 (Some(_), Some(_)) => {
                     return Err(EngineError::InvalidConfig {
                         reason: format!("agent skill \"{name}\" cannot set both source and url"),
@@ -190,6 +185,24 @@ fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<Norm
             })
         }
     }
+}
+
+fn normalize_url_skill_source(
+    name: &str,
+    url: String,
+    explicit_version: Option<String>,
+) -> EngineResult<NormalizedSkillSource> {
+    validate_non_empty(&format!("agent skill \"{name}\" url"), &url)?;
+    let (url, suffix_version) = split_url_version(&url);
+    if explicit_version.is_some() && suffix_version.is_some() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("agent skill \"{name}\" cannot set version both in url and version"),
+        });
+    }
+    Ok(NormalizedSkillSource::Url {
+        url,
+        version: explicit_version.or(suffix_version),
+    })
 }
 
 fn validate_non_empty(label: &str, value: &str) -> EngineResult<()> {
@@ -325,6 +338,7 @@ mod tests {
 
             [agents.skills]
             external = { url = "https://example.com/skill", version = "1.2.0" }
+            external-suffix = { url = "https://example.com/skill:3.0.0" }
             pinned = "https://example.com/skill:2.0.0"
             latest = "https://example.com/skill"
             rust-review = { source = "rust-review", auto = true, tools = ["rust@stable@rustup"], packages = ["llvm"] }
@@ -344,6 +358,14 @@ mod tests {
                     == NormalizedSkillSource::Url {
                         url: "https://example.com/skill".to_string(),
                         version: Some("1.2.0".to_string()),
+                    }
+        }));
+        assert!(agents.skills.iter().any(|skill| {
+            skill.name == "external-suffix"
+                && skill.source
+                    == NormalizedSkillSource::Url {
+                        url: "https://example.com/skill".to_string(),
+                        version: Some("3.0.0".to_string()),
                     }
         }));
         let rust = agents
@@ -390,6 +412,28 @@ mod tests {
         let err = normalize_agents(config).unwrap_err();
 
         assert!(err.to_string().contains("cannot set both source and url"));
+    }
+
+    #[test]
+    fn rejects_expanded_url_skill_with_duplicate_version_sources() {
+        let config = AgentsConfig {
+            skills: Some(AgentSkills::Table(BTreeMap::from([(
+                "bad".to_string(),
+                SkillSource::Expanded(ExpandedSkillSource {
+                    url: Some("https://example.com/skill:1.0.0".to_string()),
+                    version: Some("2.0.0".to_string()),
+                    ..ExpandedSkillSource::default()
+                }),
+            )]))),
+            ..AgentsConfig::default()
+        };
+
+        let err = normalize_agents(config).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("cannot set version both in url and version")
+        );
     }
 
     #[test]
