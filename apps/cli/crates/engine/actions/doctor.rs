@@ -59,6 +59,7 @@ pub fn inspect(request: DoctorRequest) -> Result<DoctorResult> {
     let global_config = global_config_path(&request.home_dir);
     if global_config.is_file() {
         checks.push(config_parse_check("global config syntax", &global_config));
+        checks.push(named_lockfile_check("global lockfile", &global_config));
     }
     checks.push(path_readiness_check("still root", &paths.root));
     checks.push(path_readiness_check("cache", &paths.cache));
@@ -128,10 +129,14 @@ fn config_parse_check(name: &str, path: &Path) -> DoctorCheck {
 }
 
 fn lockfile_check(config_path: &Path) -> DoctorCheck {
+    named_lockfile_check("lockfile", config_path)
+}
+
+fn named_lockfile_check(name: &str, config_path: &Path) -> DoctorCheck {
     let path = lockfile_path(config_path);
     if !path.exists() {
         return DoctorCheck {
-            name: "lockfile".to_string(),
+            name: name.to_string(),
             status: DoctorStatus::Warning,
             detail: format!("{} is missing; run `still sync`", path.display()),
         };
@@ -140,18 +145,18 @@ fn lockfile_check(config_path: &Path) -> DoctorCheck {
     match std::fs::read_to_string(&path) {
         Ok(content) => match validate_lockfile(&content) {
             Ok(_) => DoctorCheck {
-                name: "lockfile".to_string(),
+                name: name.to_string(),
                 status: DoctorStatus::Ok,
                 detail: path.display().to_string(),
             },
             Err(err) => DoctorCheck {
-                name: "lockfile".to_string(),
+                name: name.to_string(),
                 status: DoctorStatus::Error,
                 detail: format!("{}: {err}", path.display()),
             },
         },
         Err(err) => DoctorCheck {
-            name: "lockfile".to_string(),
+            name: name.to_string(),
             status: DoctorStatus::Error,
             detail: format!("failed to read {}: {err}", path.display()),
         },
@@ -383,6 +388,9 @@ mod tests {
                 .iter()
                 .any(|check| { check.name == "lockfile" && check.status == DoctorStatus::Ok })
         );
+        assert!(result.checks.iter().any(|check| {
+            check.name == "global lockfile" && check.status == DoctorStatus::Warning
+        }));
     }
 
     #[test]
@@ -523,6 +531,41 @@ mod tests {
             .unwrap();
         assert_eq!(check.status, DoctorStatus::Error);
         assert!(check.detail.contains("invalid kind"));
+    }
+
+    #[test]
+    fn doctor_reports_invalid_global_lockfile_schema() {
+        let temp = tempfile::tempdir().unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "[tools]\n").unwrap();
+        fs::write(
+            global.parent().unwrap().join("still.lock.toml"),
+            r#"
+            [[items]]
+            kind = "package"
+            name = "openssl"
+            platform = "linux"
+            version = ""
+            source = "backend:auto"
+            checksum = "abc123"
+            "#,
+        )
+        .unwrap();
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "global lockfile")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Error);
+        assert!(check.detail.contains("empty version"));
     }
 
     #[test]
