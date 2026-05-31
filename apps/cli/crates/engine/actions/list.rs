@@ -88,13 +88,7 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         merge_global_only_config_items(&mut sections, &request.home_dir).await?;
     }
     if request.all {
-        merge_inactive_config_items(
-            &mut sections,
-            &resolved.path,
-            &request.start_dir,
-            &request.home_dir,
-        )
-        .await?;
+        merge_inactive_config_items(&mut sections, &request.start_dir, &request.home_dir).await?;
         merge_installed_items(&mut sections, discover_installed_items().await?);
     }
 
@@ -126,30 +120,15 @@ async fn merge_global_only_config_items(
 
 async fn merge_inactive_config_items(
     sections: &mut [ListSection],
-    active_path: &std::path::Path,
     start_dir: &std::path::Path,
     home_dir: &std::path::Path,
 ) -> Result<()> {
     if let Some(project_path) = find_project_config(start_dir) {
-        let include_inactive_platforms = project_path == active_path;
-        merge_config_path(
-            sections,
-            &project_path,
-            ConfigScope::Project,
-            include_inactive_platforms,
-        )
-        .await?;
+        merge_config_path(sections, &project_path, ConfigScope::Project, true).await?;
     }
 
     let global_path = global_config_path(home_dir);
-    let include_inactive_platforms = global_path == active_path;
-    merge_config_path(
-        sections,
-        &global_path,
-        ConfigScope::Global,
-        include_inactive_platforms,
-    )
-    .await?;
+    merge_config_path(sections, &global_path, ConfigScope::Global, true).await?;
 
     Ok(())
 }
@@ -971,6 +950,47 @@ mod tests {
             result.sections[2]
                 .items
                 .contains(&global_item("firefox", "latest", None))
+        );
+    }
+
+    #[tokio::test]
+    async fn list_all_includes_global_items_inactive_on_current_platform() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let other_platform = if cfg!(target_os = "windows") {
+            "linux"
+        } else {
+            "windows"
+        };
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(
+            &global,
+            format!(
+                r#"
+                [apps.platform-app]
+                version = "latest"
+                only = "{other_platform}"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: true,
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            result.sections[2]
+                .items
+                .contains(&global_item("platform-app", "latest", None))
         );
     }
 
