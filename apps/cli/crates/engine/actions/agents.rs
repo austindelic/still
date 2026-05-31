@@ -17,7 +17,7 @@ use crate::specs::agents::{
     managed_skills_gitignore, normalize_agents, parse_skill_dependency_specs,
 };
 use crate::specs::item::{ItemKind, ItemSpec};
-use crate::specs::toml::{PackageMap, StillConfig, parse_still_toml};
+use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
 use crate::trust::assert_config_trusted;
 
 const MANAGED_MARKER: &str = ".still-managed";
@@ -179,13 +179,13 @@ fn missing_skill_dependencies(
     let mut items = Vec::new();
     for skill in skills.iter().filter(|skill| include_auto || !skill.auto) {
         extend_missing(&mut items, ItemKind::Tool, &skill.tools, |spec| {
-            !config.tools.contains_key(&spec.name)
+            !tool_config_satisfies(config.tools.get(&spec.name), spec)
         });
         extend_missing(&mut items, ItemKind::Package, &skill.packages, |spec| {
-            !package_map_contains(&config.packages, &spec.name)
+            !package_map_satisfies(&config.packages, spec)
         });
         extend_missing(&mut items, ItemKind::App, &skill.apps, |spec| {
-            !package_map_contains(&config.apps, &spec.name)
+            !package_map_satisfies(&config.apps, spec)
         });
     }
     items
@@ -226,8 +226,46 @@ fn extend_missing(
     }
 }
 
-fn package_map_contains(map: &PackageMap, name: &str) -> bool {
-    map.latest.iter().any(|item| item == name) || map.entries.contains_key(name)
+fn tool_config_satisfies(entry: Option<&ToolEntry>, spec: &ItemSpec) -> bool {
+    let Some(entry) = entry else {
+        return false;
+    };
+    match entry {
+        ToolEntry::Version(version) => {
+            version == spec.version.as_str() && required_backend_matches(spec, None)
+        }
+        ToolEntry::Expanded(tool) => {
+            let version = if tool.version.is_empty() {
+                "latest"
+            } else {
+                tool.version.as_str()
+            };
+            version == spec.version.as_str()
+                && required_backend_matches(spec, tool.backend.as_deref())
+        }
+    }
+}
+
+fn package_map_satisfies(map: &PackageMap, spec: &ItemSpec) -> bool {
+    if spec.version.is_latest()
+        && map.latest.iter().any(|item| item == &spec.name)
+        && required_backend_matches(spec, None)
+    {
+        return true;
+    }
+
+    map.entries.get(&spec.name).is_some_and(|entry| {
+        let PackageEntry::Expanded(package) = entry;
+        let version = package.version.as_deref().unwrap_or("latest");
+        version == spec.version.as_str()
+            && required_backend_matches(spec, package.backend.as_deref())
+    })
+}
+
+fn required_backend_matches(spec: &ItemSpec, configured: Option<&str>) -> bool {
+    spec.backend
+        .as_ref()
+        .is_none_or(|backend| configured == Some(backend.as_str()))
 }
 
 async fn skills_with_manifest_dependencies(
@@ -1061,6 +1099,89 @@ mod tests {
         );
         let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         assert!(!content.contains("cargo-audit ="));
+    }
+
+    #[tokio::test]
+    async fn agents_check_reports_versioned_dependency_mismatches() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools]
+            cargo-nextest = "latest"
+
+            [packages]
+            latest = ["llvm"]
+
+            [apps]
+            zed = { backend = "homebrew-cask" }
+
+            [agents]
+
+            [agents.skills]
+            rust-review = { source = "rust-review", tools = ["cargo-nextest@0.9.99@cargo"], packages = ["llvm@18@homebrew"], apps = ["zed@1.0.0@homebrew-cask"] }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.missing_dependencies.len(), 3);
+        assert!(result.missing_dependencies.iter().any(|item| {
+            item.kind == ItemKind::Tool
+                && item.spec.name == "cargo-nextest"
+                && item.spec.version.as_str() == "0.9.99"
+        }));
+        assert!(result.missing_dependencies.iter().any(|item| {
+            item.kind == ItemKind::Package
+                && item.spec.name == "llvm"
+                && item.spec.backend.as_ref().unwrap().as_str() == "homebrew"
+        }));
+        assert!(result.missing_dependencies.iter().any(|item| {
+            item.kind == ItemKind::App
+                && item.spec.name == "zed"
+                && item.spec.version.as_str() == "1.0.0"
+        }));
+    }
+
+    #[tokio::test]
+    async fn agents_check_accepts_matching_version_with_any_backend_when_unspecified() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [tools]
+            cargo-nextest = { version = "0.9.99", backend = "cargo" }
+
+            [packages]
+            llvm = { version = "18", backend = "homebrew" }
+
+            [apps]
+            zed = { backend = "homebrew-cask" }
+
+            [agents]
+
+            [agents.skills]
+            rust-review = { source = "rust-review", tools = ["cargo-nextest@0.9.99"], packages = ["llvm@18"], apps = ["zed"] }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.missing_dependencies, []);
     }
 
     #[tokio::test]
