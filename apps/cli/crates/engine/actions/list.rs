@@ -89,7 +89,13 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         merge_global_only_config_items(&mut sections, &request.home_dir).await?;
     }
     if request.all {
-        merge_inactive_config_items(&mut sections, &request.start_dir, &request.home_dir).await?;
+        merge_inactive_config_items(
+            &mut sections,
+            &request.start_dir,
+            &request.home_dir,
+            request.global,
+        )
+        .await?;
         merge_installed_items(&mut sections, discover_installed_items().await?);
     }
 
@@ -123,8 +129,9 @@ async fn merge_inactive_config_items(
     sections: &mut [ListSection],
     start_dir: &std::path::Path,
     home_dir: &std::path::Path,
+    global_only: bool,
 ) -> Result<()> {
-    if let Some(project_path) = find_project_config(start_dir) {
+    if !global_only && let Some(project_path) = find_project_config(start_dir) {
         merge_config_path(sections, &project_path, ConfigScope::Project, true).await?;
     }
 
@@ -1230,7 +1237,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_global_all_merges_project_config_items() {
+    async fn list_global_all_uses_only_global_config_items() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("repo");
         let global = temp.path().join(".config/still/config.toml");
@@ -1262,7 +1269,7 @@ mod tests {
                 .contains(&global_item("node", "22", None))
         );
         assert!(
-            result.sections[0]
+            !result.sections[0]
                 .items
                 .contains(&item("rust", "stable", None))
         );
