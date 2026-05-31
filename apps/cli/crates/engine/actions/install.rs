@@ -279,17 +279,8 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
     let formula = find_matching_formula(&formulas, &tool.name)
         .with_context(|| format!("Formula '{}' not found in formula.json", tool.name))?;
 
-    warn_if_version_mismatch(&tool, &formula);
-
     let bottle_info = build_bottle_info(&formula)?;
-    println!(
-        "Found bottle for {}@{}",
-        bottle_info.formula_name, bottle_info.version
-    );
-
     let bottle_file = System::select_bottle_file(&bottle_info.bottle)?;
-    println!("Selected bottle: {}", bottle_file.url);
-
     let bottle_data = fetch_and_verify_bottle(&formula.name, &bottle_file).await?;
 
     let install_path = compute_install_path(&formula.name, &formula.versions.stable);
@@ -901,23 +892,6 @@ fn find_matching_formula(
     anyhow::bail!("No matching formula")
 }
 
-fn warn_if_version_mismatch(tool: &ToolSpec, formula: &crate::specs::brew::FormulaSpec) {
-    let version_matches = tool.version == "latest"
-        || tool.version == formula.versions.stable
-        || semver::Version::parse(&tool.version)
-            .and_then(|req_ver| {
-                semver::Version::parse(&formula.versions.stable).map(|form_ver| req_ver == form_ver)
-            })
-            .unwrap_or(false);
-
-    if !version_matches && tool.version != "latest" {
-        println!(
-            "Warning: Requested version '{}' does not match formula version '{}'",
-            tool.version, formula.versions.stable
-        );
-    }
-}
-
 fn build_bottle_info(formula: &crate::specs::brew::FormulaSpec) -> Result<BottleInfo> {
     let bottle = formula.bottle.clone().ok_or_else(|| {
         anyhow::anyhow!(
@@ -940,7 +914,6 @@ fn compute_install_path(formula_name: &str, version: &str) -> PathBuf {
 
 async fn reinstall_to_path(bottle_data: &[u8], install_path: &Path) -> Result<()> {
     if install_path.exists() {
-        println!("Removing existing installation...");
         tokio::fs::remove_dir_all(install_path)
             .await
             .with_context(|| {
@@ -951,7 +924,6 @@ async fn reinstall_to_path(bottle_data: &[u8], install_path: &Path) -> Result<()
             })?;
     }
 
-    println!("Extracting to {}...", install_path.display());
     ArchiveExtractor::extract_tar_gz(bottle_data, install_path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to extract bottle: {e}"))?;
@@ -977,11 +949,6 @@ async fn link_binary(binary_path: &Option<PathBuf>) -> Result<Option<PathBuf>> {
 
     System::create_symlink(binary, &symlink_path).context("failed to create symlink to bin")?;
 
-    println!(
-        "Created symlink: {} -> {}",
-        symlink_path.display(),
-        binary.display()
-    );
     Ok(Some(symlink_path))
 }
 
@@ -991,16 +958,13 @@ async fn fetch_and_verify_bottle(
     formula_name: &str,
     bottle_file: &BottleFileSpec,
 ) -> Result<Vec<u8>> {
-    println!("Downloading bottle...");
     let token = get_ghcr_token(formula_name).await?;
     let bottle_data = download_bottle(&bottle_file.url, &token)
         .await
         .context("Failed to download bottle")?;
 
-    println!("Verifying checksum...");
     Hashing::verify_sha256(&bottle_data, &bottle_file.sha256)
         .map_err(|e| anyhow::anyhow!("Checksum verification failed: {e}"))?;
-    println!("Checksum verified");
 
     Ok(bottle_data)
 }
