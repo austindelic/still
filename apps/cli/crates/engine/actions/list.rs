@@ -260,7 +260,7 @@ fn package_items(
     for (name, entry) in map.entries {
         let PackageEntry::Expanded(package) = entry;
         let filter = PlatformFilter::from_config(
-            &package.platforms,
+            package.platforms.as_deref().unwrap_or(&[]),
             package.ignore.as_deref(),
             package.only.as_deref(),
         )?;

@@ -285,7 +285,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
         let desired_state = format!("{kind}:{name}:{entry:?}");
         let PackageEntry::Expanded(package) = entry;
         let filter = PlatformFilter::from_config(
-            &package.platforms,
+            package.platforms.as_deref().unwrap_or(&[]),
             package.ignore.as_deref(),
             package.only.as_deref(),
         )?;

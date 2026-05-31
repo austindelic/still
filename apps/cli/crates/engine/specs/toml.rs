@@ -74,7 +74,7 @@ pub struct ExpandedPackage {
     pub backend: Option<String>,
     pub backends: BTreeMap<String, String>,
     pub names: BTreeMap<String, String>,
-    pub platforms: Vec<String>,
+    pub platforms: Option<Vec<String>>,
     pub ignore: Option<String>,
     pub only: Option<String>,
 }
@@ -343,7 +343,10 @@ fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
         )?;
         validate_platform_map(&format!("{kind} \"{name}\" backends"), &package.backends)?;
         validate_platform_map(&format!("{kind} \"{name}\" names"), &package.names)?;
-        validate_platform_list(&format!("{kind} \"{name}\" platforms"), &package.platforms)?;
+        validate_optional_platform_list(
+            &format!("{kind} \"{name}\" platforms"),
+            package.platforms.as_deref(),
+        )?;
         if let Some(ignore) = &package.ignore {
             validate_platform_value(&format!("{kind} \"{name}\" ignore"), ignore)?;
         }
@@ -354,9 +357,16 @@ fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
     Ok(())
 }
 
-fn validate_platform_list(label: &str, values: &[String]) -> Result<()> {
-    if values.is_empty() {
+fn validate_optional_platform_list(label: &str, values: Option<&[String]>) -> Result<()> {
+    let Some(values) = values else {
         return Ok(());
+    };
+
+    if values.is_empty() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("{label} must contain at least one platform"),
+        }
+        .into());
     }
 
     let mut seen = BTreeSet::new();
@@ -824,6 +834,23 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("package \"watchman\" platforms contains duplicate platform \"macos\"")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_platform_filter_lists() {
+        let err = parse_still_toml(
+            r#"
+            [packages.watchman]
+            version = "latest"
+            platforms = []
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package \"watchman\" platforms must contain at least one platform")
         );
     }
 
