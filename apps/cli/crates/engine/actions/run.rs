@@ -90,7 +90,7 @@ pub(crate) async fn resolve_env_with_scope(
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    if !config.env.files.is_empty() {
+    if resolved.scope == ConfigScope::Project && !config.env.files.is_empty() {
         assert_config_trusted(&resolved.path, content.as_bytes(), "env file loading").await?;
     }
     let mut vars = BTreeMap::new();
@@ -255,6 +255,28 @@ mod tests {
 
         assert!(err.to_string().contains("not trusted"));
         assert!(err.to_string().contains("env file loading"));
+    }
+
+    #[tokio::test]
+    async fn global_env_files_do_not_require_project_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            &global,
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(global.parent().unwrap().join(".env"), "GLOBAL_FILE=yes\n").unwrap();
+
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Global)
+            .await
+            .unwrap();
+
+        assert_eq!(result.vars["GLOBAL_FILE"], "yes");
     }
 
     #[tokio::test]
