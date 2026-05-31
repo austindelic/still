@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::actions::sync::refresh_lockfile;
@@ -14,7 +14,7 @@ use crate::config_edit::add_install_items;
 use crate::error::EngineError;
 use crate::specs::agents::{
     NormalizedAgents, NormalizedSkill, NormalizedSkillSource, managed_skill_dir_name,
-    managed_skills_gitignore, normalize_agents,
+    managed_skills_gitignore, normalize_agents, parse_skill_dependency_specs,
 };
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageMap, StillConfig, parse_still_toml};
@@ -104,14 +104,25 @@ pub async fn run_with_installer(
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let agents = normalize_agents(config.agents.clone().unwrap_or_default())?;
+    let mut agents = normalize_agents(config.agents.clone().unwrap_or_default())?;
     let gitignore = managed_skills_gitignore(&agents.skills)?;
-    let pending_auto_dependencies = auto_dependency_items(&agents.skills, &config);
+    let mut dependency_skills = agents.skills.clone();
+    let mut pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
     let mut auto_added = Vec::new();
-    let mut missing_dependencies = missing_skill_dependencies(&agents.skills, &config, false);
+    let mut missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
     let mut target_manifests = Vec::new();
     let gitignore_path = if request.operation == AgentsOperation::Sync {
         assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
+        let project_root = resolved
+            .path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let skills_dir = project_root.join(".agents").join("skills");
+        materialize_skills(&skills_dir, &agents.skills).await?;
+        dependency_skills = skills_with_manifest_dependencies(&skills_dir, &agents.skills).await?;
+        agents.skills = dependency_skills.clone();
+        pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
+        missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
         auto_added = pending_auto_dependencies.clone();
         if !auto_added.is_empty() {
             let updated = add_install_items(&content, &auto_added)?;
@@ -125,15 +136,9 @@ pub async fn run_with_installer(
                     .with_context(|| format!("failed to read {}", resolved.path.display()))?,
             )?;
             missing_dependencies =
-                missing_skill_dependencies(&agents.skills, &updated_config, false);
+                missing_skill_dependencies(&dependency_skills, &updated_config, false);
             installer.install(auto_added.clone()).await?;
         }
-        let project_root = resolved
-            .path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let skills_dir = project_root.join(".agents").join("skills");
-        materialize_skills(&skills_dir, &agents.skills).await?;
         prune_stale_managed_skills(&skills_dir, &agents.skills).await?;
         target_manifests =
             materialize_target_manifests(&project_root.join(".agents").join("targets"), &agents)
@@ -217,6 +222,45 @@ fn extend_missing(
 
 fn package_map_contains(map: &PackageMap, name: &str) -> bool {
     map.latest.iter().any(|item| item == name) || map.entries.contains_key(name)
+}
+
+async fn skills_with_manifest_dependencies(
+    root: &Path,
+    skills: &[NormalizedSkill],
+) -> Result<Vec<NormalizedSkill>> {
+    let mut enriched = Vec::new();
+    for skill in skills {
+        let dir_name = managed_skill_dir_name(&skill.name)?;
+        let manifest = read_skill_manifest(&root.join(dir_name).join(CONTENT_DIR)).await?;
+        let mut skill = skill.clone();
+        merge_specs(&mut skill.tools, manifest.tools);
+        merge_specs(&mut skill.packages, manifest.packages);
+        merge_specs(&mut skill.apps, manifest.apps);
+        enriched.push(skill);
+    }
+    Ok(enriched)
+}
+
+async fn read_skill_manifest(content_dir: &Path) -> Result<SkillManifestDependencies> {
+    let path = content_dir.join("still.skill.toml");
+    let content = match tokio::fs::read_to_string(&path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SkillManifestDependencies::default());
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let manifest: SkillManifest = toml_edit::de::from_str(&content)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(manifest.dependencies)
+}
+
+fn merge_specs(target: &mut Vec<ItemSpec>, incoming: Vec<ItemSpec>) {
+    for spec in incoming {
+        if !target.iter().any(|existing| existing.name == spec.name) {
+            target.push(spec);
+        }
+    }
 }
 
 async fn materialize_skills(root: &Path, skills: &[NormalizedSkill]) -> Result<()> {
@@ -487,6 +531,31 @@ struct AgentTargetManifest<'a> {
     target: &'a str,
     instructions: Option<&'a str>,
     skills: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SkillManifest {
+    dependencies: SkillManifestDependencies,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SkillManifestDependencies {
+    #[serde(deserialize_with = "deserialize_dependency_specs")]
+    tools: Vec<ItemSpec>,
+    #[serde(deserialize_with = "deserialize_dependency_specs")]
+    packages: Vec<ItemSpec>,
+    #[serde(deserialize_with = "deserialize_dependency_specs")]
+    apps: Vec<ItemSpec>,
+}
+
+fn deserialize_dependency_specs<'de, D>(deserializer: D) -> Result<Vec<ItemSpec>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<String>::deserialize(deserializer)?;
+    parse_skill_dependency_specs("manifest", values).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Serialize)]
@@ -823,6 +892,114 @@ mod tests {
         assert!(lockfile.contains("name = \"cargo-nextest\""));
         assert!(lockfile.contains("name = \"llvm\""));
         assert!(lockfile.contains("name = \"zed\""));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_auto_adds_missing_skill_manifest_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(
+            source.join("still.skill.toml"),
+            r#"
+            [dependencies]
+            tools = ["cargo-nextest@0.9.99@cargo"]
+            packages = ["llvm"]
+            apps = ["zed"]
+            "#,
+        )
+        .unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
+            [agents]
+
+            [agents.skills]
+            local-skill = {{ url = "file://{}", auto = true }}
+            "#,
+            source.display()
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        let mut installer = FakeInstaller::default();
+
+        let result = run_with_installer(
+            AgentsRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                operation: AgentsOperation::Sync,
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added.len(), 3);
+        assert_eq!(installer.installed, result.auto_added);
+        assert!(
+            result
+                .auto_added
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+        );
+        let updated = fs::read_to_string(temp.path().join("still.toml")).unwrap();
+        let config = parse_still_toml(&updated).unwrap();
+        assert!(config.tools.contains_key("cargo-nextest"));
+        assert!(config.packages.latest.contains(&"llvm".to_string()));
+        assert!(config.apps.latest.contains(&"zed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_reports_missing_manifest_dependencies_when_auto_is_false() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(
+            source.join("still.skill.toml"),
+            r#"
+            [dependencies]
+            tools = ["cargo-audit"]
+            packages = ["jq"]
+            apps = ["zed"]
+            "#,
+        )
+        .unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
+            [agents]
+
+            [agents.skills]
+            local-skill = "file://{}"
+            "#,
+            source.display()
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        let mut installer = FakeInstaller::default();
+
+        let result = run_with_installer(
+            AgentsRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                operation: AgentsOperation::Sync,
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added, []);
+        assert_eq!(installer.installed, []);
+        assert_eq!(result.missing_dependencies.len(), 3);
+        assert!(
+            result
+                .missing_dependencies
+                .iter()
+                .any(|item| item.kind == ItemKind::Package && item.spec.name == "jq")
+        );
     }
 
     #[tokio::test]

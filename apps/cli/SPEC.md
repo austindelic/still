@@ -404,6 +404,20 @@ Auto dependency behavior:
 - Skill versions are opaque source versions. They may be semver, tags, commits, or provider-specific identifiers, and Still records them exactly as supplied.
 - Auto-added dependencies are written as normal desired state in `still.toml`; they are not specially annotated in config in v0.1.
 
+Skill source metadata:
+
+- A materialized skill may include `still.skill.toml` at the root of its source content.
+- `still.skill.toml` can declare dependency specs under `[dependencies]` using `tools`, `packages`, and `apps` arrays.
+- Dependency specs use the same `name`, `name@version`, and `name@version@backend` syntax as `still install`.
+- Inline dependency declarations in `still.toml` take precedence when the same dependency name is also present in `still.skill.toml`.
+
+```toml
+[dependencies]
+tools = ["cargo-nextest@0.9.99@cargo"]
+packages = ["llvm"]
+apps = ["zed"]
+```
+
 ## Install And Add
 
 `install` should support explicit type groups:

@@ -205,7 +205,10 @@ fn skill_name(source: &str) -> String {
         .to_string()
 }
 
-fn parse_specs(label: &str, values: Vec<String>) -> EngineResult<Vec<ItemSpec>> {
+pub(crate) fn parse_skill_dependency_specs(
+    label: &str,
+    values: Vec<String>,
+) -> EngineResult<Vec<ItemSpec>> {
     values
         .into_iter()
         .map(|value| {
@@ -216,6 +219,10 @@ fn parse_specs(label: &str, values: Vec<String>) -> EngineResult<Vec<ItemSpec>> 
                 })
         })
         .collect()
+}
+
+fn parse_specs(label: &str, values: Vec<String>) -> EngineResult<Vec<ItemSpec>> {
+    parse_skill_dependency_specs(label, values)
 }
 
 #[cfg(test)]
