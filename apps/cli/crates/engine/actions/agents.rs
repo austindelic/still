@@ -111,7 +111,15 @@ pub async fn run_with_installer(
     let mut auto_added = Vec::new();
     let mut missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
     let mut target_manifests = Vec::new();
-    if request.operation != AgentsOperation::Sync {
+    if request.operation == AgentsOperation::Check {
+        if has_url_skill_source(&agents.skills) {
+            assert_config_trusted(
+                &resolved.path,
+                content.as_bytes(),
+                "external agent skill inspection",
+            )
+            .await?;
+        }
         dependency_skills = skills_with_source_manifest_dependencies(&agents.skills).await?;
         agents.skills = dependency_skills.clone();
         pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
@@ -204,6 +212,12 @@ fn auto_dependency_items(
         config,
         true,
     )
+}
+
+fn has_url_skill_source(skills: &[NormalizedSkill]) -> bool {
+    skills
+        .iter()
+        .any(|skill| matches!(skill.source, NormalizedSkillSource::Url { .. }))
 }
 
 fn extend_missing(
@@ -1238,19 +1252,18 @@ mod tests {
             "#,
         )
         .unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            format!(
-                r#"
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
                 [agents]
 
                 [agents.skills]
                 local-skill = {{ url = "file://{}", auto = true }}
                 "#,
-                source.display()
-            ),
-        )
-        .unwrap();
+            source.display()
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
@@ -1273,6 +1286,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agents_check_requires_trust_before_reading_file_url_skill_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(
+            source.join("still.skill.toml"),
+            r#"
+            [dependencies]
+            tools = ["cargo-nextest"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [agents.skills]
+                local-skill = {{ url = "file://{}", auto = true }}
+                "#,
+                source.display()
+            ),
+        )
+        .unwrap();
+
+        let err = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("not trusted for external agent skill inspection")
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_list_does_not_read_file_url_skill_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents.skills]
+            local-skill = { url = "file:///missing/source", auto = true }
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::List,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.agents.skills[0].name, "local-skill");
+        assert_eq!(result.pending_auto_dependencies, []);
+    }
+
+    #[tokio::test]
     async fn agents_check_reports_missing_local_manifest_dependencies_when_auto_is_false() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source-skill");
@@ -1288,19 +1365,18 @@ mod tests {
             "#,
         )
         .unwrap();
-        fs::write(
-            temp.path().join("still.toml"),
-            format!(
-                r#"
+        let config_path = temp.path().join("still.toml");
+        let config = format!(
+            r#"
                 [agents]
 
                 [agents.skills]
                 local-skill = "file://{}"
                 "#,
-                source.display()
-            ),
-        )
-        .unwrap();
+            source.display()
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
             start_dir: temp.path().to_path_buf(),
