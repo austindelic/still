@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
 use engine::registries::specs::tool::ToolSpec;
+use engine::specs::item::ItemKind;
 
 /// Top-level CLI parser for the `still` binary.
 ///
@@ -89,16 +90,46 @@ pub struct InstallArgs {
 
 /// Arguments for uninstalling one requested tool/package/app spec.
 ///
-/// `tool` uses the same syntax as `install` so the remove path can target a
-/// specific version later without changing the CLI contract.
+/// Explicit kind flags remove from that section only. A positional item keeps
+/// the compatibility path where Still infers the configured kind from config.
 #[derive(clap::Args, Debug, Clone)]
+#[command(group(
+    clap::ArgGroup::new("target")
+        .required(true)
+        .multiple(false)
+        .args(["tool", "package", "app", "item"])
+))]
 pub struct UninstallArgs {
     /// Remove the item from the global Still config.
     #[arg(short = 'g', long)]
     pub global: bool,
-    /// Requested item in `name`, `name@latest`, or `name@version` form.
-    #[arg(value_name = "TOOL@VERSION")]
-    pub tool: UninstallSpec,
+    /// Requested tool in `name`, `name@latest`, or `name@version@backend` form.
+    #[arg(short = 't', long = "tool", value_name = "TOOL")]
+    pub tool: Option<UninstallSpec>,
+    /// Requested package in `name`, `name@latest`, or `name@version@backend` form.
+    #[arg(short = 'p', long = "package", value_name = "PACKAGE")]
+    pub package: Option<UninstallSpec>,
+    /// Requested app in `name`, `name@latest`, or `name@version@backend` form.
+    #[arg(short = 'a', long = "app", value_name = "APP")]
+    pub app: Option<UninstallSpec>,
+    /// Unclassified item. Still infers the configured kind from desired state.
+    #[arg(value_name = "ITEM@VERSION")]
+    pub item: Option<UninstallSpec>,
+}
+
+impl UninstallArgs {
+    pub fn target(&self) -> Option<(Option<ItemKind>, &UninstallSpec)> {
+        self.tool
+            .as_ref()
+            .map(|spec| (Some(ItemKind::Tool), spec))
+            .or_else(|| {
+                self.package
+                    .as_ref()
+                    .map(|spec| (Some(ItemKind::Package), spec))
+            })
+            .or_else(|| self.app.as_ref().map(|spec| (Some(ItemKind::App), spec)))
+            .or_else(|| self.item.as_ref().map(|spec| (None, spec)))
+    }
 }
 
 /// Parsed uninstall target that preserves whether the user supplied a version.
@@ -362,8 +393,10 @@ For more information, try '--help'.
             panic!("expected uninstall command");
         };
         assert!(uninstall.global);
-        assert_eq!(uninstall.tool.spec.name, "openssl");
-        assert!(!uninstall.tool.exact);
+        let (kind, target) = uninstall.target().unwrap();
+        assert_eq!(kind, None);
+        assert_eq!(target.spec.name, "openssl");
+        assert!(!target.exact);
     }
 
     #[test]
@@ -374,9 +407,36 @@ For more information, try '--help'.
             panic!("expected uninstall command");
         };
 
-        assert_eq!(uninstall.tool.spec.name, "openssl");
-        assert_eq!(uninstall.tool.spec.version, "latest");
-        assert!(uninstall.tool.exact);
+        let (kind, target) = uninstall.target().unwrap();
+        assert_eq!(kind, None);
+        assert_eq!(target.spec.name, "openssl");
+        assert_eq!(target.spec.version, "latest");
+        assert!(target.exact);
+    }
+
+    #[test]
+    fn uninstall_accepts_explicit_kind_flags() {
+        let uninstall = Cli::try_parse_from(["still", "uninstall", "--package", "openssl@3"])
+            .expect("package uninstall args should parse");
+        let Some(Command::Uninstall(uninstall)) = uninstall.command else {
+            panic!("expected uninstall command");
+        };
+
+        let (kind, target) = uninstall.target().unwrap();
+        assert_eq!(kind, Some(ItemKind::Package));
+        assert_eq!(target.spec.name, "openssl");
+        assert_eq!(target.spec.version, "3");
+        assert!(target.exact);
+    }
+
+    #[test]
+    fn uninstall_rejects_multiple_targets() {
+        let err = match Cli::try_parse_from(["still", "uninstall", "--tool", "rust", "openssl"]) {
+            Ok(_) => panic!("multiple uninstall targets should fail to parse"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("cannot be used with"));
     }
 
     #[test]

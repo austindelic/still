@@ -113,17 +113,28 @@ fn package_entry_matches(map: &crate::specs::toml::PackageMap, spec: &ItemSpec) 
     None
 }
 
-/// Removes one named item from tools, packages, or apps.
-pub fn remove_item(input: &str, name: &str) -> EngineResult<(String, Option<ItemKind>)> {
+/// Removes one named item from a selected kind, or infers the kind from config.
+pub fn remove_item(
+    input: &str,
+    kind: Option<ItemKind>,
+    name: &str,
+) -> EngineResult<(String, Option<ItemKind>)> {
     let mut doc = input
         .parse::<DocumentMut>()
         .map_err(|err| EngineError::InvalidConfig {
             reason: err.to_string(),
         })?;
 
-    let removed = remove_from_section(&mut doc, "tools", name, ItemKind::Tool)
-        .or_else(|| remove_from_section(&mut doc, "packages", name, ItemKind::Package))
-        .or_else(|| remove_from_section(&mut doc, "apps", name, ItemKind::App));
+    let removed = match kind {
+        Some(ItemKind::Tool) => remove_from_section(&mut doc, "tools", name, ItemKind::Tool),
+        Some(ItemKind::Package) => {
+            remove_from_section(&mut doc, "packages", name, ItemKind::Package)
+        }
+        Some(ItemKind::App) => remove_from_section(&mut doc, "apps", name, ItemKind::App),
+        None => remove_from_section(&mut doc, "tools", name, ItemKind::Tool)
+            .or_else(|| remove_from_section(&mut doc, "packages", name, ItemKind::Package))
+            .or_else(|| remove_from_section(&mut doc, "apps", name, ItemKind::App)),
+    };
 
     Ok((doc.to_string(), removed))
 }
@@ -131,6 +142,7 @@ pub fn remove_item(input: &str, name: &str) -> EngineResult<(String, Option<Item
 /// Fully specified desired-state item to remove.
 #[derive(Debug, Clone)]
 pub struct RemoveItemTarget {
+    pub kind: Option<ItemKind>,
     pub name: String,
     pub version: String,
     pub backend: Option<crate::specs::item::BackendId>,
@@ -151,11 +163,24 @@ pub fn remove_item_target(
             reason: err.to_string(),
         })?;
 
-    let removed = remove_exact_from_section(&mut doc, &config, "tools", target, ItemKind::Tool)
-        .or_else(|| {
+    let removed = match target.kind {
+        Some(ItemKind::Tool) => {
+            remove_exact_from_section(&mut doc, &config, "tools", target, ItemKind::Tool)
+        }
+        Some(ItemKind::Package) => {
             remove_exact_from_section(&mut doc, &config, "packages", target, ItemKind::Package)
-        })
-        .or_else(|| remove_exact_from_section(&mut doc, &config, "apps", target, ItemKind::App));
+        }
+        Some(ItemKind::App) => {
+            remove_exact_from_section(&mut doc, &config, "apps", target, ItemKind::App)
+        }
+        None => remove_exact_from_section(&mut doc, &config, "tools", target, ItemKind::Tool)
+            .or_else(|| {
+                remove_exact_from_section(&mut doc, &config, "packages", target, ItemKind::Package)
+            })
+            .or_else(|| {
+                remove_exact_from_section(&mut doc, &config, "apps", target, ItemKind::App)
+            }),
+    };
 
     Ok((doc.to_string(), removed))
 }
@@ -537,7 +562,7 @@ mod tests {
 
     #[test]
     fn removes_tool_entries() {
-        let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", "rust").unwrap();
+        let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", None, "rust").unwrap();
 
         let config = parse(&output);
         assert_eq!(removed, Some(ItemKind::Tool));
@@ -546,12 +571,37 @@ mod tests {
 
     #[test]
     fn removes_latest_package_entries() {
-        let (output, removed) =
-            remove_item("[packages]\nlatest = [\"openssl\", \"llvm\"]\n", "openssl").unwrap();
+        let (output, removed) = remove_item(
+            "[packages]\nlatest = [\"openssl\", \"llvm\"]\n",
+            None,
+            "openssl",
+        )
+        .unwrap();
 
         let config = parse(&output);
         assert_eq!(removed, Some(ItemKind::Package));
         assert_eq!(config.packages.latest, ["llvm"]);
+    }
+
+    #[test]
+    fn typed_remove_only_removes_requested_kind() {
+        let (output, removed) = remove_item(
+            r#"
+            [tools]
+            zed = "latest"
+
+            [apps]
+            latest = ["zed"]
+            "#,
+            Some(ItemKind::App),
+            "zed",
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(removed, Some(ItemKind::App));
+        assert!(config.tools.contains_key("zed"));
+        assert!(config.apps.latest.is_empty());
     }
 
     #[test]
@@ -606,7 +656,7 @@ mod tests {
 
     #[test]
     fn reports_when_remove_target_is_missing() {
-        let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", "node").unwrap();
+        let (output, removed) = remove_item("[tools]\nrust = \"stable\"\n", None, "node").unwrap();
 
         assert_eq!(removed, None);
         assert_eq!(parse(&output).tools.len(), 1);
@@ -622,6 +672,7 @@ mod tests {
     fn remove_target(spec: &str) -> RemoveItemTarget {
         let spec = spec.parse::<ItemSpec>().unwrap();
         RemoveItemTarget {
+            kind: None,
             name: spec.name,
             version: spec.version.to_string(),
             backend: spec.backend,

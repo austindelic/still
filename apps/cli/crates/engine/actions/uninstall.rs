@@ -34,6 +34,7 @@ pub struct UninstallRequest {
 /// Item target supplied by uninstall.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UninstallTarget {
+    pub kind: Option<ItemKind>,
     pub name: String,
     pub version: String,
     pub backend: Option<BackendId>,
@@ -72,13 +73,14 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
         remove_item_target(
             &content,
             &RemoveItemTarget {
+                kind: request.target.kind,
                 name: request.target.name.clone(),
                 version: request.target.version.clone(),
                 backend: request.target.backend.clone(),
             },
         )?
     } else {
-        remove_item(&content, &request.target.name)?
+        remove_item(&content, request.target.kind, &request.target.name)?
     };
     let Some(kind) = removed else {
         return Err(EngineError::Conflict {
@@ -296,6 +298,39 @@ mod tests {
         let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(config.packages.latest, ["llvm"]);
         assert!(!config.packages.entries.contains_key("openssl"));
+    }
+
+    #[tokio::test]
+    async fn uninstall_explicit_kind_only_removes_that_kind() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("still.toml");
+        fs::write(
+            &path,
+            r#"
+            [tools]
+            zed = "latest"
+
+            [apps]
+            latest = ["zed"]
+            "#,
+        )
+        .unwrap();
+
+        let mut target = target("zed");
+        target.kind = Some(ItemKind::App);
+        let result = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            target,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.kind, ItemKind::App);
+        let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
+        assert!(config.tools.contains_key("zed"));
+        assert!(config.apps.latest.is_empty());
     }
 
     #[tokio::test]
@@ -519,6 +554,7 @@ mod tests {
 
     fn target(name: &str) -> UninstallTarget {
         UninstallTarget {
+            kind: None,
             name: name.to_string(),
             version: "latest".to_string(),
             backend: None,
@@ -528,6 +564,7 @@ mod tests {
 
     fn exact_target(name: &str, version: &str, backend: &str) -> UninstallTarget {
         UninstallTarget {
+            kind: None,
             name: name.to_string(),
             version: version.to_string(),
             backend: Some(backend.parse().unwrap()),

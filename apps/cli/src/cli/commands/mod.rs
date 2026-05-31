@@ -144,7 +144,11 @@ where
             }
         },
         Command::Uninstall(args) => {
-            match runtime.uninstall(uninstall_target(&args.tool), args.global) {
+            let Some((kind, spec)) = args.target() else {
+                output.error("uninstall failed: expected a tool, package, app, or item target");
+                return 1;
+            };
+            match runtime.uninstall(uninstall_target(kind, spec), args.global) {
                 Ok(result) => {
                     output.success(&format!(
                         "Removed {} {} from {}",
@@ -363,9 +367,11 @@ where
 }
 
 fn uninstall_target(
+    kind: Option<engine::specs::item::ItemKind>,
     spec: &crate::cli::args::UninstallSpec,
 ) -> engine::actions::uninstall::UninstallTarget {
     engine::actions::uninstall::UninstallTarget {
+        kind,
         name: spec.spec.name.clone(),
         version: spec.spec.version.clone(),
         backend: spec.spec.backend.clone(),
@@ -1970,7 +1976,10 @@ Marker: /repo/.still/trust.toml
         let code = run_cli(
             Command::Uninstall(crate::cli::args::UninstallArgs {
                 global: false,
-                tool: "openssl".parse().unwrap(),
+                tool: None,
+                package: Some("openssl".parse().unwrap()),
+                app: None,
+                item: None,
             }),
             &mut runtime,
             &mut output,
@@ -1978,6 +1987,7 @@ Marker: /repo/.still/trust.toml
 
         assert_eq!(code, 0);
         assert_eq!(runtime.uninstall_targets.len(), 1);
+        assert_eq!(runtime.uninstall_targets[0].kind, Some(ItemKind::Package));
         assert_eq!(runtime.uninstall_targets[0].name, "openssl");
         assert_eq!(runtime.uninstall_targets[0].version, "latest");
         assert!(!runtime.uninstall_targets[0].exact);
@@ -2025,7 +2035,10 @@ Removed artifact /opt/still/packages/openssl
         let code = run_cli(
             Command::Uninstall(crate::cli::args::UninstallArgs {
                 global: false,
-                tool: "openssl@3@homebrew".parse().unwrap(),
+                tool: None,
+                package: Some("openssl@3@homebrew".parse().unwrap()),
+                app: None,
+                item: None,
             }),
             &mut runtime,
             &mut output,
@@ -2033,6 +2046,7 @@ Removed artifact /opt/still/packages/openssl
 
         assert_eq!(code, 0);
         assert_eq!(runtime.uninstall_targets.len(), 1);
+        assert_eq!(runtime.uninstall_targets[0].kind, Some(ItemKind::Package));
         assert_eq!(runtime.uninstall_targets[0].name, "openssl");
         assert_eq!(runtime.uninstall_targets[0].version, "3");
         assert_eq!(
@@ -2082,7 +2096,10 @@ Removed artifact /opt/still/packages/openssl
         let code = run_cli(
             Command::Uninstall(crate::cli::args::UninstallArgs {
                 global: false,
-                tool: "openssl@latest".parse().unwrap(),
+                tool: None,
+                package: None,
+                app: None,
+                item: Some("openssl@latest".parse().unwrap()),
             }),
             &mut runtime,
             &mut output,
@@ -2090,6 +2107,7 @@ Removed artifact /opt/still/packages/openssl
 
         assert_eq!(code, 0);
         assert_eq!(runtime.uninstall_targets[0].name, "openssl");
+        assert_eq!(runtime.uninstall_targets[0].kind, None);
         assert_eq!(runtime.uninstall_targets[0].version, "latest");
         assert!(runtime.uninstall_targets[0].exact);
     }
