@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::actions::install::InstallItemRequest;
+use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::add_install_items;
@@ -54,10 +54,44 @@ pub struct AgentsResult {
     pub missing_dependencies: Vec<InstallItemRequest>,
 }
 
+/// Installs auto-added skill dependencies after they become normal desired state.
+pub trait AgentDependencyInstaller {
+    /// Reconciles the supplied tool/package/app dependencies.
+    /// # Errors
+    /// Fails when dependency installation fails through the selected backend.
+    async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()>;
+}
+
+/// Production installer for agent-linked dependencies.
+#[derive(Debug, Default)]
+pub struct RealAgentDependencyInstaller;
+
+impl AgentDependencyInstaller for RealAgentDependencyInstaller {
+    async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        crate::actions::install::run(InstallRequest { items }).await?;
+        Ok(())
+    }
+}
+
 /// Reads selected config, normalizes agent skills, and optionally writes ignore metadata.
 /// # Errors
 /// Fails when config cannot be read, parsed, normalized, or synced.
 pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
+    let mut installer = RealAgentDependencyInstaller;
+    run_with_installer(request, &mut installer).await
+}
+
+/// Runs agent inspection or sync with an injected dependency installer.
+/// # Errors
+/// Fails when config cannot be read, parsed, normalized, synced, or dependency
+/// installation fails.
+pub async fn run_with_installer(
+    request: AgentsRequest,
+    installer: &mut impl AgentDependencyInstaller,
+) -> Result<AgentsResult> {
     let resolved = resolve_config_path(
         &request.start_dir,
         &request.home_dir,
@@ -92,6 +126,7 @@ pub async fn run(request: AgentsRequest) -> Result<AgentsResult> {
             )?;
             missing_dependencies =
                 missing_skill_dependencies(&agents.skills, &updated_config, false);
+            installer.install(auto_added.clone()).await?;
         }
         let project_root = resolved
             .path
@@ -505,6 +540,18 @@ mod tests {
 
     use super::*;
 
+    #[derive(Default)]
+    struct FakeInstaller {
+        installed: Vec<InstallItemRequest>,
+    }
+
+    impl AgentDependencyInstaller for FakeInstaller {
+        async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
+            self.installed.extend(items);
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn agents_check_normalizes_config_without_writing_gitignore() {
         let temp = tempfile::tempdir().unwrap();
@@ -742,19 +789,24 @@ mod tests {
 
             [agents.skills]
             rust-review = { auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }
-            "#;
+        "#;
         fs::write(&config_path, config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
+        let mut installer = FakeInstaller::default();
 
-        let result = run(AgentsRequest {
-            start_dir: temp.path().to_path_buf(),
-            home_dir: temp.path().to_path_buf(),
-            operation: AgentsOperation::Sync,
-        })
+        let result = run_with_installer(
+            AgentsRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                operation: AgentsOperation::Sync,
+            },
+            &mut installer,
+        )
         .await
         .unwrap();
 
         assert_eq!(result.auto_added.len(), 3);
+        assert_eq!(installer.installed, result.auto_added);
         assert!(
             result
                 .auto_added
