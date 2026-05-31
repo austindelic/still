@@ -452,7 +452,7 @@ fn merge_global_only_items(sections: &mut [ListSection], global_sections: Vec<Li
             if section
                 .items
                 .iter()
-                .any(|item| item.logical_name == global_item.logical_name)
+                .any(|item| item_overrides_global(item, &global_item))
             {
                 continue;
             }
@@ -460,6 +460,10 @@ fn merge_global_only_items(sections: &mut [ListSection], global_sections: Vec<Li
         }
         sort_items(&mut section.items);
     }
+}
+
+fn item_overrides_global(project: &ListItem, global: &ListItem) -> bool {
+    project.logical_name == global.logical_name || project.name == global.name
 }
 
 fn merge_config_items(sections: &mut [ListSection], config_sections: Vec<ListSection>) {
@@ -1165,6 +1169,42 @@ mod tests {
         )
         .unwrap();
         fs::write(&global, "[packages]\nlatest = [\"fd\"]\n").unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.sections[1].items,
+            [item_with_logical_name("fd", "fd-find", "latest", None)]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_active_project_item_overrides_global_item_by_resolved_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let platform = current_platform().to_string();
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+                "#
+            ),
+        )
+        .unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"fd-find\"]\n").unwrap();
 
         let result = inspect(ListRequest {
             start_dir: project,

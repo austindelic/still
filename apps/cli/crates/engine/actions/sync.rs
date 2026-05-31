@@ -181,13 +181,19 @@ async fn sync_items_for_active_project_path(
 
 fn merge_global_only_items(items: &mut Vec<SyncItem>, global_items: Vec<SyncItem>) {
     for global_item in global_items {
-        if items.iter().any(|item| {
-            item.kind == global_item.kind && item.logical_name == global_item.logical_name
-        }) {
+        if items
+            .iter()
+            .any(|item| item_overrides_global(item, &global_item))
+        {
             continue;
         }
         items.push(global_item);
     }
+}
+
+fn item_overrides_global(project: &SyncItem, global: &SyncItem) -> bool {
+    project.kind == global.kind
+        && (project.logical_name == global.logical_name || project.spec.name == global.spec.name)
 }
 
 fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
@@ -866,6 +872,44 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(fd_items.len(), 1);
         assert_eq!(fd_items[0].spec.name, "fd-find");
+    }
+
+    #[tokio::test]
+    async fn sync_project_items_override_global_items_by_resolved_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let platform = current_platform().to_string();
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            format!(
+                r#"
+                [packages.fd]
+                version = "latest"
+                names = {{ {platform} = "fd-find" }}
+                "#
+            ),
+        )
+        .unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"fd-find\"]\n").unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        let fd_find_items = result
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Package && item.spec.name == "fd-find")
+            .collect::<Vec<_>>();
+        assert_eq!(fd_find_items.len(), 1);
+        assert_eq!(fd_find_items[0].logical_name, "fd");
     }
 
     #[tokio::test]
