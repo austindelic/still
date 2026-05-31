@@ -391,12 +391,13 @@ fn validate_platform_map(label: &str, map: &BTreeMap<String, String>) -> Result<
 }
 
 fn validate_platform_value(label: &str, value: &str) -> Result<()> {
-    if value.parse::<PlatformId>().is_err() {
+    if !matches!(value, "macos" | "linux" | "windows") {
         return Err(EngineError::InvalidConfig {
             reason: format!("{label} contains unsupported platform \"{value}\""),
         }
         .into());
     }
+    value.parse::<PlatformId>()?;
     Ok(())
 }
 
@@ -817,6 +818,22 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("app \"zed\" only contains unsupported platform \"freebsd\"")
+        );
+    }
+
+    #[test]
+    fn rejects_platform_aliases_in_config() {
+        let err = parse_still_toml(
+            r#"
+            [packages.fd.names]
+            darwin = "fd"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package \"fd\" names contains unsupported platform \"darwin\"")
         );
     }
 
