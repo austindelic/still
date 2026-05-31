@@ -475,7 +475,10 @@ fn merge_installed_items(sections: &mut [ListSection], installed_sections: Vec<L
             if let Some(existing) = section.items.iter_mut().find(|item| {
                 item.name == installed_item.name
                     && item.version == installed_item.version
-                    && item.backend == installed_item.backend
+                    && backends_match_for_installed_merge(
+                        item.backend.as_deref(),
+                        installed_item.backend.as_deref(),
+                    )
             }) {
                 existing.installed = true;
                 existing.outputs = installed_item.outputs;
@@ -486,6 +489,10 @@ fn merge_installed_items(sections: &mut [ListSection], installed_sections: Vec<L
         }
         sort_items(&mut section.items);
     }
+}
+
+fn backends_match_for_installed_merge(configured: Option<&str>, installed: Option<&str>) -> bool {
+    configured.is_none() || installed.is_none() || configured == installed
 }
 
 fn sort_items(items: &mut [ListItem]) {
@@ -904,6 +911,38 @@ mod tests {
                     installed: true,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn merge_installed_matches_configured_auto_backend() {
+        let mut sections = vec![ListSection {
+            kind: ItemKind::Package,
+            items: vec![item("openssl", "latest", None)],
+        }];
+
+        merge_installed_items(
+            &mut sections,
+            vec![ListSection {
+                kind: ItemKind::Package,
+                items: vec![installed_item("openssl", "latest", Some("apt"))],
+            }],
+        );
+
+        assert_eq!(
+            sections[0].items,
+            [ListItem {
+                logical_name: "openssl".to_string(),
+                name: "openssl".to_string(),
+                version: "latest".to_string(),
+                backend: None,
+                outputs: Vec::new(),
+                linked_executables: Vec::new(),
+                configured: true,
+                project: true,
+                global: false,
+                installed: true,
+            }]
         );
     }
 
