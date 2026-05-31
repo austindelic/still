@@ -1,6 +1,7 @@
 //! Engine install action for resolving, downloading, verifying, extracting, and linking packages.
 
 use crate::error::EngineError;
+use crate::platform::{PlatformId, current_platform};
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
@@ -548,20 +549,24 @@ fn package_install_command(item: &InstallItemRequest) -> Result<PackageInstallCo
 
 fn package_install_command_for_backend(name: &str, backend: &str) -> Result<PackageInstallCommand> {
     let normalized = normalize_auto_backend(backend, default_package_backend);
-    #[cfg(target_os = "macos")]
-    {
-        match normalized.as_str() {
+    package_install_command_for_platform(name, &normalized, current_platform())
+}
+
+fn package_install_command_for_platform(
+    name: &str,
+    backend: &str,
+    platform: PlatformId,
+) -> Result<PackageInstallCommand> {
+    match platform {
+        PlatformId::Macos => match backend {
             "homebrew" | "brew" => Ok(PackageInstallCommand {
                 backend: "homebrew".to_string(),
                 program: "brew".to_string(),
                 args: vec!["install".to_string(), name.to_string()],
             }),
-            _ => unsupported_package_backend(&normalized),
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        match normalized.as_str() {
+            _ => unsupported_package_backend(backend),
+        },
+        PlatformId::Linux => match backend {
             "apt" | "apt-get" => Ok(PackageInstallCommand {
                 backend: "apt".to_string(),
                 program: "apt-get".to_string(),
@@ -590,12 +595,9 @@ fn package_install_command_for_backend(name: &str, backend: &str) -> Result<Pack
                     format!("nixpkgs#{name}"),
                 ],
             }),
-            _ => unsupported_package_backend(&normalized),
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        match normalized.as_str() {
+            _ => unsupported_package_backend(backend),
+        },
+        PlatformId::Windows => match backend {
             "winget" => Ok(PackageInstallCommand {
                 backend: "winget".to_string(),
                 program: "winget".to_string(),
@@ -617,8 +619,8 @@ fn package_install_command_for_backend(name: &str, backend: &str) -> Result<Pack
                 program: "scoop".to_string(),
                 args: vec!["install".to_string(), name.to_string()],
             }),
-            _ => unsupported_package_backend(&normalized),
-        }
+            _ => unsupported_package_backend(backend),
+        },
     }
 }
 
@@ -685,9 +687,16 @@ fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
 
 fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInstallCommand> {
     let normalized = normalize_auto_backend(backend, default_app_backend);
-    #[cfg(target_os = "macos")]
-    {
-        match normalized.as_str() {
+    app_install_command_for_platform(name, &normalized, current_platform())
+}
+
+fn app_install_command_for_platform(
+    name: &str,
+    backend: &str,
+    platform: PlatformId,
+) -> Result<AppInstallCommand> {
+    match platform {
+        PlatformId::Macos => match backend {
             "homebrew-cask" | "brew-cask" | "cask" => Ok(AppInstallCommand {
                 backend: "homebrew-cask".to_string(),
                 program: "brew".to_string(),
@@ -697,12 +706,9 @@ fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInsta
                     name.to_string(),
                 ],
             }),
-            _ => unsupported_app_backend(&normalized),
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        match normalized.as_str() {
+            _ => unsupported_app_backend(backend),
+        },
+        PlatformId::Linux => match backend {
             "flatpak" => Ok(AppInstallCommand {
                 backend: "flatpak".to_string(),
                 program: "flatpak".to_string(),
@@ -718,12 +724,9 @@ fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInsta
                 program: "snap".to_string(),
                 args: vec!["install".to_string(), name.to_string()],
             }),
-            _ => unsupported_app_backend(&normalized),
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        match normalized.as_str() {
+            _ => unsupported_app_backend(backend),
+        },
+        PlatformId::Windows => match backend {
             "winget" => Ok(AppInstallCommand {
                 backend: "winget".to_string(),
                 program: "winget".to_string(),
@@ -740,8 +743,13 @@ fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInsta
                 program: "choco".to_string(),
                 args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
             }),
-            _ => unsupported_app_backend(&normalized),
-        }
+            "scoop" => Ok(AppInstallCommand {
+                backend: "scoop".to_string(),
+                program: "scoop".to_string(),
+                args: vec!["install".to_string(), name.to_string()],
+            }),
+            _ => unsupported_app_backend(backend),
+        },
     }
 }
 
@@ -1309,6 +1317,16 @@ mod tests {
     }
 
     #[test]
+    fn app_install_command_plans_windows_scoop() {
+        let command =
+            app_install_command_for_platform("firefox", "scoop", PlatformId::Windows).unwrap();
+
+        assert_eq!(command.backend, "scoop");
+        assert_eq!(command.program, "scoop");
+        assert_eq!(command.args, ["install", "firefox"]);
+    }
+
+    #[test]
     fn app_install_path_uses_still_managed_app_storage() {
         let item = InstallItemRequest {
             kind: ItemKind::App,
@@ -1367,6 +1385,16 @@ mod tests {
         let err = package_install_command(&item).unwrap_err();
 
         assert!(err.to_string().contains("package backend unknown-backend"));
+    }
+
+    #[test]
+    fn package_install_command_plans_windows_scoop() {
+        let command =
+            package_install_command_for_platform("openssl", "scoop", PlatformId::Windows).unwrap();
+
+        assert_eq!(command.backend, "scoop");
+        assert_eq!(command.program, "scoop");
+        assert_eq!(command.args, ["install", "openssl"]);
     }
 
     #[test]
