@@ -241,6 +241,7 @@ pub async fn run_with_installer(
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(&path, &gitignore).await?;
+        refresh_active_lockfile(&resolved.path, &request.home_dir).await?;
         Some(path)
     } else {
         None
@@ -1096,6 +1097,36 @@ mod tests {
                 .unwrap()
                 .contains("target = \"codex\"")
         );
+    }
+
+    #[tokio::test]
+    async fn agents_sync_writes_agent_skill_lockfile_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let rust_review = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
+            [agents.skills]
+            rust-review = {{ url = "{}", version = "v1.2.3" }}
+            "#,
+            rust_review
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
+        assert!(lockfile.contains("kind = \"agent-skill\""));
+        assert!(lockfile.contains("name = \"rust-review\""));
+        assert!(lockfile.contains("version = \"v1.2.3\""));
     }
 
     #[tokio::test]
