@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
-use crate::lockfile::lockfile_path;
+use crate::lockfile::{lockfile_path, validate_lockfile};
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::toml::parse_still_toml;
 use crate::trust::{TrustMarker, config_fingerprint, trust_marker_path};
@@ -138,7 +138,7 @@ fn lockfile_check(config_path: &Path) -> DoctorCheck {
     }
 
     match std::fs::read_to_string(&path) {
-        Ok(content) => match content.parse::<toml_edit::DocumentMut>() {
+        Ok(content) => match validate_lockfile(&content) {
             Ok(_) => DoctorCheck {
                 name: "lockfile".to_string(),
                 status: DoctorStatus::Ok,
@@ -490,6 +490,39 @@ mod tests {
             .unwrap();
         assert_eq!(check.status, DoctorStatus::Warning);
         assert!(check.detail.contains("still sync"));
+    }
+
+    #[test]
+    fn doctor_reports_invalid_project_lockfile_schema() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("still.toml"), "[tools]\n").unwrap();
+        fs::write(
+            temp.path().join("still.lock.toml"),
+            r#"
+            [[items]]
+            kind = "plugin"
+            name = "rust"
+            platform = "linux"
+            version = "stable"
+            source = "backend:auto"
+            checksum = "abc123"
+            "#,
+        )
+        .unwrap();
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "lockfile")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Error);
+        assert!(check.detail.contains("invalid kind"));
     }
 
     #[test]

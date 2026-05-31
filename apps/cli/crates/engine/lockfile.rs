@@ -2,11 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::{Result, bail};
 use serde::Deserialize;
 
 use crate::actions::sync::SyncItem;
-use crate::platform::current_platform;
-use crate::specs::item::ItemKind;
+use crate::platform::{PlatformId, current_platform};
+use crate::specs::item::{BackendId, ItemKind};
 use crate::system::System;
 use crate::utils::hashing::Hashing;
 use crate::utils::paths::PathOps;
@@ -37,6 +38,15 @@ pub fn render_merged_lockfile(existing: Option<&str>, items: &[SyncItem]) -> Str
     entries.retain(|item| item.platform != platform);
     entries.extend(lockfile_items(items));
     render_lockfile_entries(&entries)
+}
+
+/// Validates a lockfile against Still's typed lockfile schema.
+pub fn validate_lockfile(input: &str) -> Result<()> {
+    let lockfile = toml_edit::de::from_str::<Lockfile>(input)?;
+    for (index, item) in lockfile.items.iter().enumerate() {
+        validate_lockfile_item(index + 1, item)?;
+    }
+    Ok(())
 }
 
 fn render_lockfile_entries(items: &[LockfileItem]) -> String {
@@ -112,6 +122,33 @@ fn parse_lockfile_items(input: &str) -> Vec<LockfileItem> {
     toml_edit::de::from_str::<Lockfile>(input)
         .map(|lockfile| lockfile.items)
         .unwrap_or_default()
+}
+
+fn validate_lockfile_item(index: usize, item: &LockfileItem) -> Result<()> {
+    if item.name.trim().is_empty() {
+        bail!("lockfile item {index} has an empty name");
+    }
+    item.kind
+        .parse::<ItemKind>()
+        .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid kind: {err}"))?;
+    item.platform
+        .parse::<PlatformId>()
+        .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid platform: {err}"))?;
+    if item.version.trim().is_empty() {
+        bail!("lockfile item {index} has an empty version");
+    }
+    if let Some(backend) = &item.backend {
+        backend
+            .parse::<BackendId>()
+            .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid backend: {err}"))?;
+    }
+    if item.source.trim().is_empty() {
+        bail!("lockfile item {index} has an empty source");
+    }
+    if item.checksum.trim().is_empty() {
+        bail!("lockfile item {index} has an empty checksum");
+    }
+    Ok(())
 }
 
 fn toml_string(value: &str) -> String {
@@ -270,6 +307,44 @@ mod tests {
 
         assert!(!output.contains("old-rust"));
         assert!(output.contains("name = \"rust\""));
+    }
+
+    #[test]
+    fn validates_typed_lockfile_items() {
+        let content = format!(
+            r#"
+            [[items]]
+            kind = "tool"
+            name = "rust"
+            platform = "{}"
+            version = "stable"
+            backend = "rustup"
+            source = "backend:rustup"
+            checksum = "abc123"
+            outputs = ["/still/tools/rust/stable"]
+            linked_executables = []
+            "#,
+            current_platform()
+        );
+
+        validate_lockfile(&content).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_lockfile_items() {
+        let content = r#"
+            [[items]]
+            kind = "plugin"
+            name = "rust"
+            platform = "plan9"
+            version = "stable"
+            source = "backend:auto"
+            checksum = "abc123"
+        "#;
+
+        let err = validate_lockfile(content).unwrap_err();
+
+        assert!(err.to_string().contains("invalid kind"));
     }
 
     fn item(kind: ItemKind, spec: &str) -> SyncItem {
