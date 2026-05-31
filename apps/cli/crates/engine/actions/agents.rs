@@ -111,6 +111,12 @@ pub async fn run_with_installer(
     let mut auto_added = Vec::new();
     let mut missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
     let mut target_manifests = Vec::new();
+    if request.operation != AgentsOperation::Sync {
+        dependency_skills = skills_with_source_manifest_dependencies(&agents.skills).await?;
+        agents.skills = dependency_skills.clone();
+        pending_auto_dependencies = auto_dependency_items(&dependency_skills, &config);
+        missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
+    }
     let gitignore_path = if request.operation == AgentsOperation::Sync {
         assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
         let project_root = resolved
@@ -232,6 +238,27 @@ async fn skills_with_manifest_dependencies(
     for skill in skills {
         let dir_name = managed_skill_dir_name(&skill.name)?;
         let manifest = read_skill_manifest(&root.join(dir_name).join(CONTENT_DIR)).await?;
+        let mut skill = skill.clone();
+        merge_specs(&mut skill.tools, manifest.tools);
+        merge_specs(&mut skill.packages, manifest.packages);
+        merge_specs(&mut skill.apps, manifest.apps);
+        enriched.push(skill);
+    }
+    Ok(enriched)
+}
+
+async fn skills_with_source_manifest_dependencies(
+    skills: &[NormalizedSkill],
+) -> Result<Vec<NormalizedSkill>> {
+    let mut enriched = Vec::new();
+    for skill in skills {
+        let manifest = match &skill.source {
+            NormalizedSkillSource::Url { url, .. } if url.starts_with("file://") => {
+                let source = PathBuf::from(url.trim_start_matches("file://"));
+                read_skill_manifest(&source).await?
+            }
+            _ => SkillManifestDependencies::default(),
+        };
         let mut skill = skill.clone();
         merge_specs(&mut skill.tools, manifest.tools);
         merge_specs(&mut skill.packages, manifest.packages);
@@ -1072,6 +1099,105 @@ mod tests {
         assert!(!config.packages.latest.contains(&"llvm".to_string()));
         assert!(!config.apps.latest.contains(&"zed".to_string()));
         assert!(!temp.path().join("still.lock.toml").exists());
+    }
+
+    #[tokio::test]
+    async fn agents_check_reports_pending_local_manifest_dependencies_without_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(
+            source.join("still.skill.toml"),
+            r#"
+            [dependencies]
+            tools = ["cargo-nextest"]
+            packages = ["llvm"]
+            apps = ["zed"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [agents]
+
+                [agents.skills]
+                local-skill = {{ url = "file://{}", auto = true }}
+                "#,
+                source.display()
+            ),
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added, []);
+        assert_eq!(result.pending_auto_dependencies.len(), 3);
+        assert!(
+            result
+                .pending_auto_dependencies
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+        );
+        assert!(!temp.path().join(".agents/skills").exists());
+        assert!(!temp.path().join("still.lock.toml").exists());
+    }
+
+    #[tokio::test]
+    async fn agents_check_reports_missing_local_manifest_dependencies_when_auto_is_false() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(
+            source.join("still.skill.toml"),
+            r#"
+            [dependencies]
+            tools = ["cargo-audit"]
+            packages = ["jq"]
+            apps = ["zed"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [agents]
+
+                [agents.skills]
+                local-skill = "file://{}"
+                "#,
+                source.display()
+            ),
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.auto_added, []);
+        assert_eq!(result.missing_dependencies.len(), 3);
+        assert!(
+            result
+                .missing_dependencies
+                .iter()
+                .any(|item| item.kind == ItemKind::Package && item.spec.name == "jq")
+        );
+        assert!(!temp.path().join(".agents/skills").exists());
     }
 
     #[tokio::test]
