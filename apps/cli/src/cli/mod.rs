@@ -178,7 +178,11 @@ mod tests {
             panic!("task should not run in these routing tests");
         }
 
-        fn activate(&mut self, _shell: Option<String>) -> anyhow::Result<ActivateResult> {
+        fn activate(
+            &mut self,
+            _shell: Option<String>,
+            _global: bool,
+        ) -> anyhow::Result<ActivateResult> {
             panic!("activate should not run in these routing tests");
         }
 

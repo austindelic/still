@@ -369,7 +369,7 @@ where
                 1
             }
         },
-        Command::Activate(args) => match runtime.activate(args.shell) {
+        Command::Activate(args) => match runtime.activate(args.shell, args.global) {
             Ok(result) => {
                 output.info(&result.code);
                 0
@@ -547,6 +547,7 @@ mod tests {
         task_globals: Vec<bool>,
         activate_result: Option<anyhow::Result<ActivateResult>>,
         activate_shells: Vec<Option<String>>,
+        activate_globals: Vec<bool>,
         doctor_result: Option<anyhow::Result<DoctorResult>>,
         sync_result: Option<anyhow::Result<SyncResult>>,
         services_result: Option<anyhow::Result<ServicesResult>>,
@@ -615,8 +616,13 @@ mod tests {
                 .expect("test runtime task result was not configured")
         }
 
-        fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult> {
+        fn activate(
+            &mut self,
+            shell: Option<String>,
+            global: bool,
+        ) -> anyhow::Result<ActivateResult> {
             self.activate_shells.push(shell);
+            self.activate_globals.push(global);
             self.activate_result
                 .take()
                 .expect("test runtime activate result was not configured")
@@ -688,6 +694,7 @@ mod tests {
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -736,6 +743,7 @@ mod tests {
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -786,6 +794,7 @@ config check failed: failed to parse still.toml
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -831,6 +840,7 @@ config check failed: failed to parse still.toml
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -880,6 +890,7 @@ init failed: still.toml already exists
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -927,6 +938,7 @@ RUST_LOG=debug
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -994,6 +1006,7 @@ env failed: failed to read still.toml
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1052,6 +1065,7 @@ Apps:
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1117,6 +1131,7 @@ list failed: failed to read still.toml
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1191,6 +1206,7 @@ Skills:
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1262,6 +1278,7 @@ Auto dependencies to add on sync:
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1323,6 +1340,7 @@ agents sync needs --accept-auto-deps before writing auto dependencies
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1386,6 +1404,7 @@ warn
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1437,6 +1456,7 @@ run failed: failed to run cargo
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1507,6 +1527,7 @@ run failed: failed to run cargo
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1570,6 +1591,7 @@ Tasks:
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1624,6 +1646,7 @@ failed
                 code: "export PATH=\"/opt/still/bin:$PATH\"".to_string(),
             })),
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1636,6 +1659,7 @@ failed
 
         let code = run_cli(
             Command::Activate(crate::cli::args::ActivateArgs {
+                global: true,
                 shell: Some("zsh".to_string()),
             }),
             &mut runtime,
@@ -1644,6 +1668,7 @@ failed
 
         assert_eq!(code, 0);
         assert_eq!(runtime.activate_shells, [Some("zsh".to_string())]);
+        assert_eq!(runtime.activate_globals, [true]);
         insta::assert_snapshot!(output.stdout, @r###"
 export PATH="/opt/still/bin:$PATH"
 "###);
@@ -1671,6 +1696,7 @@ export PATH="/opt/still/bin:$PATH"
             task_globals: Vec::new(),
             activate_result: Some(Err(anyhow!("unsupported shell"))),
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -1683,6 +1709,7 @@ export PATH="/opt/still/bin:$PATH"
 
         let code = run_cli(
             Command::Activate(crate::cli::args::ActivateArgs {
+                global: false,
                 shell: Some("bad".to_string()),
             }),
             &mut runtime,
@@ -1717,6 +1744,7 @@ activate failed: unsupported shell
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: Some(Ok(DoctorResult {
                 checks: vec![
                     DoctorCheck {
@@ -1775,6 +1803,7 @@ activate failed: unsupported shell
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: Some(Err(anyhow!("home directory missing"))),
             sync_result: None,
             services_result: None,
@@ -1819,6 +1848,7 @@ doctor failed: home directory missing
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: Some(Ok(SyncResult {
                 path: PathBuf::from("/repo/still.toml"),
@@ -1885,6 +1915,7 @@ Sync plan:
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: Some(Ok(SyncResult {
                 path: PathBuf::from("/repo/still.toml"),
@@ -1940,6 +1971,7 @@ Sync plan:
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: Some(Ok(ServicesResult {
@@ -2002,6 +2034,7 @@ web: configured - echo web
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: Some(Ok(ServicesResult {
@@ -2071,6 +2104,7 @@ web
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -2120,6 +2154,7 @@ Marker: /repo/.still/trust.toml
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -2187,6 +2222,7 @@ Removed artifact /opt/still/packages/openssl
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,
@@ -2250,6 +2286,7 @@ Removed artifact /opt/still/packages/openssl
             task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
             doctor_result: None,
             sync_result: None,
             services_result: None,

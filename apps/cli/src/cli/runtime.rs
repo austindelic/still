@@ -62,7 +62,7 @@ pub trait CliRuntime {
     fn task(&mut self, name: Option<String>, global: bool) -> anyhow::Result<TaskResult>;
 
     /// Generates shell activation code.
-    fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult>;
+    fn activate(&mut self, shell: Option<String>, global: bool) -> anyhow::Result<ActivateResult>;
 
     /// Runs local diagnostics.
     fn doctor(&mut self) -> anyhow::Result<DoctorResult>;
@@ -206,13 +206,14 @@ impl CliRuntime for RealRuntime {
         runtime.block_on(engine::actions::task::run(request))
     }
 
-    fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult> {
+    fn activate(&mut self, shell: Option<String>, global: bool) -> anyhow::Result<ActivateResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = ActivateRequest {
             start_dir,
             home_dir,
+            global,
             shell,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");

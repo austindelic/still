@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::actions::run::resolve_env;
-use crate::config::{find_project_config, global_config_path};
+use crate::actions::run::resolve_env_with_scope;
+use crate::config::{ConfigScope, find_project_config, global_config_path};
 use crate::error::EngineError;
 use crate::system::System;
 use crate::utils::paths::PathOps;
@@ -16,6 +16,7 @@ use crate::utils::paths::PathOps;
 pub struct ActivateRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
     pub shell: Option<String>,
 }
 
@@ -46,7 +47,8 @@ pub async fn run(request: ActivateRequest) -> Result<ActivateResult> {
         .transpose()?
         .unwrap_or(ShellKind::Posix);
     let root = still_root(&request.home_dir);
-    let vars = activation_vars(&request.start_dir, &request.home_dir, &root).await?;
+    let vars =
+        activation_vars(&request.start_dir, &request.home_dir, &root, request.global).await?;
     let code = activation_code(shell, &vars)?;
 
     Ok(ActivateResult { shell, code })
@@ -68,11 +70,22 @@ async fn activation_vars(
     start_dir: &Path,
     home_dir: &Path,
     root: &Path,
+    global: bool,
 ) -> Result<BTreeMap<String, String>> {
-    let has_readable_config =
-        find_project_config(start_dir).is_some() || global_config_path(home_dir).is_file();
+    let scope = if global {
+        ConfigScope::Global
+    } else {
+        ConfigScope::Project
+    };
+    let has_readable_config = if global {
+        global_config_path(home_dir).is_file()
+    } else {
+        find_project_config(start_dir).is_some() || global_config_path(home_dir).is_file()
+    };
     let mut vars = if has_readable_config {
-        resolve_env(start_dir, home_dir).await?.vars
+        resolve_env_with_scope(start_dir, home_dir, scope)
+            .await?
+            .vars
     } else {
         BTreeMap::from([("PATH".to_string(), managed_path())])
     };
@@ -156,6 +169,7 @@ mod tests {
         let result = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: None,
         })
         .await
@@ -172,6 +186,7 @@ mod tests {
         let result = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: Some("fish".to_string()),
         })
         .await
@@ -197,6 +212,7 @@ mod tests {
         let result = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: None,
         })
         .await
@@ -208,6 +224,29 @@ mod tests {
                 .code
                 .contains("export MESSAGE='hello '\"'\"'still'\"'\"''")
         );
+    }
+
+    #[tokio::test]
+    async fn activation_can_use_global_env_when_project_config_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[env]\nVALUE = \"project\"\n").unwrap();
+        fs::write(&global, "[env]\nVALUE = \"global\"\n").unwrap();
+
+        let result = run(ActivateRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            shell: Some("fish".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert!(result.code.contains("set -gx VALUE 'global'"));
+        assert!(!result.code.contains("project"));
     }
 
     #[tokio::test]
@@ -226,6 +265,7 @@ mod tests {
         let err = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: None,
         })
         .await
@@ -251,6 +291,7 @@ mod tests {
         let result = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: Some("powershell".to_string()),
         })
         .await
@@ -277,6 +318,7 @@ mod tests {
         let result = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: None,
         })
         .await
@@ -291,6 +333,7 @@ mod tests {
         let err = run(ActivateRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             shell: Some("elvish".to_string()),
         })
         .await

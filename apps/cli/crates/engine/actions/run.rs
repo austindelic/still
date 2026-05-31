@@ -70,10 +70,6 @@ pub(crate) struct ResolvedRunEnv {
     pub(crate) vars: BTreeMap<String, String>,
 }
 
-pub(crate) async fn resolve_env(start_dir: &Path, home_dir: &Path) -> Result<ResolvedRunEnv> {
-    resolve_env_with_scope(start_dir, home_dir, ConfigScope::Project).await
-}
-
 pub(crate) async fn resolve_env_with_scope(
     start_dir: &Path,
     home_dir: &Path,
@@ -217,7 +213,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = resolve_env(temp.path(), temp.path()).await.unwrap();
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
 
         assert_eq!(result.working_dir, temp.path());
         assert_eq!(result.vars["SHARED"], "config");
@@ -231,7 +229,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("still.toml"), "[env]\n").unwrap();
 
-        let result = resolve_env(temp.path(), temp.path()).await.unwrap();
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
         let path = result.vars.get("PATH").unwrap();
         let paths = std::env::split_paths(path).collect::<Vec<_>>();
 
@@ -300,7 +300,9 @@ mod tests {
         .unwrap();
         fs::write(temp.path().join(".env"), "TOKEN=secret\n").unwrap();
 
-        let err = resolve_env(temp.path(), temp.path()).await.unwrap_err();
+        let err = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap_err();
 
         assert!(err.to_string().contains("not trusted"));
         assert!(err.to_string().contains("env file loading"));
@@ -354,7 +356,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = resolve_env(&project, temp.path()).await.unwrap();
+        let result = resolve_env_with_scope(&project, temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
 
         assert_eq!(result.working_dir, project);
         assert_eq!(result.vars["GLOBAL_ONLY"], "global");
@@ -391,7 +395,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = resolve_env(&project, temp.path()).await.unwrap();
+        let result = resolve_env_with_scope(&project, temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
 
         assert_eq!(result.vars["GLOBAL_FILE"], "yes");
         assert_eq!(result.vars["PROJECT_FILE"], "yes");
@@ -409,7 +415,9 @@ mod tests {
         fs::write(&config_path, config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
-        let err = resolve_env(temp.path(), temp.path()).await.unwrap_err();
+        let err = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap_err();
 
         assert!(err.to_string().contains("failed to read env file"));
         assert!(err.to_string().contains(".env.missing"));

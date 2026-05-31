@@ -278,6 +278,9 @@ pub struct EnvArgs {
 /// Arguments for shell activation.
 #[derive(clap::Args, Debug, Clone)]
 pub struct ActivateArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
     /// Shell to generate activation code for.
     #[arg(long)]
     pub shell: Option<String>,
@@ -419,6 +422,14 @@ For more information, try '--help'.
             panic!("expected services command");
         };
         assert!(services.global);
+
+        let activate = Cli::try_parse_from(["still", "activate", "--global", "--shell", "fish"])
+            .expect("activate global args should parse");
+        let Some(Command::Activate(activate)) = activate.command else {
+            panic!("expected activate command");
+        };
+        assert!(activate.global);
+        assert_eq!(activate.shell.as_deref(), Some("fish"));
     }
 
     #[test]
