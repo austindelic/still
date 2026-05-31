@@ -85,14 +85,16 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
     let resolved_env = resolve_env(&request.start_dir, &request.home_dir).await?;
 
     let mut executions = Vec::new();
-    let mut visited = BTreeSet::new();
+    let mut completed = BTreeSet::new();
+    let mut visiting = BTreeSet::new();
     run_task_graph(
         &tasks,
         &services,
         &name,
         &resolved_env.working_dir,
         &resolved_env.vars,
-        &mut visited,
+        &mut completed,
+        &mut visiting,
         &mut executions,
     )?;
     let status = executions
@@ -127,11 +129,18 @@ fn run_task_graph(
     name: &str,
     working_dir: &Path,
     env: &BTreeMap<String, String>,
-    visited: &mut BTreeSet<String>,
+    completed: &mut BTreeSet<String>,
+    visiting: &mut BTreeSet<String>,
     executions: &mut Vec<TaskExecution>,
 ) -> Result<()> {
-    if !visited.insert(name.to_string()) {
+    if completed.contains(name) {
         return Ok(());
+    }
+    if !visiting.insert(name.to_string()) {
+        return Err(EngineError::Conflict {
+            message: format!("task dependency cycle includes \"{name}\""),
+        }
+        .into());
     }
 
     let task = tasks.get(name).ok_or_else(|| EngineError::Conflict {
@@ -145,13 +154,15 @@ fn run_task_graph(
             &dependency,
             working_dir,
             env,
-            visited,
+            completed,
+            visiting,
             executions,
         )?;
         if executions
             .last()
             .is_some_and(|execution| execution.status != 0)
         {
+            visiting.remove(name);
             return Ok(());
         }
     }
@@ -184,6 +195,8 @@ fn run_task_graph(
         }
     }
 
+    visiting.remove(name);
+    completed.insert(name.to_string());
     Ok(())
 }
 
@@ -431,6 +444,36 @@ mod tests {
             .map(|execution| execution.task.as_str())
             .collect();
         assert_eq!(executed, ["setup", "build", "ci"]);
+    }
+
+    #[tokio::test]
+    async fn task_dependency_cycles_are_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [tasks.a]
+            depends = ["b"]
+            run = "echo a"
+
+            [tasks.b]
+            depends = ["a"]
+            run = "echo b"
+        "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let err = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("a".to_string()),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("task dependency cycle includes \"a\"")
+        );
     }
 
     #[tokio::test]
