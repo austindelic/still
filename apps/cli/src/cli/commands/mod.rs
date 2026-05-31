@@ -42,7 +42,7 @@ where
             }
         },
         Command::Install(args) => install::run(args, runtime, output),
-        Command::Sync(_args) => match runtime.sync() {
+        Command::Sync(args) => match runtime.sync(args.global) {
             Ok(result) => {
                 output.info(&format!("Config: {}", result.path.display()));
                 output.info(&format!("Lockfile: {}", result.lockfile_path.display()));
@@ -97,7 +97,7 @@ where
                 1
             }
         },
-        Command::List(args) => match runtime.list(args.all) {
+        Command::List(args) => match runtime.list(args.all, args.global) {
             Ok(result) => {
                 output.info(&format!("Config: {}", result.path.display()));
                 for section in result.sections {
@@ -143,7 +143,7 @@ where
                 1
             }
         },
-        Command::Uninstall(args) => match runtime.uninstall(args.tool.name) {
+        Command::Uninstall(args) => match runtime.uninstall(args.tool.name, args.global) {
             Ok(result) => {
                 output.success(&format!(
                     "Removed {} {} from {}",
@@ -525,7 +525,7 @@ mod tests {
                 .expect("test runtime env result was not configured")
         }
 
-        fn list(&mut self, all: bool) -> anyhow::Result<ListResult> {
+        fn list(&mut self, all: bool, _global: bool) -> anyhow::Result<ListResult> {
             self.list_alls.push(all);
             self.list_result
                 .take()
@@ -566,7 +566,7 @@ mod tests {
                 .expect("test runtime doctor result was not configured")
         }
 
-        fn sync(&mut self) -> anyhow::Result<SyncResult> {
+        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
             self.sync_result
                 .take()
                 .expect("test runtime sync result was not configured")
@@ -589,7 +589,7 @@ mod tests {
                 .expect("test runtime trust result was not configured")
         }
 
-        fn uninstall(&mut self, name: String) -> anyhow::Result<UninstallResult> {
+        fn uninstall(&mut self, name: String, _global: bool) -> anyhow::Result<UninstallResult> {
             self.uninstall_names.push(name);
             self.uninstall_result
                 .take()
@@ -924,7 +924,10 @@ env failed: failed to read still.toml
         let mut output = BufferedOutput::default();
 
         let code = run_cli(
-            Command::List(crate::cli::args::ListArgs { all: true }),
+            Command::List(crate::cli::args::ListArgs {
+                global: false,
+                all: true,
+            }),
             &mut runtime,
             &mut output,
         );
@@ -977,7 +980,10 @@ Apps:
         let mut output = BufferedOutput::default();
 
         let code = run_cli(
-            Command::List(crate::cli::args::ListArgs { all: false }),
+            Command::List(crate::cli::args::ListArgs {
+                global: false,
+                all: false,
+            }),
             &mut runtime,
             &mut output,
         );
@@ -1565,7 +1571,7 @@ doctor failed: home directory missing
         let mut output = BufferedOutput::default();
 
         let code = run_cli(
-            Command::Sync(crate::cli::args::SyncArgs {}),
+            Command::Sync(crate::cli::args::SyncArgs { global: false }),
             &mut runtime,
             &mut output,
         );
@@ -1625,7 +1631,7 @@ Sync plan:
         let mut output = BufferedOutput::default();
 
         let code = run_cli(
-            Command::Sync(crate::cli::args::SyncArgs {}),
+            Command::Sync(crate::cli::args::SyncArgs { global: false }),
             &mut runtime,
             &mut output,
         );
@@ -1849,6 +1855,7 @@ Marker: /repo/.still/trust.toml
 
         let code = run_cli(
             Command::Uninstall(crate::cli::args::UninstallArgs {
+                global: false,
                 tool: "openssl".parse().unwrap(),
             }),
             &mut runtime,

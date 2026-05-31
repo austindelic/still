@@ -158,7 +158,7 @@ mod tests {
             panic!("env should not run in these routing tests");
         }
 
-        fn list(&mut self, _all: bool) -> anyhow::Result<ListResult> {
+        fn list(&mut self, _all: bool, _global: bool) -> anyhow::Result<ListResult> {
             panic!("list should not run in these routing tests");
         }
 
@@ -188,7 +188,7 @@ mod tests {
             })
         }
 
-        fn sync(&mut self) -> anyhow::Result<SyncResult> {
+        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
             panic!("sync should not run in these routing tests");
         }
 
@@ -204,7 +204,7 @@ mod tests {
             panic!("trust should not run in these routing tests");
         }
 
-        fn uninstall(&mut self, _name: String) -> anyhow::Result<UninstallResult> {
+        fn uninstall(&mut self, _name: String, _global: bool) -> anyhow::Result<UninstallResult> {
             panic!("uninstall should not run in these routing tests");
         }
     }

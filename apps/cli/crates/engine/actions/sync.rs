@@ -18,6 +18,7 @@ use crate::utils::paths::PathOps;
 pub struct SyncRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
 }
 
 /// Sync report for desired install state.
@@ -113,7 +114,11 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         &request.start_dir,
         &request.home_dir,
         ConfigSelection {
-            scope: ConfigScope::Project,
+            scope: if request.global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
             for_write: false,
         },
     )?;
@@ -331,6 +336,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -382,6 +388,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -405,6 +412,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -438,6 +446,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -477,6 +486,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -508,6 +518,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -529,12 +540,43 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
 
         assert_eq!(result.missing.len(), 1);
         assert_eq!(result.missing[0].spec.name, "still-test-definitely-missing");
+    }
+
+    #[tokio::test]
+    async fn sync_global_forces_global_config() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nrust = \"stable\"\n",
+        )
+        .unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "[tools]\nnode = \"22\"\n").unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "node")
+        );
+        assert!(!result.items.iter().any(|item| item.spec.name == "rust"));
     }
 
     #[tokio::test]
@@ -551,6 +593,7 @@ mod tests {
             SyncRequest {
                 start_dir: temp.path().to_path_buf(),
                 home_dir: temp.path().to_path_buf(),
+                global: false,
             },
             &mut installer,
         )
@@ -577,12 +620,14 @@ mod tests {
         plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();
@@ -603,6 +648,7 @@ mod tests {
         let result = plan(SyncRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
         })
         .await
         .unwrap();

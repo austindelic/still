@@ -91,6 +91,9 @@ pub struct InstallArgs {
 /// specific version later without changing the CLI contract.
 #[derive(clap::Args, Debug, Clone)]
 pub struct UninstallArgs {
+    /// Remove the item from the global Still config.
+    #[arg(short = 'g', long)]
+    pub global: bool,
     /// Requested item in `name`, `name@latest`, or `name@version` form.
     #[arg(value_name = "TOOL@VERSION")]
     pub tool: ToolSpec,
@@ -102,11 +105,18 @@ pub struct TrustArgs {}
 
 /// Arguments for syncing installed state.
 #[derive(clap::Args, Debug, Clone)]
-pub struct SyncArgs {}
+pub struct SyncArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
+}
 
 /// Arguments for listing configured and installed state.
 #[derive(clap::Args, Debug, Clone)]
 pub struct ListArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
     /// Include inactive global/project entries and known installed items.
     #[arg(long)]
     pub all: bool,
@@ -305,6 +315,34 @@ For more information, try '--help'.
         assert!(args.packages.is_empty());
         assert!(args.apps.is_empty());
         assert_eq!(names(&args.items), ["rust", "firefox"]);
+    }
+
+    #[test]
+    fn desired_state_read_commands_accept_global_flag() {
+        let list = Cli::try_parse_from(["still", "list", "--global"])
+            .expect("list global args should parse");
+        let Some(Command::List(list)) = list.command else {
+            panic!("expected list command");
+        };
+        assert!(list.global);
+
+        let sync = Cli::try_parse_from(["still", "sync", "--global"])
+            .expect("sync global args should parse");
+        let Some(Command::Sync(sync)) = sync.command else {
+            panic!("expected sync command");
+        };
+        assert!(sync.global);
+    }
+
+    #[test]
+    fn desired_state_write_commands_accept_global_flag() {
+        let uninstall = Cli::try_parse_from(["still", "uninstall", "--global", "openssl"])
+            .expect("uninstall global args should parse");
+        let Some(Command::Uninstall(uninstall)) = uninstall.command else {
+            panic!("expected uninstall command");
+        };
+        assert!(uninstall.global);
+        assert_eq!(uninstall.tool.name, "openssl");
     }
 
     #[test]

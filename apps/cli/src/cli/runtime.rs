@@ -49,7 +49,7 @@ pub trait CliRuntime {
     fn env(&mut self, global: bool) -> anyhow::Result<EnvResult>;
 
     /// Lists configured desired-state items.
-    fn list(&mut self, all: bool) -> anyhow::Result<ListResult>;
+    fn list(&mut self, all: bool, global: bool) -> anyhow::Result<ListResult>;
 
     /// Inspects or syncs configured agent state.
     fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult>;
@@ -67,7 +67,7 @@ pub trait CliRuntime {
     fn doctor(&mut self) -> anyhow::Result<DoctorResult>;
 
     /// Plans synchronization against configured desired state.
-    fn sync(&mut self) -> anyhow::Result<SyncResult>;
+    fn sync(&mut self, global: bool) -> anyhow::Result<SyncResult>;
 
     /// Inspects or runs configured service actions.
     fn services(
@@ -80,7 +80,7 @@ pub trait CliRuntime {
     fn trust(&mut self) -> anyhow::Result<TrustResult>;
 
     /// Removes an item from desired state.
-    fn uninstall(&mut self, name: String) -> anyhow::Result<UninstallResult>;
+    fn uninstall(&mut self, name: String, global: bool) -> anyhow::Result<UninstallResult>;
 }
 
 /// Production runtime implementation that calls real engine actions.
@@ -134,14 +134,14 @@ impl CliRuntime for RealRuntime {
         runtime.block_on(engine::actions::env::inspect(request))
     }
 
-    fn list(&mut self, all: bool) -> anyhow::Result<ListResult> {
+    fn list(&mut self, all: bool, global: bool) -> anyhow::Result<ListResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = ListRequest {
             start_dir,
             home_dir,
-            global: false,
+            global,
             all,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
@@ -210,13 +210,14 @@ impl CliRuntime for RealRuntime {
         })
     }
 
-    fn sync(&mut self) -> anyhow::Result<SyncResult> {
+    fn sync(&mut self, global: bool) -> anyhow::Result<SyncResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = SyncRequest {
             start_dir,
             home_dir,
+            global,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::sync::run(request))
@@ -252,13 +253,14 @@ impl CliRuntime for RealRuntime {
         runtime.block_on(engine::actions::trust::run(request))
     }
 
-    fn uninstall(&mut self, name: String) -> anyhow::Result<UninstallResult> {
+    fn uninstall(&mut self, name: String, global: bool) -> anyhow::Result<UninstallResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = UninstallRequest {
             start_dir,
             home_dir,
+            global,
             name,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");

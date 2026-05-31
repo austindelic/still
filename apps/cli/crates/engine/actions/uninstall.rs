@@ -25,6 +25,7 @@ impl UninstallOps for Windows {}
 pub struct UninstallRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
     pub name: String,
 }
 
@@ -45,8 +46,12 @@ pub async fn run(request: UninstallRequest) -> Result<UninstallResult> {
         &request.start_dir,
         &request.home_dir,
         ConfigSelection {
-            scope: ConfigScope::Project,
-            for_write: true,
+            scope: if request.global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
+            for_write: request.global,
         },
     )?;
     let content = tokio::fs::read_to_string(&resolved.path)
@@ -126,6 +131,7 @@ mod tests {
         let result = run(UninstallRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: "openssl".to_string(),
         })
         .await
@@ -151,6 +157,7 @@ mod tests {
         let err = run(UninstallRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: "node".to_string(),
         })
         .await
@@ -168,5 +175,53 @@ mod tests {
                 .iter()
                 .any(|path| { path.ends_with(std::path::Path::new("packages").join("openssl")) })
         );
+    }
+
+    #[tokio::test]
+    async fn uninstall_uses_global_config_when_no_project_config_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"openssl\"]\n").unwrap();
+
+        let result = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            name: "openssl".to_string(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        let config = parse_still_toml(&fs::read_to_string(result.path).unwrap()).unwrap();
+        assert!(config.packages.latest.is_empty());
+    }
+
+    #[tokio::test]
+    async fn uninstall_global_forces_global_config() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[packages]\nlatest = [\"openssl\"]\n",
+        )
+        .unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"llvm\"]\n").unwrap();
+
+        let result = run(UninstallRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            name: "llvm".to_string(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        let project =
+            parse_still_toml(&fs::read_to_string(temp.path().join("still.toml")).unwrap()).unwrap();
+        assert_eq!(project.packages.latest, ["openssl"]);
     }
 }
