@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::actions::run::resolve_env_with_scope;
-use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::specs::toml::parse_still_toml;
 
 /// Request to inspect configured environment values.
@@ -44,7 +44,11 @@ pub async fn inspect(request: EnvRequest) -> Result<EnvResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let files = config.env.files;
+    let mut files = Vec::new();
+    if !request.global && resolved.scope == ConfigScope::Project {
+        files.extend(env_files_from_config(&global_config_path(&request.home_dir)).await?);
+    }
+    files.extend(config.env.files);
     let resolved_env =
         resolve_env_with_scope(&request.start_dir, &request.home_dir, resolved.scope).await?;
     let vars = resolved_env.vars.into_iter().collect();
@@ -54,6 +58,15 @@ pub async fn inspect(request: EnvRequest) -> Result<EnvResult> {
         vars,
         files,
     })
+}
+
+async fn env_files_from_config(path: &std::path::Path) -> Result<Vec<String>> {
+    let content = match tokio::fs::read_to_string(path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
+    };
+    Ok(parse_still_toml(&content)?.env.files)
 }
 
 #[cfg(test)]
@@ -138,6 +151,58 @@ mod tests {
             result
                 .vars
                 .contains(&("FROM_LOCAL".to_string(), "two".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn inspect_reports_global_and_project_env_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let project_config = project.join("still.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            &global,
+            r#"
+            [env]
+            files = ["global.env"]
+            GLOBAL = "yes"
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            global.parent().unwrap().join("global.env"),
+            "GLOBAL_FILE=yes\n",
+        )
+        .unwrap();
+        let project_content = r#"
+            [env]
+            files = ["project.env"]
+            PROJECT = "yes"
+            "#;
+        fs::write(&project_config, project_content).unwrap();
+        fs::write(project.join("project.env"), "PROJECT_FILE=yes\n").unwrap();
+        write_trust_marker(&project_config, project_content.as_bytes());
+
+        let result = inspect(EnvRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.files, ["global.env", "project.env"]);
+        assert!(
+            result
+                .vars
+                .contains(&("GLOBAL_FILE".to_string(), "yes".to_string()))
+        );
+        assert!(
+            result
+                .vars
+                .contains(&("PROJECT_FILE".to_string(), "yes".to_string()))
         );
     }
 
