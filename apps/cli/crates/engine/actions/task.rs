@@ -82,6 +82,9 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         .into());
     }
     assert_config_trusted(&resolved.path, content.as_bytes(), "task execution").await?;
+    let mut checked = BTreeSet::new();
+    let mut visiting = BTreeSet::new();
+    validate_task_graph(&tasks, &services, &name, &mut checked, &mut visiting)?;
     let resolved_env = resolve_env(&request.start_dir, &request.home_dir).await?;
 
     let mut executions = Vec::new();
@@ -121,6 +124,44 @@ fn task_summaries(tasks: &BTreeMap<String, TaskEntry>) -> Vec<TaskSummary> {
             },
         })
         .collect()
+}
+
+fn validate_task_graph(
+    tasks: &BTreeMap<String, TaskEntry>,
+    services: &BTreeMap<String, ServiceEntry>,
+    name: &str,
+    checked: &mut BTreeSet<String>,
+    visiting: &mut BTreeSet<String>,
+) -> Result<()> {
+    if checked.contains(name) {
+        return Ok(());
+    }
+    if !visiting.insert(name.to_string()) {
+        return Err(EngineError::Conflict {
+            message: format!("task dependency cycle includes \"{name}\""),
+        }
+        .into());
+    }
+
+    let task = tasks.get(name).ok_or_else(|| EngineError::Conflict {
+        message: format!("unknown task \"{name}\""),
+    })?;
+    let normalized = normalize_task(name, task)?;
+    for service in &normalized.requires {
+        if !services.contains_key(service) {
+            return Err(EngineError::Conflict {
+                message: format!("task \"{name}\" requires unknown service \"{service}\""),
+            }
+            .into());
+        }
+    }
+    for dependency in &normalized.depends {
+        validate_task_graph(tasks, services, dependency, checked, visiting)?;
+    }
+
+    visiting.remove(name);
+    checked.insert(name.to_string());
+    Ok(())
 }
 
 fn run_task_graph(
@@ -503,6 +544,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_prevalidates_required_services_before_running_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let marker = temp.path().join("dependency-ran");
+        let config = format!(
+            r#"
+            [tasks.setup]
+            run = "{}"
+
+            [tasks.test]
+            depends = ["setup"]
+            requires = ["db"]
+            run = "echo test"
+            "#,
+            write_file_command(&marker)
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let err = run(TaskRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            name: Some("test".to_string()),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("task \"test\" requires unknown service \"db\"")
+        );
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
     async fn task_runs_when_required_services_are_configured() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
@@ -548,6 +624,14 @@ mod tests {
             format!("echo %{name}%")
         } else {
             format!("printf \\\"${name}\\\"")
+        }
+    }
+
+    fn write_file_command(path: &Path) -> String {
+        if cfg!(windows) {
+            format!("echo ran > {}", path.display())
+        } else {
+            format!("printf ran > {}", path.display())
         }
     }
 }
