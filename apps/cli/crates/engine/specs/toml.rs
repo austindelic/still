@@ -218,16 +218,25 @@ fn validate_config(config: &StillConfig) -> Result<()> {
     validate_package_map("app", &config.apps)?;
 
     for (name, entry) in &config.services {
-        if let ServiceEntry::Expanded(service) = entry
-            && service.preset.is_none()
-            && service.task.is_none()
-            && service.start.is_none()
-            && service.check.is_none()
-        {
-            return Err(EngineError::InvalidConfig {
-                reason: format!("service \"{name}\" must define preset, task, start, or check"),
+        if let ServiceEntry::Expanded(service) = entry {
+            if let Some(preset) = service.preset.as_deref()
+                && !is_supported_service_preset(preset)
+            {
+                return Err(EngineError::InvalidConfig {
+                    reason: format!("service \"{name}\" uses unknown preset \"{preset}\""),
+                }
+                .into());
             }
-            .into());
+            if service.preset.is_none()
+                && service.task.is_none()
+                && service.start.is_none()
+                && service.check.is_none()
+            {
+                return Err(EngineError::InvalidConfig {
+                    reason: format!("service \"{name}\" must define preset, task, start, or check"),
+                }
+                .into());
+            }
         }
     }
 
@@ -306,6 +315,13 @@ fn validate_platform_value(label: &str, value: &str) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+fn is_supported_service_preset(name: &str) -> bool {
+    matches!(
+        name,
+        "docker" | "docker-compose" | "compose" | "postgres" | "postgresql" | "redis"
+    )
 }
 
 #[cfg(test)]
@@ -472,6 +488,22 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("service \"web\" must define preset, task, start, or check")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_service_preset() {
+        let err = parse_still_toml(
+            r#"
+            [services.db]
+            preset = "postgresql-typo"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("service \"db\" uses unknown preset \"postgresql-typo\"")
         );
     }
 
