@@ -290,6 +290,7 @@ impl CliRuntime for RealRuntime {
 #[derive(Debug, Clone)]
 struct PendingInstallConfigWrite {
     path: std::path::PathBuf,
+    original: Option<String>,
     updated: String,
 }
 
@@ -324,15 +325,17 @@ fn prepare_install_config_write_at(
         },
     )?;
 
-    let content = match std::fs::read_to_string(&resolved.path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+    let original = match std::fs::read_to_string(&resolved.path) {
+        Ok(content) => Some(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(err.into()),
     };
+    let content = original.as_deref().unwrap_or("");
     let updated =
-        engine::config_edit::add_install_items_with_force(&content, &request.items, force)?;
+        engine::config_edit::add_install_items_with_force(content, &request.items, force)?;
     Ok(PendingInstallConfigWrite {
         path: resolved.path,
+        original,
         updated,
     })
 }
@@ -343,7 +346,19 @@ fn record_install_items(pending: PendingInstallConfigWrite) -> anyhow::Result<()
     }
     std::fs::write(&pending.path, pending.updated)?;
     let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    runtime.block_on(engine::actions::sync::refresh_lockfile(&pending.path))?;
+    if let Err(err) = runtime.block_on(engine::actions::sync::refresh_lockfile(&pending.path)) {
+        restore_install_config(&pending.path, pending.original)?;
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn restore_install_config(path: &std::path::Path, original: Option<String>) -> anyhow::Result<()> {
+    match original {
+        Some(original) => std::fs::write(path, original)?,
+        None if path.exists() => std::fs::remove_file(path)?,
+        None => {}
+    }
     Ok(())
 }
 
@@ -404,6 +419,25 @@ mod tests {
 
         assert_eq!(pending.path, temp.join(".config/still/config.toml"));
         assert!(pending.updated.contains("latest = [\"openssl\"]"));
+    }
+
+    #[test]
+    fn install_recording_restores_config_when_lockfile_refresh_fails() {
+        let temp = test_dir("install-recording-rollback");
+        let config_path = temp.join("still.toml");
+        let original = "[tools]\nrust = \"stable\"\n";
+        fs::write(&config_path, original).unwrap();
+        fs::create_dir(temp.join("still.lock.toml")).unwrap();
+
+        let err = record_install_items(PendingInstallConfigWrite {
+            path: config_path.clone(),
+            original: Some(original.to_string()),
+            updated: "[tools]\nrust = \"stable\"\nnode = \"latest\"\n".to_string(),
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("still.lock.toml"));
+        assert_eq!(fs::read_to_string(config_path).unwrap(), original);
     }
 
     fn install_item(
