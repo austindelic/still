@@ -277,7 +277,7 @@ mod tests {
             &path,
             r#"
             [packages]
-            latest = ["openssl"]
+            latest = ["llvm"]
             openssl = { version = "3", backend = "homebrew" }
             "#,
         )
@@ -294,7 +294,7 @@ mod tests {
 
         assert_eq!(result.kind, ItemKind::Package);
         let config = parse_still_toml(&fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(config.packages.latest, ["openssl"]);
+        assert_eq!(config.packages.latest, ["llvm"]);
         assert!(!config.packages.entries.contains_key("openssl"));
     }
 

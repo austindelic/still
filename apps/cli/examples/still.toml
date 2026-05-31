@@ -23,7 +23,7 @@ files = [
 ]
 
 [packages]
-latest = ["pandoc", "ripgrep", "fd", "jq", "ffmpeg"]
+latest = ["pandoc", "ripgrep", "jq", "ffmpeg"]
 postgresql = {version = "16", backend = "auto"}
 
 [packages.llvm]

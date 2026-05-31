@@ -1,6 +1,6 @@
 //! Still TOML config models.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -259,6 +259,21 @@ fn validate_config(config: &StillConfig) -> Result<()> {
 }
 
 fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
+    let mut latest = BTreeSet::new();
+    for name in &map.latest {
+        if !latest.insert(name) {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("{kind} \"{name}\" is listed more than once in latest"),
+            }
+            .into());
+        }
+        if map.entries.contains_key(name) {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("{kind} \"{name}\" is configured in both latest and keyed entries"),
+            }
+            .into());
+        }
+    }
     for (name, entry) in &map.entries {
         let PackageEntry::Expanded(package) = entry;
         validate_platform_map(&format!("{kind} \"{name}\" backends"), &package.backends)?;
@@ -329,7 +344,7 @@ mod tests {
         let config = parse_still_toml(
             r#"
             [packages]
-            latest = ["ripgrep", "fd"]
+            latest = ["ripgrep"]
             postgresql = { version = "16", backend = "auto", backends = { macos = "homebrew", linux = "apt" } }
 
             [packages.fd.names]
@@ -342,7 +357,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(config.packages.latest, ["ripgrep", "fd"]);
+        assert_eq!(config.packages.latest, ["ripgrep"]);
         assert!(config.packages.entries.contains_key("postgresql"));
         let PackageEntry::Expanded(postgresql) = &config.packages.entries["postgresql"];
         assert_eq!(postgresql.backends["linux"], "apt");
@@ -533,6 +548,39 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("app \"zed\" only contains unsupported platform \"freebsd\"")
+        );
+    }
+
+    #[test]
+    fn rejects_package_configured_in_latest_and_keyed_entry() {
+        let err = parse_still_toml(
+            r#"
+            [packages]
+            latest = ["openssl"]
+            openssl = { version = "3" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package \"openssl\" is configured in both latest and keyed entries")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_latest_apps() {
+        let err = parse_still_toml(
+            r#"
+            [apps]
+            latest = ["firefox", "firefox"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("app \"firefox\" is listed more than once in latest")
         );
     }
 

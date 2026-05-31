@@ -559,7 +559,7 @@ mod tests {
         let (output, removed) = remove_item_target(
             r#"
             [packages]
-            latest = ["openssl"]
+            latest = ["llvm"]
             openssl = { version = "3", backend = "homebrew" }
             "#,
             &remove_target("openssl@3@homebrew"),
@@ -568,7 +568,7 @@ mod tests {
 
         let config = parse(&output);
         assert_eq!(removed, Some(ItemKind::Package));
-        assert_eq!(config.packages.latest, ["openssl"]);
+        assert_eq!(config.packages.latest, ["llvm"]);
         assert!(!config.packages.entries.contains_key("openssl"));
     }
 
