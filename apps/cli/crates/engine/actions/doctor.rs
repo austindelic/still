@@ -660,6 +660,33 @@ mod tests {
     }
 
     #[test]
+    fn doctor_warns_when_global_lockfile_is_outdated() {
+        let temp = tempfile::tempdir().unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "[packages]\nlatest = [\"openssl\"]\n").unwrap();
+        fs::write(
+            global.parent().unwrap().join("still.lock.toml"),
+            render_merged_lockfile(None, &[]),
+        )
+        .unwrap();
+
+        let result = inspect(DoctorRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "global lockfile")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Warning);
+        assert!(check.detail.contains("outdated"));
+    }
+
+    #[test]
     fn doctor_reports_path_readiness_and_path_activation() {
         let temp = tempfile::tempdir().unwrap();
 
