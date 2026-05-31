@@ -363,13 +363,13 @@ where
 }
 
 fn uninstall_target(
-    spec: &engine::registries::specs::tool::ToolSpec,
+    spec: &crate::cli::args::UninstallSpec,
 ) -> engine::actions::uninstall::UninstallTarget {
     engine::actions::uninstall::UninstallTarget {
-        name: spec.name.clone(),
-        version: spec.version.clone(),
-        backend: spec.backend.clone(),
-        exact: spec.version != "latest" || spec.backend.is_some(),
+        name: spec.spec.name.clone(),
+        version: spec.spec.version.clone(),
+        backend: spec.spec.backend.clone(),
+        exact: spec.exact,
     }
 }
 
@@ -2029,6 +2029,55 @@ Removed artifact /opt/still/packages/openssl
                 .map(|backend| backend.as_str()),
             Some("homebrew")
         );
+        assert!(runtime.uninstall_targets[0].exact);
+    }
+
+    #[test]
+    fn uninstall_passes_explicit_latest_as_exact_target() {
+        let mut runtime = FakeRuntime {
+            uninstall_result: Some(Ok(UninstallResult {
+                path: PathBuf::from("/repo/still.toml"),
+                kind: ItemKind::Package,
+                name: "openssl".to_string(),
+                removed_paths: Vec::new(),
+            })),
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: None,
+            services_requests: Vec::new(),
+            trust_result: None,
+            uninstall_targets: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Uninstall(crate::cli::args::UninstallArgs {
+                global: false,
+                tool: "openssl@latest".parse().unwrap(),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 0);
+        assert_eq!(runtime.uninstall_targets[0].name, "openssl");
+        assert_eq!(runtime.uninstall_targets[0].version, "latest");
         assert!(runtime.uninstall_targets[0].exact);
     }
 

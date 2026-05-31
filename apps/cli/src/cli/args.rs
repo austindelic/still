@@ -1,5 +1,7 @@
 //! Clap definitions for the public `still` command-line contract.
 
+use std::str::FromStr;
+
 use clap::{Parser, Subcommand};
 use engine::registries::specs::tool::ToolSpec;
 
@@ -96,7 +98,25 @@ pub struct UninstallArgs {
     pub global: bool,
     /// Requested item in `name`, `name@latest`, or `name@version` form.
     #[arg(value_name = "TOOL@VERSION")]
-    pub tool: ToolSpec,
+    pub tool: UninstallSpec,
+}
+
+/// Parsed uninstall target that preserves whether the user supplied a version.
+#[derive(Debug, Clone)]
+pub struct UninstallSpec {
+    pub spec: ToolSpec,
+    pub exact: bool,
+}
+
+impl FromStr for UninstallSpec {
+    type Err = anyhow::Error;
+
+    fn from_str(input: &str) -> anyhow::Result<Self> {
+        Ok(Self {
+            spec: input.parse()?,
+            exact: input.contains('@'),
+        })
+    }
 }
 
 /// Arguments for project trust.
@@ -342,7 +362,21 @@ For more information, try '--help'.
             panic!("expected uninstall command");
         };
         assert!(uninstall.global);
-        assert_eq!(uninstall.tool.name, "openssl");
+        assert_eq!(uninstall.tool.spec.name, "openssl");
+        assert!(!uninstall.tool.exact);
+    }
+
+    #[test]
+    fn uninstall_preserves_explicit_latest_target() {
+        let uninstall = Cli::try_parse_from(["still", "uninstall", "openssl@latest"])
+            .expect("uninstall latest args should parse");
+        let Some(Command::Uninstall(uninstall)) = uninstall.command else {
+            panic!("expected uninstall command");
+        };
+
+        assert_eq!(uninstall.tool.spec.name, "openssl");
+        assert_eq!(uninstall.tool.spec.version, "latest");
+        assert!(uninstall.tool.exact);
     }
 
     #[test]
