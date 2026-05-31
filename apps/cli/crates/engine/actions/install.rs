@@ -551,16 +551,25 @@ fn package_install_command(item: &InstallItemRequest) -> Result<PackageInstallCo
         item.spec.backend.as_ref().map(|backend| backend.as_str()),
         current_platform(),
     );
-    package_install_command_for_backend(&item.spec.name, &backend)
+    package_install_command_for_backend(&item.spec, &backend)
 }
 
-fn package_install_command_for_backend(name: &str, backend: &str) -> Result<PackageInstallCommand> {
+fn package_install_command_for_backend(
+    spec: &ItemSpec,
+    backend: &str,
+) -> Result<PackageInstallCommand> {
     let normalized = install_backend(ItemKind::Package, Some(backend), current_platform());
-    package_install_command_for_platform(name, &normalized, current_platform())
+    package_install_command_for_platform(
+        &spec.name,
+        spec.version.as_str(),
+        &normalized,
+        current_platform(),
+    )
 }
 
 fn package_install_command_for_platform(
     name: &str,
+    version: &str,
     backend: &str,
     platform: PlatformId,
 ) -> Result<PackageInstallCommand> {
@@ -569,7 +578,10 @@ fn package_install_command_for_platform(
             "homebrew" | "brew" => Ok(PackageInstallCommand {
                 backend: "homebrew".to_string(),
                 program: "brew".to_string(),
-                args: vec!["install".to_string(), name.to_string()],
+                args: vec![
+                    "install".to_string(),
+                    backend_versioned_name(name, version, "@"),
+                ],
             }),
             _ => unsupported_package_backend(backend),
         },
@@ -577,54 +589,78 @@ fn package_install_command_for_platform(
             "apt" | "apt-get" => Ok(PackageInstallCommand {
                 backend: "apt".to_string(),
                 program: "apt-get".to_string(),
-                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
-            }),
-            "dnf" => Ok(PackageInstallCommand {
-                backend: "dnf".to_string(),
-                program: "dnf".to_string(),
-                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
-            }),
-            "pacman" => Ok(PackageInstallCommand {
-                backend: "pacman".to_string(),
-                program: "pacman".to_string(),
                 args: vec![
-                    "-S".to_string(),
-                    "--noconfirm".to_string(),
-                    name.to_string(),
-                ],
-            }),
-            "nix" => Ok(PackageInstallCommand {
-                backend: "nix".to_string(),
-                program: "nix".to_string(),
-                args: vec![
-                    "profile".to_string(),
                     "install".to_string(),
-                    format!("nixpkgs#{name}"),
+                    "-y".to_string(),
+                    backend_versioned_name(name, version, "="),
                 ],
             }),
+            "dnf" => {
+                reject_pinned_package_version(backend, version)?;
+                Ok(PackageInstallCommand {
+                    backend: "dnf".to_string(),
+                    program: "dnf".to_string(),
+                    args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+                })
+            }
+            "pacman" => {
+                reject_pinned_package_version(backend, version)?;
+                Ok(PackageInstallCommand {
+                    backend: "pacman".to_string(),
+                    program: "pacman".to_string(),
+                    args: vec![
+                        "-S".to_string(),
+                        "--noconfirm".to_string(),
+                        name.to_string(),
+                    ],
+                })
+            }
+            "nix" => {
+                reject_pinned_package_version(backend, version)?;
+                Ok(PackageInstallCommand {
+                    backend: "nix".to_string(),
+                    program: "nix".to_string(),
+                    args: vec![
+                        "profile".to_string(),
+                        "install".to_string(),
+                        format!("nixpkgs#{name}"),
+                    ],
+                })
+            }
             _ => unsupported_package_backend(backend),
         },
         PlatformId::Windows => match backend {
             "winget" => Ok(PackageInstallCommand {
                 backend: "winget".to_string(),
                 program: "winget".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    "--id".to_string(),
-                    name.to_string(),
+                args: append_version_args(
+                    vec!["install".to_string(), "--id".to_string(), name.to_string()],
+                    version,
+                    "--version",
+                )
+                .into_iter()
+                .chain([
                     "--accept-package-agreements".to_string(),
                     "--accept-source-agreements".to_string(),
-                ],
+                ])
+                .collect(),
             }),
             "chocolatey" | "choco" => Ok(PackageInstallCommand {
                 backend: "chocolatey".to_string(),
                 program: "choco".to_string(),
-                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+                args: append_version_args(
+                    vec!["install".to_string(), "-y".to_string(), name.to_string()],
+                    version,
+                    "--version",
+                ),
             }),
             "scoop" => Ok(PackageInstallCommand {
                 backend: "scoop".to_string(),
                 program: "scoop".to_string(),
-                args: vec!["install".to_string(), name.to_string()],
+                args: vec![
+                    "install".to_string(),
+                    backend_versioned_name(name, version, "@"),
+                ],
             }),
             _ => unsupported_package_backend(backend),
         },
@@ -688,80 +724,143 @@ fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
         item.spec.backend.as_ref().map(|backend| backend.as_str()),
         current_platform(),
     );
-    app_install_command_for_backend(&item.spec.name, &backend)
+    app_install_command_for_backend(&item.spec, &backend)
 }
 
-fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInstallCommand> {
+fn app_install_command_for_backend(spec: &ItemSpec, backend: &str) -> Result<AppInstallCommand> {
     let normalized = install_backend(ItemKind::App, Some(backend), current_platform());
-    app_install_command_for_platform(name, &normalized, current_platform())
+    app_install_command_for_platform(
+        &spec.name,
+        spec.version.as_str(),
+        &normalized,
+        current_platform(),
+    )
 }
 
 fn app_install_command_for_platform(
     name: &str,
+    version: &str,
     backend: &str,
     platform: PlatformId,
 ) -> Result<AppInstallCommand> {
     match platform {
         PlatformId::Macos => match backend {
-            "homebrew-cask" | "brew-cask" | "cask" => Ok(AppInstallCommand {
-                backend: "homebrew-cask".to_string(),
-                program: "brew".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    "--cask".to_string(),
-                    name.to_string(),
-                ],
-            }),
-            "mas" => Ok(AppInstallCommand {
-                backend: "mas".to_string(),
-                program: "mas".to_string(),
-                args: vec!["install".to_string(), name.to_string()],
-            }),
+            "homebrew-cask" | "brew-cask" | "cask" => {
+                reject_pinned_app_version("homebrew-cask", version)?;
+                Ok(AppInstallCommand {
+                    backend: "homebrew-cask".to_string(),
+                    program: "brew".to_string(),
+                    args: vec![
+                        "install".to_string(),
+                        "--cask".to_string(),
+                        name.to_string(),
+                    ],
+                })
+            }
+            "mas" => {
+                reject_pinned_app_version(backend, version)?;
+                Ok(AppInstallCommand {
+                    backend: "mas".to_string(),
+                    program: "mas".to_string(),
+                    args: vec!["install".to_string(), name.to_string()],
+                })
+            }
             _ => unsupported_app_backend(backend),
         },
         PlatformId::Linux => match backend {
-            "flatpak" => Ok(AppInstallCommand {
-                backend: "flatpak".to_string(),
-                program: "flatpak".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    "-y".to_string(),
-                    "flathub".to_string(),
-                    name.to_string(),
-                ],
-            }),
-            "snap" => Ok(AppInstallCommand {
-                backend: "snap".to_string(),
-                program: "snap".to_string(),
-                args: vec!["install".to_string(), name.to_string()],
-            }),
+            "flatpak" => {
+                reject_pinned_app_version(backend, version)?;
+                Ok(AppInstallCommand {
+                    backend: "flatpak".to_string(),
+                    program: "flatpak".to_string(),
+                    args: vec![
+                        "install".to_string(),
+                        "-y".to_string(),
+                        "flathub".to_string(),
+                        name.to_string(),
+                    ],
+                })
+            }
+            "snap" => {
+                reject_pinned_app_version(backend, version)?;
+                Ok(AppInstallCommand {
+                    backend: "snap".to_string(),
+                    program: "snap".to_string(),
+                    args: vec!["install".to_string(), name.to_string()],
+                })
+            }
             _ => unsupported_app_backend(backend),
         },
         PlatformId::Windows => match backend {
             "winget" => Ok(AppInstallCommand {
                 backend: "winget".to_string(),
                 program: "winget".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    "--id".to_string(),
-                    name.to_string(),
+                args: append_version_args(
+                    vec!["install".to_string(), "--id".to_string(), name.to_string()],
+                    version,
+                    "--version",
+                )
+                .into_iter()
+                .chain([
                     "--accept-package-agreements".to_string(),
                     "--accept-source-agreements".to_string(),
-                ],
+                ])
+                .collect(),
             }),
             "chocolatey" | "choco" => Ok(AppInstallCommand {
                 backend: "chocolatey".to_string(),
                 program: "choco".to_string(),
-                args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
+                args: append_version_args(
+                    vec!["install".to_string(), "-y".to_string(), name.to_string()],
+                    version,
+                    "--version",
+                ),
             }),
             "scoop" => Ok(AppInstallCommand {
                 backend: "scoop".to_string(),
                 program: "scoop".to_string(),
-                args: vec!["install".to_string(), name.to_string()],
+                args: vec![
+                    "install".to_string(),
+                    backend_versioned_name(name, version, "@"),
+                ],
             }),
             _ => unsupported_app_backend(backend),
         },
     }
+}
+
+fn backend_versioned_name(name: &str, version: &str, separator: &str) -> String {
+    if version.eq_ignore_ascii_case("latest") {
+        name.to_string()
+    } else {
+        format!("{name}{separator}{version}")
+    }
+}
+
+fn append_version_args(mut args: Vec<String>, version: &str, flag: &str) -> Vec<String> {
+    if !version.eq_ignore_ascii_case("latest") {
+        args.extend([flag.to_string(), version.to_string()]);
+    }
+    args
+}
+
+fn reject_pinned_package_version(backend: &str, version: &str) -> Result<()> {
+    reject_pinned_version(ItemKind::Package, backend, version)
+}
+
+fn reject_pinned_app_version(backend: &str, version: &str) -> Result<()> {
+    reject_pinned_version(ItemKind::App, backend, version)
+}
+
+fn reject_pinned_version(kind: ItemKind, backend: &str, version: &str) -> Result<()> {
+    if version.eq_ignore_ascii_case("latest") {
+        return Ok(());
+    }
+    Err(EngineError::UnsupportedPlatform {
+        feature: format!("{kind} backend {backend} pinned version {version}"),
+        platform: std::env::consts::OS.to_string(),
+    }
+    .into())
 }
 
 fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
@@ -1348,7 +1447,8 @@ mod tests {
     #[test]
     fn app_install_command_plans_windows_scoop() {
         let command =
-            app_install_command_for_platform("firefox", "scoop", PlatformId::Windows).unwrap();
+            app_install_command_for_platform("firefox", "latest", "scoop", PlatformId::Windows)
+                .unwrap();
 
         assert_eq!(command.backend, "scoop");
         assert_eq!(command.program, "scoop");
@@ -1358,11 +1458,52 @@ mod tests {
     #[test]
     fn app_install_command_plans_macos_mas() {
         let command =
-            app_install_command_for_platform("497799835", "mas", PlatformId::Macos).unwrap();
+            app_install_command_for_platform("497799835", "latest", "mas", PlatformId::Macos)
+                .unwrap();
 
         assert_eq!(command.backend, "mas");
         assert_eq!(command.program, "mas");
         assert_eq!(command.args, ["install", "497799835"]);
+    }
+
+    #[test]
+    fn app_install_command_rejects_pinned_cask_versions() {
+        let err = app_install_command_for_platform(
+            "firefox",
+            "121.0",
+            "homebrew-cask",
+            PlatformId::Macos,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("app backend homebrew-cask pinned version 121.0")
+        );
+    }
+
+    #[test]
+    fn app_install_command_passes_pinned_versions_to_windows_backends() {
+        let winget =
+            app_install_command_for_platform("Firefox", "121.0", "winget", PlatformId::Windows)
+                .unwrap();
+        assert_eq!(
+            winget.args,
+            [
+                "install",
+                "--id",
+                "Firefox",
+                "--version",
+                "121.0",
+                "--accept-package-agreements",
+                "--accept-source-agreements"
+            ]
+        );
+
+        let scoop =
+            app_install_command_for_platform("firefox", "121.0", "scoop", PlatformId::Windows)
+                .unwrap();
+        assert_eq!(scoop.args, ["install", "firefox@121.0"]);
     }
 
     #[test]
@@ -1429,11 +1570,51 @@ mod tests {
     #[test]
     fn package_install_command_plans_windows_scoop() {
         let command =
-            package_install_command_for_platform("openssl", "scoop", PlatformId::Windows).unwrap();
+            package_install_command_for_platform("openssl", "latest", "scoop", PlatformId::Windows)
+                .unwrap();
 
         assert_eq!(command.backend, "scoop");
         assert_eq!(command.program, "scoop");
         assert_eq!(command.args, ["install", "openssl"]);
+    }
+
+    #[test]
+    fn package_install_command_passes_pinned_versions_to_supported_backends() {
+        let brew =
+            package_install_command_for_platform("ripgrep", "1", "homebrew", PlatformId::Macos)
+                .unwrap();
+        assert_eq!(brew.args, ["install", "ripgrep@1"]);
+
+        let apt =
+            package_install_command_for_platform("openssl", "3", "apt", PlatformId::Linux).unwrap();
+        assert_eq!(apt.args, ["install", "-y", "openssl=3"]);
+
+        let winget =
+            package_install_command_for_platform("OpenSSL", "3", "winget", PlatformId::Windows)
+                .unwrap();
+        assert_eq!(
+            winget.args,
+            [
+                "install",
+                "--id",
+                "OpenSSL",
+                "--version",
+                "3",
+                "--accept-package-agreements",
+                "--accept-source-agreements"
+            ]
+        );
+    }
+
+    #[test]
+    fn package_install_command_rejects_pinned_versions_for_unsupported_backends() {
+        let err = package_install_command_for_platform("openssl", "3", "dnf", PlatformId::Linux)
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package backend dnf pinned version 3")
+        );
     }
 
     #[test]
