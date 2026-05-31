@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
-use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
+use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::lockfile::{lockfile_path, render_merged_lockfile};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::backend::normalize_auto_backend;
@@ -124,7 +124,11 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
             for_write: false,
         },
     )?;
-    let items = sync_items_for_path(&resolved.path).await?;
+    let items = if !request.global && resolved.scope == ConfigScope::Project {
+        sync_items_for_active_project_path(&resolved.path, &request.home_dir).await?
+    } else {
+        sync_items_for_path(&resolved.path).await?
+    };
     let lockfile_path = lockfile_path(&resolved.path);
     let existing_lockfile = read_optional_lockfile(&lockfile_path).await?;
     let rendered_lockfile = render_merged_lockfile(existing_lockfile.as_deref(), &items);
@@ -150,6 +154,39 @@ async fn sync_items_for_path(config_path: &Path) -> Result<Vec<SyncItem>> {
         .with_context(|| format!("failed to read {}", config_path.display()))?;
     let config = parse_still_toml(&content)?;
     sync_items(config)
+}
+
+async fn sync_items_for_active_project_path(
+    project_path: &Path,
+    home_dir: &Path,
+) -> Result<Vec<SyncItem>> {
+    let mut items = sync_items_for_path(project_path).await?;
+    let global_path = global_config_path(home_dir);
+    let global_items = match sync_items_for_path(&global_path).await {
+        Ok(items) => items,
+        Err(err)
+            if err
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Vec::new()
+        }
+        Err(err) => return Err(err),
+    };
+    merge_global_only_items(&mut items, global_items);
+    Ok(items)
+}
+
+fn merge_global_only_items(items: &mut Vec<SyncItem>, global_items: Vec<SyncItem>) {
+    for global_item in global_items {
+        if items
+            .iter()
+            .any(|item| item.kind == global_item.kind && item.spec.name == global_item.spec.name)
+        {
+            continue;
+        }
+        items.push(global_item);
+    }
 }
 
 fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
@@ -666,6 +703,72 @@ mod tests {
                 .any(|item| item.kind == ItemKind::Tool && item.spec.name == "node")
         );
         assert!(!result.items.iter().any(|item| item.spec.name == "rust"));
+    }
+
+    #[tokio::test]
+    async fn sync_project_state_includes_global_only_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(&global, "[tools]\nnode = \"22\"\n").unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: project.clone(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, project.join("still.toml"));
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "rust")
+        );
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "node")
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_project_items_override_global_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(&global, "[tools]\nrust = \"1.80.0\"\nnode = \"22\"\n").unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        let rust_items = result
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Tool && item.spec.name == "rust")
+            .collect::<Vec<_>>();
+        assert_eq!(rust_items.len(), 1);
+        assert_eq!(rust_items[0].spec.version.as_str(), "stable");
+        assert!(
+            result
+                .items
+                .iter()
+                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "node")
+        );
     }
 
     #[tokio::test]
