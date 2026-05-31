@@ -203,13 +203,27 @@ fn validate_config(config: &StillConfig) -> Result<()> {
     validate_env_config(&config.env)?;
 
     for (name, entry) in &config.tools {
-        if let ToolEntry::Expanded(tool) = entry
-            && tool.version.trim().is_empty()
-        {
-            return Err(EngineError::InvalidConfig {
-                reason: format!("tool \"{name}\" must define version"),
+        match entry {
+            ToolEntry::Version(version) => {
+                validate_non_empty_string(&format!("tool \"{name}\" version"), version)?;
             }
-            .into());
+            ToolEntry::Expanded(tool) => {
+                if tool.version.trim().is_empty() {
+                    return Err(EngineError::InvalidConfig {
+                        reason: format!("tool \"{name}\" must define version"),
+                    }
+                    .into());
+                }
+                validate_non_empty_strings(
+                    &format!("tool \"{name}\" components"),
+                    &tool.components,
+                )?;
+                validate_non_empty_strings(&format!("tool \"{name}\" targets"), &tool.targets)?;
+                validate_optional_non_empty_string(
+                    &format!("tool \"{name}\" backend"),
+                    tool.backend.as_deref(),
+                )?;
+            }
         }
         if let ToolEntry::Expanded(tool) = entry {
             validate_platform_map(&format!("tool \"{name}\" backends"), &tool.backends)?;
@@ -220,44 +234,71 @@ fn validate_config(config: &StillConfig) -> Result<()> {
     validate_package_map("app", &config.apps)?;
 
     for (name, entry) in &config.services {
-        if let ServiceEntry::Expanded(service) = entry {
-            if let Some(preset) = service.preset.as_deref()
-                && !is_supported_service_preset(preset)
-            {
-                return Err(EngineError::InvalidConfig {
-                    reason: format!("service \"{name}\" uses unknown preset \"{preset}\""),
-                }
-                .into());
+        match entry {
+            ServiceEntry::Command(command) => {
+                validate_non_empty_string(&format!("service \"{name}\" command"), command)?;
             }
-            if service.preset.is_none()
-                && service.task.is_none()
-                && service.start.is_none()
-                && service.check.is_none()
-            {
-                return Err(EngineError::InvalidConfig {
-                    reason: format!("service \"{name}\" must define preset, task, start, or check"),
+            ServiceEntry::Expanded(service) => {
+                if let Some(preset) = service.preset.as_deref() {
+                    validate_non_empty_string(&format!("service \"{name}\" preset"), preset)?;
+                    if !is_supported_service_preset(preset) {
+                        return Err(EngineError::InvalidConfig {
+                            reason: format!("service \"{name}\" uses unknown preset \"{preset}\""),
+                        }
+                        .into());
+                    }
                 }
-                .into());
+                validate_optional_non_empty_string(
+                    &format!("service \"{name}\" task"),
+                    service.task.as_deref(),
+                )?;
+                validate_service_action(&format!("service \"{name}\" start"), &service.start)?;
+                validate_service_action(&format!("service \"{name}\" stop"), &service.stop)?;
+                validate_service_action(&format!("service \"{name}\" check"), &service.check)?;
+                if service.preset.is_none()
+                    && service.task.is_none()
+                    && service.start.is_none()
+                    && service.check.is_none()
+                {
+                    return Err(EngineError::InvalidConfig {
+                        reason: format!(
+                            "service \"{name}\" must define preset, task, start, or check"
+                        ),
+                    }
+                    .into());
+                }
             }
         }
     }
 
     for (name, entry) in &config.tasks {
-        if let TaskEntry::Expanded(task) = entry {
-            match &task.run {
-                TaskRun::None => {
-                    return Err(EngineError::InvalidConfig {
-                        reason: format!("task \"{name}\" must define run"),
+        match entry {
+            TaskEntry::Command(command) => {
+                validate_non_empty_string(&format!("task \"{name}\" run"), command)?;
+            }
+            TaskEntry::Expanded(task) => {
+                validate_non_empty_strings(&format!("task \"{name}\" depends"), &task.depends)?;
+                validate_non_empty_strings(&format!("task \"{name}\" requires"), &task.requires)?;
+                match &task.run {
+                    TaskRun::None => {
+                        return Err(EngineError::InvalidConfig {
+                            reason: format!("task \"{name}\" must define run"),
+                        }
+                        .into());
                     }
-                    .into());
-                }
-                TaskRun::Commands(commands) if commands.is_empty() => {
-                    return Err(EngineError::InvalidConfig {
-                        reason: format!("task \"{name}\" must define at least one run command"),
+                    TaskRun::Command(command) => {
+                        validate_non_empty_string(&format!("task \"{name}\" run"), command)?;
                     }
-                    .into());
+                    TaskRun::Commands(commands) if commands.is_empty() => {
+                        return Err(EngineError::InvalidConfig {
+                            reason: format!("task \"{name}\" must define at least one run command"),
+                        }
+                        .into());
+                    }
+                    TaskRun::Commands(commands) => {
+                        validate_non_empty_strings(&format!("task \"{name}\" run"), commands)?;
+                    }
                 }
-                TaskRun::Command(_) | TaskRun::Commands(_) => {}
             }
         }
     }
@@ -270,19 +311,12 @@ fn validate_config(config: &StillConfig) -> Result<()> {
 }
 
 fn validate_env_config(env: &EnvConfig) -> Result<()> {
-    for file in &env.files {
-        if file.trim().is_empty() {
-            return Err(EngineError::InvalidConfig {
-                reason: "env files cannot contain empty entries".to_string(),
-            }
-            .into());
-        }
-    }
-    Ok(())
+    validate_non_empty_strings("env files", &env.files)
 }
 
 fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
     let mut latest = BTreeSet::new();
+    validate_non_empty_strings(&format!("{kind} latest"), &map.latest)?;
     for name in &map.latest {
         if !latest.insert(name) {
             return Err(EngineError::InvalidConfig {
@@ -299,6 +333,14 @@ fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
     }
     for (name, entry) in &map.entries {
         let PackageEntry::Expanded(package) = entry;
+        validate_optional_non_empty_string(
+            &format!("{kind} \"{name}\" version"),
+            package.version.as_deref(),
+        )?;
+        validate_optional_non_empty_string(
+            &format!("{kind} \"{name}\" backend"),
+            package.backend.as_deref(),
+        )?;
         validate_platform_map(&format!("{kind} \"{name}\" backends"), &package.backends)?;
         validate_platform_map(&format!("{kind} \"{name}\" names"), &package.names)?;
         for field in &package.platforms {
@@ -315,8 +357,9 @@ fn validate_package_map(kind: &str, map: &PackageMap) -> Result<()> {
 }
 
 fn validate_platform_map(label: &str, map: &BTreeMap<String, String>) -> Result<()> {
-    for key in map.keys() {
+    for (key, value) in map {
         validate_platform_value(label, key)?;
+        validate_non_empty_string(label, value)?;
     }
     Ok(())
 }
@@ -325,6 +368,48 @@ fn validate_platform_value(label: &str, value: &str) -> Result<()> {
     if value.parse::<PlatformId>().is_err() {
         return Err(EngineError::InvalidConfig {
             reason: format!("{label} contains unsupported platform \"{value}\""),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_service_action(label: &str, action: &Option<ServiceAction>) -> Result<()> {
+    match action {
+        Some(ServiceAction::Task(action)) => {
+            validate_non_empty_string(&format!("{label} task"), &action.task)?;
+        }
+        Some(ServiceAction::Command(action)) => {
+            validate_non_empty_string(&format!("{label} command"), &action.command)?;
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+fn validate_optional_non_empty_string(label: &str, value: Option<&str>) -> Result<()> {
+    if let Some(value) = value {
+        validate_non_empty_string(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_non_empty_strings(label: &str, values: &[String]) -> Result<()> {
+    for value in values {
+        if value.trim().is_empty() {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("{label} cannot contain empty entries"),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_non_empty_string(label: &str, value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("{label} cannot be empty"),
         }
         .into());
     }
@@ -493,6 +578,56 @@ mod tests {
     }
 
     #[test]
+    fn rejects_empty_tool_list_entries() {
+        let err = parse_still_toml(
+            r#"
+            [tools.rust]
+            version = "stable"
+            components = ["rustfmt", " "]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("tool \"rust\" components cannot contain empty entries")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_package_latest_entries() {
+        let err = parse_still_toml(
+            r#"
+            [packages]
+            latest = ["ripgrep", " "]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package latest cannot contain empty entries")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_package_metadata_values() {
+        let err = parse_still_toml(
+            r#"
+            [packages.openssl]
+            version = "3"
+            names = { linux = " " }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("package \"openssl\" names cannot be empty")
+        );
+    }
+
+    #[test]
     fn rejects_expanded_task_without_run() {
         let err = parse_still_toml(
             r#"
@@ -503,6 +638,52 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("task \"ci\" must define run"));
+    }
+
+    #[test]
+    fn rejects_empty_task_commands_and_refs() {
+        let err = parse_still_toml(
+            r#"
+            [tasks.ci]
+            depends = ["test", " "]
+            run = "cargo test"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("task \"ci\" depends cannot contain empty entries")
+        );
+
+        let err = parse_still_toml(
+            r#"
+            [tasks.ci]
+            run = ["cargo test", " "]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("task \"ci\" run cannot contain empty entries")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_service_actions() {
+        let err = parse_still_toml(
+            r#"
+            [services.web]
+            start = { command = " " }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("service \"web\" start command cannot be empty")
+        );
     }
 
     #[test]

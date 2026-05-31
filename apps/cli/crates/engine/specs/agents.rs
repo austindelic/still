@@ -81,10 +81,18 @@ pub fn managed_skill_dir_name(name: &str) -> EngineResult<String> {
 /// Converts parsed `[agents]` config into command/planner friendly data.
 pub fn normalize_agents(config: AgentsConfig) -> EngineResult<NormalizedAgents> {
     let targets = normalize_targets(config.targets)?;
+    if let Some(instructions) = config.instructions.as_deref()
+        && instructions.trim().is_empty()
+    {
+        return Err(EngineError::InvalidConfig {
+            reason: "agent instructions cannot be empty".to_string(),
+        });
+    }
     let skills = match config.skills {
         Some(AgentSkills::List(skills)) => skills
             .into_iter()
             .map(|skill| {
+                validate_non_empty("agent skill", &skill)?;
                 let source = source_from_shorthand(&skill);
                 Ok(NormalizedSkill {
                     name: skill_name(&skill),
@@ -98,7 +106,10 @@ pub fn normalize_agents(config: AgentsConfig) -> EngineResult<NormalizedAgents> 
             .collect::<EngineResult<Vec<_>>>()?,
         Some(AgentSkills::Table(skills)) => skills
             .into_iter()
-            .map(|(name, source)| normalize_skill_entry(name, source))
+            .map(|(name, source)| {
+                validate_non_empty("agent skill name", &name)?;
+                normalize_skill_entry(name, source)
+            })
             .collect::<EngineResult<Vec<_>>>()?,
         None => Vec::new(),
     };
@@ -129,19 +140,31 @@ fn normalize_targets(targets: Vec<String>) -> EngineResult<Vec<String>> {
 
 fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<NormalizedSkill> {
     match source {
-        SkillSource::Shorthand(value) => Ok(NormalizedSkill {
-            name,
-            source: source_from_shorthand(&value),
-            auto: false,
-            tools: Vec::new(),
-            packages: Vec::new(),
-            apps: Vec::new(),
-        }),
+        SkillSource::Shorthand(value) => {
+            validate_non_empty(&format!("agent skill \"{name}\" source"), &value)?;
+            Ok(NormalizedSkill {
+                name,
+                source: source_from_shorthand(&value),
+                auto: false,
+                tools: Vec::new(),
+                packages: Vec::new(),
+                apps: Vec::new(),
+            })
+        }
         SkillSource::Expanded(expanded) => {
+            if let Some(version) = expanded.version.as_deref() {
+                validate_non_empty(&format!("agent skill \"{name}\" version"), version)?;
+            }
             let source = match (expanded.source, expanded.url) {
-                (Some(source), None) => source_from_shorthand(&source),
+                (Some(source), None) => {
+                    validate_non_empty(&format!("agent skill \"{name}\" source"), &source)?;
+                    source_from_shorthand(&source)
+                }
                 (None, Some(url)) => NormalizedSkillSource::Url {
-                    url,
+                    url: {
+                        validate_non_empty(&format!("agent skill \"{name}\" url"), &url)?;
+                        url
+                    },
                     version: expanded.version,
                 },
                 (None, None) => source_from_shorthand(&name),
@@ -162,6 +185,15 @@ fn normalize_skill_entry(name: String, source: SkillSource) -> EngineResult<Norm
             })
         }
     }
+}
+
+fn validate_non_empty(label: &str, value: &str) -> EngineResult<()> {
+    if value.trim().is_empty() {
+        return Err(EngineError::InvalidConfig {
+            reason: format!("{label} cannot be empty"),
+        });
+    }
+    Ok(())
 }
 
 fn source_from_shorthand(value: &str) -> NormalizedSkillSource {
@@ -321,6 +353,48 @@ mod tests {
         let err = normalize_agents(config).unwrap_err();
 
         assert!(err.to_string().contains("cannot set both source and url"));
+    }
+
+    #[test]
+    fn rejects_empty_agent_instructions() {
+        let err = parse_still_toml(
+            r#"
+            [agents]
+            instructions = " "
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("agent instructions cannot be empty")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_agent_skill_sources() {
+        let err = parse_still_toml(
+            r#"
+            [agents]
+            skills = [" "]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("agent skill cannot be empty"));
+
+        let err = parse_still_toml(
+            r#"
+            [agents.skills]
+            rust-review = { url = " " }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("agent skill \"rust-review\" url cannot be empty")
+        );
     }
 
     #[test]
