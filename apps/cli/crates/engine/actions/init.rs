@@ -1,6 +1,6 @@
 //! Engine action for creating starter project config.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -8,8 +8,7 @@ use crate::config::PROJECT_CONFIG_FILE;
 use crate::error::EngineError;
 use crate::trust::{config_fingerprint, trust_marker_path};
 
-const STARTER_CONFIG: &str = r#"[tools]
-
+const STARTER_TEMPLATE_AFTER_TOOLS: &str = r#"
 [packages]
 latest = []
 
@@ -52,7 +51,8 @@ pub async fn run(request: InitRequest) -> Result<InitResult> {
         return Err(EngineError::ConfigAlreadyExists { path }.into());
     }
 
-    tokio::fs::write(&path, STARTER_CONFIG)
+    let content = starter_config(&request.start_dir).await;
+    tokio::fs::write(&path, &content)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
     let trust_path = trust_marker_path(&path);
@@ -64,13 +64,42 @@ pub async fn run(request: InitRequest) -> Result<InitResult> {
         format!(
             "config = \"{}\"\nfingerprint = \"{}\"\n",
             path.display(),
-            config_fingerprint(STARTER_CONFIG.as_bytes())
+            config_fingerprint(content.as_bytes())
         ),
     )
     .await
     .with_context(|| format!("failed to write {}", trust_path.display()))?;
 
     Ok(InitResult { path })
+}
+
+async fn starter_config(project_dir: &Path) -> String {
+    let mut tools = Vec::new();
+    if file_exists(project_dir.join("Cargo.toml")).await {
+        tools.push(("rust", "stable"));
+    }
+    if file_exists(project_dir.join("package.json")).await {
+        tools.push(("node", "latest"));
+    }
+    if file_exists(project_dir.join("go.mod")).await {
+        tools.push(("go", "latest"));
+    }
+    if file_exists(project_dir.join("pyproject.toml")).await {
+        tools.push(("python", "latest"));
+    }
+
+    let mut output = String::from("[tools]\n");
+    for (name, version) in tools {
+        output.push_str(&format!("{name} = \"{version}\"\n"));
+    }
+    output.push_str(STARTER_TEMPLATE_AFTER_TOOLS);
+    output
+}
+
+async fn file_exists(path: PathBuf) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_file())
 }
 
 #[cfg(test)]
@@ -97,6 +126,30 @@ mod tests {
         let marker = fs::read_to_string(temp.path().join(".still/trust.toml")).unwrap();
         assert!(marker.contains("fingerprint"));
         assert!(marker.contains("still.toml"));
+    }
+
+    #[tokio::test]
+    async fn init_infers_common_project_tools() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("package.json"), "{}\n").unwrap();
+
+        let result = run(InitRequest {
+            start_dir: temp.path().to_path_buf(),
+            force: false,
+        })
+        .await
+        .unwrap();
+
+        let content = fs::read_to_string(&result.path).unwrap();
+        assert!(content.contains("rust = \"stable\""));
+        assert!(content.contains("node = \"latest\""));
+        let marker = fs::read_to_string(temp.path().join(".still/trust.toml")).unwrap();
+        assert!(marker.contains(&config_fingerprint(content.as_bytes())));
     }
 
     #[tokio::test]
