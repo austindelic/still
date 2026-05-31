@@ -98,6 +98,23 @@ pub struct InstalledItemResult {
     pub linked_executables: Vec<PathBuf>,
 }
 
+/// Installs individual items for the multi-item install coordinator.
+pub trait ItemInstaller {
+    /// Installs one item and returns its filesystem outputs.
+    /// # Errors
+    /// Fails when backend resolution or installation fails.
+    async fn install(&mut self, item: &InstallItemRequest) -> Result<InstallResult>;
+}
+
+#[derive(Debug, Default)]
+struct RealItemInstaller;
+
+impl ItemInstaller for RealItemInstaller {
+    async fn install(&mut self, item: &InstallItemRequest) -> Result<InstallResult> {
+        install_one(item).await
+    }
+}
+
 /// Installs one requested item into Still-managed storage and links its executable when found.
 /// # Arguments
 /// * `request` - Parsed package name and version request.
@@ -109,6 +126,26 @@ pub struct InstalledItemResult {
 /// # Side Effects
 /// Downloads an archive, replaces the install directory, and may create a symlink.
 pub async fn run(request: InstallRequest) -> Result<InstallResult> {
+    let mut installer = RealItemInstaller;
+    run_with_installer(request, &mut installer).await
+}
+
+/// Installs requested items with an injected installer.
+/// # Errors
+/// Fails if any item fails. Already-installed items from the same request are
+/// rolled back before returning the install error.
+pub async fn run_with_installer(
+    request: InstallRequest,
+    installer: &mut impl ItemInstaller,
+) -> Result<InstallResult> {
+    run_with_installer_and_rollback_roots(request, installer, &RollbackRoots::system()).await
+}
+
+async fn run_with_installer_and_rollback_roots(
+    request: InstallRequest,
+    installer: &mut impl ItemInstaller,
+    rollback_roots: &RollbackRoots,
+) -> Result<InstallResult> {
     if request.items.is_empty() {
         return Err(EngineError::EmptyInstallRequest.into());
     }
@@ -116,12 +153,24 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     let mut last = None;
     let mut installed = Vec::new();
     for item in &request.items {
-        let result = install_one(item).await.with_context(|| {
+        let result = match installer.install(item).await.with_context(|| {
             format!(
                 "failed to install {} {}@{}",
                 item.kind, item.spec.name, item.spec.version
             )
-        })?;
+        }) {
+            Ok(result) => result,
+            Err(err) => {
+                if let Err(rollback_err) =
+                    rollback_installed_items_at(&installed, rollback_roots).await
+                {
+                    return Err(err.context(format!(
+                        "failed to roll back partial installs: {rollback_err}"
+                    )));
+                }
+                return Err(err);
+            }
+        };
         installed.push(InstalledItemResult {
             kind: item.kind,
             name: result.tool_name.clone(),
@@ -137,6 +186,73 @@ pub async fn run(request: InstallRequest) -> Result<InstallResult> {
     let mut result: InstallResult = last.ok_or_else(|| EngineError::EmptyInstallRequest)?;
     result.installed = installed;
     Ok(result)
+}
+
+#[derive(Debug, Clone)]
+struct RollbackRoots {
+    tool_root: PathBuf,
+    package_root: PathBuf,
+    app_root: PathBuf,
+    bin_dir: PathBuf,
+}
+
+impl RollbackRoots {
+    fn system() -> Self {
+        Self {
+            tool_root: System::tool_dir(),
+            package_root: System::root_dir().join("packages"),
+            app_root: System::apps_dir(),
+            bin_dir: System::bin_dir(),
+        }
+    }
+
+    fn install_root(&self, kind: ItemKind) -> &Path {
+        match kind {
+            ItemKind::Tool => &self.tool_root,
+            ItemKind::Package => &self.package_root,
+            ItemKind::App => &self.app_root,
+        }
+    }
+}
+
+async fn rollback_installed_items_at(
+    installed: &[InstalledItemResult],
+    roots: &RollbackRoots,
+) -> Result<()> {
+    for item in installed.iter().rev() {
+        for linked in item.linked_executables.iter().rev() {
+            if linked.starts_with(&roots.bin_dir) {
+                remove_path_if_exists(linked).await?;
+            }
+        }
+
+        let install_root = roots.install_root(item.kind);
+        let item_root = install_root.join(&item.name);
+        let mut outputs = item.outputs.clone();
+        outputs.push(item.install_path.clone());
+        outputs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+        outputs.dedup();
+        for output in outputs {
+            if output.starts_with(&item_root) {
+                remove_path_if_exists(&output).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn remove_path_if_exists(path: &Path) -> Result<()> {
+    let metadata = match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    if metadata.is_dir() {
+        tokio::fs::remove_dir_all(path).await?;
+    } else {
+        tokio::fs::remove_file(path).await?;
+    }
+    Ok(())
 }
 
 async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
@@ -1100,6 +1216,7 @@ impl InstallOps for Windows {
 #[cfg(test)]
 mod tests {
     use crate::specs::item::{ItemKind, ItemSpec};
+    use anyhow::anyhow;
 
     use super::*;
 
@@ -1108,6 +1225,75 @@ mod tests {
         let err = run(InstallRequest { items: Vec::new() }).await.unwrap_err();
 
         assert!(err.to_string().contains("at least one item"));
+    }
+
+    #[tokio::test]
+    async fn multi_item_install_rolls_back_previous_outputs_on_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = RollbackRoots {
+            tool_root: temp.path().join("tools"),
+            package_root: temp.path().join("packages"),
+            app_root: temp.path().join("apps"),
+            bin_dir: temp.path().join("bin"),
+        };
+        let mut installer = FakeItemInstaller {
+            roots: roots.clone(),
+            calls: 0,
+            fail_on_call: Some(1),
+        };
+
+        let err = run_with_installer_and_rollback_roots(
+            InstallRequest {
+                items: vec![
+                    install_item(ItemKind::Tool, "ripgrep"),
+                    install_item(ItemKind::Package, "openssl"),
+                ],
+            },
+            &mut installer,
+            &roots,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("failed to install package openssl@latest")
+        );
+        assert!(!roots.tool_root.join("ripgrep/latest").exists());
+        assert!(!roots.bin_dir.join("ripgrep").exists());
+    }
+
+    #[tokio::test]
+    async fn multi_item_install_keeps_outputs_when_all_items_succeed() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = RollbackRoots {
+            tool_root: temp.path().join("tools"),
+            package_root: temp.path().join("packages"),
+            app_root: temp.path().join("apps"),
+            bin_dir: temp.path().join("bin"),
+        };
+        let mut installer = FakeItemInstaller {
+            roots: roots.clone(),
+            calls: 0,
+            fail_on_call: None,
+        };
+
+        let result = run_with_installer_and_rollback_roots(
+            InstallRequest {
+                items: vec![
+                    install_item(ItemKind::Tool, "ripgrep"),
+                    install_item(ItemKind::Package, "openssl"),
+                ],
+            },
+            &mut installer,
+            &roots,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.installed.len(), 2);
+        assert!(roots.tool_root.join("ripgrep/latest").exists());
+        assert!(roots.package_root.join("openssl/latest").exists());
     }
 
     #[test]
@@ -1322,5 +1508,46 @@ mod tests {
         assert!(marker.contains("outputs = ["));
         assert!(marker.contains("linked_executables = ["));
         assert!(marker.contains("bin/rg"));
+    }
+
+    struct FakeItemInstaller {
+        roots: RollbackRoots,
+        calls: usize,
+        fail_on_call: Option<usize>,
+    }
+
+    impl ItemInstaller for FakeItemInstaller {
+        async fn install(&mut self, item: &InstallItemRequest) -> Result<InstallResult> {
+            if self.fail_on_call == Some(self.calls) {
+                self.calls += 1;
+                return Err(anyhow!("planned failure"));
+            }
+            self.calls += 1;
+            let install_root = self.roots.install_root(item.kind);
+            let install_path = install_root
+                .join(&item.spec.name)
+                .join(item.spec.version.as_str());
+            let link_path = self.roots.bin_dir.join(&item.spec.name);
+            tokio::fs::create_dir_all(&install_path).await?;
+            tokio::fs::create_dir_all(&self.roots.bin_dir).await?;
+            tokio::fs::write(&link_path, "link").await?;
+
+            Ok(InstallResult {
+                tool_name: item.spec.name.clone(),
+                version: item.spec.version.to_string(),
+                install_path: install_path.clone(),
+                binary_path: Some(link_path.clone()),
+                outputs: vec![install_path],
+                linked_executables: vec![link_path],
+                installed: Vec::new(),
+            })
+        }
+    }
+
+    fn install_item(kind: ItemKind, spec: &str) -> InstallItemRequest {
+        InstallItemRequest {
+            kind,
+            spec: spec.parse::<ItemSpec>().unwrap(),
+        }
     }
 }
