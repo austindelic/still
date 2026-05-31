@@ -88,9 +88,14 @@ pub async fn run_with_installer(
     request: SyncRequest,
     installer: &mut impl SyncInstaller,
 ) -> Result<SyncResult> {
+    let lockfile_path = selected_lockfile_path(&request)?;
+    let previous_lockfile = read_optional_lockfile(&lockfile_path).await?;
     let mut result = plan(request).await?;
     let to_install = install_requests(&result.missing);
-    installer.install(to_install).await?;
+    if let Err(err) = installer.install(to_install).await {
+        restore_lockfile(&lockfile_path, previous_lockfile).await?;
+        return Err(err);
+    }
     result.installed = result.missing.clone();
     result.missing = missing_items(&result.items).await?;
     Ok(result)
@@ -114,18 +119,7 @@ pub async fn refresh_lockfile(config_path: &Path) -> Result<PathBuf> {
 /// # Errors
 /// Fails when config cannot be found, read, parsed, or normalized.
 pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
-    let resolved = resolve_config_path(
-        &request.start_dir,
-        &request.home_dir,
-        ConfigSelection {
-            scope: if request.global {
-                ConfigScope::Global
-            } else {
-                ConfigScope::Project
-            },
-            for_write: false,
-        },
-    )?;
+    let resolved = selected_config_path(&request)?;
     let items = if !request.global && resolved.scope == ConfigScope::Project {
         sync_items_for_active_project_path(&resolved.path, &request.home_dir).await?
     } else {
@@ -148,6 +142,25 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
         missing,
         installed: Vec::new(),
     })
+}
+
+fn selected_config_path(request: &SyncRequest) -> Result<crate::config::ResolvedConfigPath> {
+    Ok(resolve_config_path(
+        &request.start_dir,
+        &request.home_dir,
+        ConfigSelection {
+            scope: if request.global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
+            for_write: false,
+        },
+    )?)
+}
+
+fn selected_lockfile_path(request: &SyncRequest) -> Result<PathBuf> {
+    Ok(lockfile_path(&selected_config_path(request)?.path))
 }
 
 async fn sync_items_for_path(config_path: &Path) -> Result<Vec<SyncItem>> {
@@ -212,6 +225,22 @@ async fn read_optional_lockfile(path: &std::path::Path) -> Result<Option<String>
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
+}
+
+async fn restore_lockfile(path: &Path, content: Option<String>) -> Result<()> {
+    match content {
+        Some(content) => tokio::fs::write(path, content)
+            .await
+            .with_context(|| format!("failed to restore {}", path.display()))?,
+        None => match tokio::fs::remove_file(path).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err).with_context(|| format!("failed to remove {}", path.display()));
+            }
+        },
+    }
+    Ok(())
 }
 
 fn lockfile_drift(existing: Option<&str>, desired: &str) -> Vec<SyncDrift> {
@@ -392,11 +421,15 @@ mod tests {
     #[derive(Default)]
     struct FakeInstaller {
         installed: Vec<InstallItemRequest>,
+        fail: bool,
     }
 
     impl SyncInstaller for FakeInstaller {
         async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
             self.installed.extend(items);
+            if self.fail {
+                return Err(anyhow::anyhow!("install failed"));
+            }
             Ok(())
         }
     }
@@ -952,6 +985,67 @@ mod tests {
             "still-test-definitely-missing"
         );
         assert_eq!(result.installed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sync_restores_existing_lockfile_when_install_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let lockfile_path = temp.path().join("still.lock.toml");
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nstill-test-definitely-missing = \"0.0.1\"\n",
+        )
+        .unwrap();
+        fs::write(&lockfile_path, "original lockfile\n").unwrap();
+        let mut installer = FakeInstaller {
+            fail: true,
+            ..FakeInstaller::default()
+        };
+
+        let err = run_with_installer(
+            SyncRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                global: false,
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "install failed");
+        assert_eq!(
+            fs::read_to_string(lockfile_path).unwrap(),
+            "original lockfile\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_removes_new_lockfile_when_install_fails_without_existing_lockfile() {
+        let temp = tempfile::tempdir().unwrap();
+        let lockfile_path = temp.path().join("still.lock.toml");
+        fs::write(
+            temp.path().join("still.toml"),
+            "[tools]\nstill-test-definitely-missing = \"0.0.1\"\n",
+        )
+        .unwrap();
+        let mut installer = FakeInstaller {
+            fail: true,
+            ..FakeInstaller::default()
+        };
+
+        run_with_installer(
+            SyncRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                global: false,
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(!lockfile_path.exists());
     }
 
     #[tokio::test]
