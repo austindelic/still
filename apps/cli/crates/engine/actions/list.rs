@@ -83,7 +83,7 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
         .await
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
-    let mut sections = sections_from_config(config, resolved.scope)?;
+    let mut sections = sections_from_config(config, resolved.scope, false)?;
     if !request.global && resolved.scope == ConfigScope::Project {
         merge_global_only_config_items(&mut sections, &request.home_dir).await?;
     }
@@ -117,7 +117,10 @@ async fn merge_global_only_config_items(
         }
     };
     let config = parse_still_toml(&content)?;
-    merge_global_only_items(sections, sections_from_config(config, ConfigScope::Global)?);
+    merge_global_only_items(
+        sections,
+        sections_from_config(config, ConfigScope::Global, false)?,
+    );
     Ok(())
 }
 
@@ -127,16 +130,26 @@ async fn merge_inactive_config_items(
     start_dir: &std::path::Path,
     home_dir: &std::path::Path,
 ) -> Result<()> {
-    if let Some(project_path) = find_project_config(start_dir)
-        && project_path != active_path
-    {
-        merge_config_path(sections, &project_path, ConfigScope::Project).await?;
+    if let Some(project_path) = find_project_config(start_dir) {
+        let include_inactive_platforms = project_path == active_path;
+        merge_config_path(
+            sections,
+            &project_path,
+            ConfigScope::Project,
+            include_inactive_platforms,
+        )
+        .await?;
     }
 
     let global_path = global_config_path(home_dir);
-    if global_path != active_path {
-        merge_config_path(sections, &global_path, ConfigScope::Global).await?;
-    }
+    let include_inactive_platforms = global_path == active_path;
+    merge_config_path(
+        sections,
+        &global_path,
+        ConfigScope::Global,
+        include_inactive_platforms,
+    )
+    .await?;
 
     Ok(())
 }
@@ -145,6 +158,7 @@ async fn merge_config_path(
     sections: &mut [ListSection],
     path: &std::path::Path,
     scope: ConfigScope,
+    include_inactive_platforms: bool,
 ) -> Result<()> {
     let content = match tokio::fs::read_to_string(path).await {
         Ok(content) => content,
@@ -152,11 +166,18 @@ async fn merge_config_path(
         Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
     };
     let config = parse_still_toml(&content)?;
-    merge_config_items(sections, sections_from_config(config, scope)?);
+    merge_config_items(
+        sections,
+        sections_from_config(config, scope, include_inactive_platforms)?,
+    );
     Ok(())
 }
 
-fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Result<Vec<ListSection>> {
+fn sections_from_config(
+    config: StillConfig,
+    scope: ConfigScope,
+    include_inactive_platforms: bool,
+) -> Result<Vec<ListSection>> {
     let platform = current_platform();
     Ok(vec![
         ListSection {
@@ -165,11 +186,23 @@ fn sections_from_config(config: StillConfig, scope: ConfigScope) -> Result<Vec<L
         },
         ListSection {
             kind: ItemKind::Package,
-            items: package_items(ItemKind::Package, config.packages, scope, platform)?,
+            items: package_items(
+                ItemKind::Package,
+                config.packages,
+                scope,
+                platform,
+                include_inactive_platforms,
+            )?,
         },
         ListSection {
             kind: ItemKind::App,
-            items: package_items(ItemKind::App, config.apps, scope, platform)?,
+            items: package_items(
+                ItemKind::App,
+                config.apps,
+                scope,
+                platform,
+                include_inactive_platforms,
+            )?,
         },
     ])
 }
@@ -224,6 +257,7 @@ fn package_items(
     map: PackageMap,
     scope: ConfigScope,
     platform: PlatformId,
+    include_inactive_platforms: bool,
 ) -> Result<Vec<ListItem>> {
     let mut items = BTreeMap::new();
     for name in map.latest {
@@ -251,7 +285,7 @@ fn package_items(
             package.ignore.as_deref(),
             package.only.as_deref(),
         )?;
-        if !filter.matches(platform) {
+        if !include_inactive_platforms && !filter.matches(platform) {
             continue;
         }
         let logical_name = name.clone();
@@ -581,6 +615,98 @@ mod tests {
         assert_eq!(
             result.sections[1].items,
             [item_with_logical_name("fd", "fd-find", "latest", None)]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_all_includes_project_items_inactive_on_current_platform() {
+        let temp = tempfile::tempdir().unwrap();
+        let other_platform = if cfg!(target_os = "windows") {
+            "linux"
+        } else {
+            "windows"
+        };
+        fs::write(
+            temp.path().join("still.toml"),
+            format!(
+                r#"
+                [packages.inactive-lib]
+                version = "latest"
+                only = "{other_platform}"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let active = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: false,
+        })
+        .await
+        .unwrap();
+        assert!(active.sections[1].items.is_empty());
+
+        let all = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            all: true,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            all.sections[1].items,
+            [item("inactive-lib", "latest", None)]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_global_all_includes_global_items_inactive_on_current_platform() {
+        let temp = tempfile::tempdir().unwrap();
+        let other_platform = if cfg!(target_os = "windows") {
+            "linux"
+        } else {
+            "windows"
+        };
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            &global,
+            format!(
+                r#"
+                [apps.platform-app]
+                version = "latest"
+                only = "{other_platform}"
+                "#
+            ),
+        )
+        .unwrap();
+
+        let active = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            all: false,
+        })
+        .await
+        .unwrap();
+        assert!(active.sections[2].items.is_empty());
+
+        let all = inspect(ListRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            all: true,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            all.sections[2].items,
+            [global_item("platform-app", "latest", None)]
         );
     }
 
