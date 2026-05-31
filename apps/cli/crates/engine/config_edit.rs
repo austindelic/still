@@ -32,6 +32,7 @@ pub fn add_install_items_with_force(
         })?;
 
     if !force {
+        reject_conflicting_request_items(items)?;
         reject_conflicting_install_items(&config, items)?;
     }
 
@@ -44,6 +45,29 @@ pub fn add_install_items_with_force(
     }
 
     Ok(doc.to_string())
+}
+
+fn reject_conflicting_request_items(items: &[InstallItemRequest]) -> EngineResult<()> {
+    for (index, item) in items.iter().enumerate() {
+        let Some(existing) = items[..index]
+            .iter()
+            .find(|existing| existing.kind == item.kind && existing.spec.name == item.spec.name)
+        else {
+            continue;
+        };
+
+        if install_items_match(existing, item) {
+            continue;
+        }
+
+        return Err(EngineError::Conflict {
+            message: format!(
+                "{} {} was requested more than once with a different version or backend; pass --force to update it",
+                item.kind, item.spec.name
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn reject_conflicting_install_items(
@@ -62,6 +86,13 @@ fn reject_conflicting_install_items(
         });
     }
     Ok(())
+}
+
+fn install_items_match(left: &InstallItemRequest, right: &InstallItemRequest) -> bool {
+    left.kind == right.kind
+        && left.spec.name == right.spec.name
+        && left.spec.version == right.spec.version
+        && left.spec.backend == right.spec.backend
 }
 
 fn existing_item_matches(
@@ -437,6 +468,36 @@ mod tests {
         let config = parse(&output);
         assert_eq!(config.packages.latest, ["openssl"]);
         assert_eq!(config.apps.latest, ["firefox"]);
+    }
+
+    #[test]
+    fn rejects_conflicting_duplicate_request_items_without_force() {
+        let err = add_install_items(
+            "",
+            &[
+                item(ItemKind::Package, "openssl"),
+                item(ItemKind::Package, "openssl@3@homebrew"),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("requested more than once"));
+        assert!(err.to_string().contains("--force"));
+    }
+
+    #[test]
+    fn allows_identical_duplicate_request_items() {
+        let output = add_install_items(
+            "",
+            &[
+                item(ItemKind::Package, "openssl"),
+                item(ItemKind::Package, "openssl"),
+            ],
+        )
+        .unwrap();
+
+        let config = parse(&output);
+        assert_eq!(config.packages.latest, ["openssl"]);
     }
 
     #[test]
