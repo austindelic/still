@@ -1,6 +1,7 @@
 //! Engine action for inspecting and syncing agent config.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -547,16 +548,19 @@ async fn validate_instructions_file(project_root: &Path, instructions: Option<&s
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
         NormalizedSkillSource::Official { .. } => Ok(()),
-        NormalizedSkillSource::GitHub { path: repo, .. } => {
+        NormalizedSkillSource::GitHub {
+            path: repo,
+            version,
+        } => {
             let url = format!("https://github.com/{repo}.git");
-            clone_skill_source(&url, path).await
+            clone_skill_source(&url, path, version.as_deref()).await
         }
         NormalizedSkillSource::Url { url, .. } if url.starts_with("file://") => {
             let source = PathBuf::from(url.trim_start_matches("file://"));
             copy_skill_source(&source, &path.join(CONTENT_DIR)).await
         }
-        NormalizedSkillSource::Url { url, .. } if is_git_source(url) => {
-            clone_skill_source(url, path).await
+        NormalizedSkillSource::Url { url, version } if is_git_source(url) => {
+            clone_skill_source(url, path, version.as_deref()).await
         }
         NormalizedSkillSource::Url { url, .. } => {
             download_skill_file(url, &path.join(CONTENT_DIR)).await
@@ -568,14 +572,13 @@ fn is_git_source(url: &str) -> bool {
     url.ends_with(".git") || url.starts_with("git@")
 }
 
-async fn clone_skill_source(url: &str, path: &Path) -> Result<()> {
+async fn clone_skill_source(url: &str, path: &Path, version: Option<&str>) -> Result<()> {
     let content_path = path.join(CONTENT_DIR);
     if tokio::fs::metadata(&content_path).await.is_ok() {
         tokio::fs::remove_dir_all(&content_path).await?;
     }
     let status = Command::new("git")
-        .args(["clone", "--depth", "1", url])
-        .arg(&content_path)
+        .args(git_clone_args(url, &content_path, version))
         .status()
         .with_context(|| format!("failed to run git clone for agent skill source {url}"))?;
     if !status.success() {
@@ -584,7 +587,39 @@ async fn clone_skill_source(url: &str, path: &Path) -> Result<()> {
         }
         .into());
     }
+    if let Some(version) = version {
+        let status = Command::new("git")
+            .args(git_checkout_args(&content_path, version))
+            .status()
+            .with_context(|| {
+                format!("failed to run git checkout for agent skill source {url}@{version}")
+            })?;
+        if !status.success() {
+            return Err(EngineError::Conflict {
+                message: format!("failed to checkout agent skill source {url}@{version}"),
+            }
+            .into());
+        }
+    }
     Ok(())
+}
+
+fn git_clone_args(url: &str, destination: &Path, version: Option<&str>) -> Vec<OsString> {
+    let mut args = vec![OsString::from("clone")];
+    if version.is_none() {
+        args.extend([OsString::from("--depth"), OsString::from("1")]);
+    }
+    args.extend([OsString::from(url), destination.as_os_str().to_owned()]);
+    args
+}
+
+fn git_checkout_args(destination: &Path, version: &str) -> Vec<OsString> {
+    vec![
+        OsString::from("-C"),
+        destination.as_os_str().to_owned(),
+        OsString::from("checkout"),
+        OsString::from(version),
+    ]
 }
 
 async fn download_skill_file(url: &str, destination: &Path) -> Result<()> {
@@ -898,6 +933,49 @@ mod tests {
         assert!(metadata.contains("source_kind = \"official\""));
         assert!(metadata.contains("source = \"rust-review\""));
         assert!(metadata.contains("version = \"v1.2.3\""));
+    }
+
+    #[test]
+    fn unpinned_git_skill_clone_uses_shallow_default_branch() {
+        let destination = Path::new(".agents/skills/repo/content");
+
+        let args = git_clone_args("https://github.com/owner/repo.git", destination, None);
+
+        assert_eq!(
+            os_args(&args),
+            [
+                "clone",
+                "--depth",
+                "1",
+                "https://github.com/owner/repo.git",
+                ".agents/skills/repo/content"
+            ]
+        );
+    }
+
+    #[test]
+    fn pinned_git_skill_clone_allows_commit_checkout() {
+        let destination = Path::new(".agents/skills/repo/content");
+
+        let clone_args = git_clone_args(
+            "https://github.com/owner/repo.git",
+            destination,
+            Some("abc123"),
+        );
+        let checkout_args = git_checkout_args(destination, "abc123");
+
+        assert_eq!(
+            os_args(&clone_args),
+            [
+                "clone",
+                "https://github.com/owner/repo.git",
+                ".agents/skills/repo/content"
+            ]
+        );
+        assert_eq!(
+            os_args(&checkout_args),
+            ["-C", ".agents/skills/repo/content", "checkout", "abc123"]
+        );
     }
 
     #[tokio::test]
@@ -1701,5 +1779,11 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    fn os_args(args: &[OsString]) -> Vec<String> {
+        args.iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
     }
 }
