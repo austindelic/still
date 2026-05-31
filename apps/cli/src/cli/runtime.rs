@@ -56,10 +56,10 @@ pub trait CliRuntime {
     fn agents(&mut self, operation: AgentsOperation) -> anyhow::Result<AgentsResult>;
 
     /// Runs a child command inside the managed environment.
-    fn run_command(&mut self, command: Vec<String>) -> anyhow::Result<RunResult>;
+    fn run_command(&mut self, command: Vec<String>, global: bool) -> anyhow::Result<RunResult>;
 
     /// Lists or runs configured tasks.
-    fn task(&mut self, name: Option<String>) -> anyhow::Result<TaskResult>;
+    fn task(&mut self, name: Option<String>, global: bool) -> anyhow::Result<TaskResult>;
 
     /// Generates shell activation code.
     fn activate(&mut self, shell: Option<String>) -> anyhow::Result<ActivateResult>;
@@ -75,6 +75,7 @@ pub trait CliRuntime {
         &mut self,
         operation: ServicesOperation,
         name: Option<String>,
+        global: bool,
     ) -> anyhow::Result<ServicesResult>;
 
     /// Marks the current project config trusted.
@@ -177,26 +178,28 @@ impl CliRuntime for RealRuntime {
         runtime.block_on(engine::actions::agents::run(request))
     }
 
-    fn run_command(&mut self, command: Vec<String>) -> anyhow::Result<RunResult> {
+    fn run_command(&mut self, command: Vec<String>, global: bool) -> anyhow::Result<RunResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = RunRequest {
             start_dir,
             home_dir,
+            global,
             command,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         runtime.block_on(engine::actions::run::run(request))
     }
 
-    fn task(&mut self, name: Option<String>) -> anyhow::Result<TaskResult> {
+    fn task(&mut self, name: Option<String>, global: bool) -> anyhow::Result<TaskResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))?;
         let request = TaskRequest {
             start_dir,
             home_dir,
+            global,
             name,
         };
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
@@ -243,6 +246,7 @@ impl CliRuntime for RealRuntime {
         &mut self,
         operation: ServicesOperation,
         name: Option<String>,
+        global: bool,
     ) -> anyhow::Result<ServicesResult> {
         let start_dir = std::env::current_dir()?;
         let home_dir =
@@ -250,6 +254,7 @@ impl CliRuntime for RealRuntime {
         let request = ServicesRequest {
             start_dir,
             home_dir,
+            global,
             operation,
             name,
         };

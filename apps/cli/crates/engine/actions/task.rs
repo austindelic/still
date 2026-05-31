@@ -6,7 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use crate::actions::run::resolve_env;
+use crate::actions::run::resolve_env_with_scope;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
 use crate::specs::toml::{ExpandedTask, ServiceEntry, TaskEntry, TaskRun, parse_still_toml};
@@ -17,6 +17,7 @@ use crate::trust::assert_config_trusted;
 pub struct TaskRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
     pub name: Option<String>,
 }
 
@@ -55,7 +56,11 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         &request.start_dir,
         &request.home_dir,
         ConfigSelection {
-            scope: ConfigScope::Project,
+            scope: if request.global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
             for_write: false,
         },
     )?;
@@ -81,11 +86,14 @@ pub async fn run(request: TaskRequest) -> Result<TaskResult> {
         }
         .into());
     }
-    assert_config_trusted(&resolved.path, content.as_bytes(), "task execution").await?;
+    if resolved.scope == ConfigScope::Project {
+        assert_config_trusted(&resolved.path, content.as_bytes(), "task execution").await?;
+    }
     let mut checked = BTreeSet::new();
     let mut visiting = BTreeSet::new();
     validate_task_graph(&tasks, &services, &name, &mut checked, &mut visiting)?;
-    let resolved_env = resolve_env(&request.start_dir, &request.home_dir).await?;
+    let resolved_env =
+        resolve_env_with_scope(&request.start_dir, &request.home_dir, resolved.scope).await?;
 
     let mut executions = Vec::new();
     let mut completed = BTreeSet::new();
@@ -316,6 +324,7 @@ mod tests {
         let result = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: None,
         })
         .await
@@ -338,6 +347,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_global_reads_global_config_when_project_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            "[tasks]\nproject = \"echo project\"\n",
+        )
+        .unwrap();
+        fs::write(&global, "[tasks]\nglobal = \"echo global\"\n").unwrap();
+
+        let result = run(TaskRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            name: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.tasks,
+            [TaskSummary {
+                name: "global".to_string(),
+                description: None,
+            }]
+        );
+        assert_eq!(result.path, global);
+    }
+
+    #[tokio::test]
+    async fn global_task_execution_uses_global_env_without_project_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            "[tasks]\nproject = \"echo project\"\n",
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            format!(
+                r#"
+                [env]
+                VALUE = "global"
+
+                [tasks]
+                global = "{}"
+                "#,
+                env_echo_command("VALUE")
+            ),
+        )
+        .unwrap();
+
+        let result = run(TaskRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            name: Some("global".to_string()),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.status, 0);
+        assert_eq!(result.executions[0].stdout.trim(), "global");
+    }
+
+    #[tokio::test]
     async fn task_reports_unknown_task() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
@@ -349,6 +431,7 @@ mod tests {
         let err = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("missing".to_string()),
         })
         .await
@@ -369,6 +452,7 @@ mod tests {
         let err = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await
@@ -389,6 +473,7 @@ mod tests {
         let result = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await
@@ -418,6 +503,7 @@ mod tests {
         let result = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await
@@ -441,6 +527,7 @@ mod tests {
         let result = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await
@@ -474,6 +561,7 @@ mod tests {
         let result = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("ci".to_string()),
         })
         .await
@@ -506,6 +594,7 @@ mod tests {
         let err = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("a".to_string()),
         })
         .await
@@ -532,6 +621,7 @@ mod tests {
         let err = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await
@@ -566,6 +656,7 @@ mod tests {
         let err = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await
@@ -596,6 +687,7 @@ mod tests {
         let result = run(TaskRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             name: Some("test".to_string()),
         })
         .await

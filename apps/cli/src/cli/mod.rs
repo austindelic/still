@@ -166,11 +166,15 @@ mod tests {
             panic!("agents should not run in these routing tests");
         }
 
-        fn run_command(&mut self, _command: Vec<String>) -> anyhow::Result<RunResult> {
+        fn run_command(
+            &mut self,
+            _command: Vec<String>,
+            _global: bool,
+        ) -> anyhow::Result<RunResult> {
             panic!("run_command should not run in these routing tests");
         }
 
-        fn task(&mut self, _name: Option<String>) -> anyhow::Result<TaskResult> {
+        fn task(&mut self, _name: Option<String>, _global: bool) -> anyhow::Result<TaskResult> {
             panic!("task should not run in these routing tests");
         }
 
@@ -196,6 +200,7 @@ mod tests {
             &mut self,
             _operation: ServicesOperation,
             _name: Option<String>,
+            _global: bool,
         ) -> anyhow::Result<ServicesResult> {
             panic!("services should not run in these routing tests");
         }

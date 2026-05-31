@@ -167,18 +167,20 @@ where
                 }
             }
         }
-        Command::Run(args) => match runtime.run_command(normalize_child_command(args.command)) {
-            Ok(result) => {
-                write_child_output(output, &result.stdout, false);
-                write_child_output(output, &result.stderr, true);
-                result.status
+        Command::Run(args) => {
+            match runtime.run_command(normalize_child_command(args.command), args.global) {
+                Ok(result) => {
+                    write_child_output(output, &result.stdout, false);
+                    write_child_output(output, &result.stderr, true);
+                    result.status
+                }
+                Err(e) => {
+                    output.error(&format!("run failed: {e}"));
+                    1
+                }
             }
-            Err(e) => {
-                output.error(&format!("run failed: {e}"));
-                1
-            }
-        },
-        Command::Task(args) => match runtime.task(args.name) {
+        }
+        Command::Task(args) => match runtime.task(args.name, args.global) {
             Ok(result) => {
                 if result.executions.is_empty() {
                     output.info(&format!("Config: {}", result.path.display()));
@@ -227,7 +229,7 @@ where
                     (engine::actions::services::ServicesOperation::Check, name)
                 }
             };
-            match runtime.services(operation, name) {
+            match runtime.services(operation, name, args.global) {
                 Ok(result) => {
                     output.info(&format!("Config: {}", result.path.display()));
                     for service in result.services {
@@ -539,14 +541,16 @@ mod tests {
         agents_operations: Vec<AgentsOperation>,
         run_result: Option<anyhow::Result<RunResult>>,
         run_commands: Vec<Vec<String>>,
+        run_globals: Vec<bool>,
         task_result: Option<anyhow::Result<TaskResult>>,
         task_names: Vec<Option<String>>,
+        task_globals: Vec<bool>,
         activate_result: Option<anyhow::Result<ActivateResult>>,
         activate_shells: Vec<Option<String>>,
         doctor_result: Option<anyhow::Result<DoctorResult>>,
         sync_result: Option<anyhow::Result<SyncResult>>,
         services_result: Option<anyhow::Result<ServicesResult>>,
-        services_requests: Vec<(ServicesOperation, Option<String>)>,
+        services_requests: Vec<(ServicesOperation, Option<String>, bool)>,
         trust_result: Option<anyhow::Result<TrustResult>>,
         uninstall_result: Option<anyhow::Result<UninstallResult>>,
         uninstall_targets: Vec<UninstallTarget>,
@@ -595,15 +599,17 @@ mod tests {
                 .expect("test runtime agents result was not configured")
         }
 
-        fn run_command(&mut self, command: Vec<String>) -> anyhow::Result<RunResult> {
+        fn run_command(&mut self, command: Vec<String>, global: bool) -> anyhow::Result<RunResult> {
             self.run_commands.push(command);
+            self.run_globals.push(global);
             self.run_result
                 .take()
                 .expect("test runtime run result was not configured")
         }
 
-        fn task(&mut self, name: Option<String>) -> anyhow::Result<TaskResult> {
+        fn task(&mut self, name: Option<String>, global: bool) -> anyhow::Result<TaskResult> {
             self.task_names.push(name);
+            self.task_globals.push(global);
             self.task_result
                 .take()
                 .expect("test runtime task result was not configured")
@@ -632,8 +638,9 @@ mod tests {
             &mut self,
             operation: ServicesOperation,
             name: Option<String>,
+            global: bool,
         ) -> anyhow::Result<ServicesResult> {
-            self.services_requests.push((operation, name));
+            self.services_requests.push((operation, name, global));
             self.services_result
                 .take()
                 .expect("test runtime services result was not configured")
@@ -675,8 +682,10 @@ mod tests {
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -721,8 +730,10 @@ mod tests {
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -769,8 +780,10 @@ config check failed: failed to parse still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -812,8 +825,10 @@ config check failed: failed to parse still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -859,8 +874,10 @@ init failed: still.toml already exists
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -904,8 +921,10 @@ RUST_LOG=debug
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -969,8 +988,10 @@ env failed: failed to read still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1025,8 +1046,10 @@ Apps:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1088,8 +1111,10 @@ list failed: failed to read still.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1160,8 +1185,10 @@ Skills:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1229,8 +1256,10 @@ Auto dependencies to add on sync:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1288,8 +1317,10 @@ agents sync needs --accept-auto-deps before writing auto dependencies
                 stderr: "warn\n".to_string(),
             })),
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1304,6 +1335,7 @@ agents sync needs --accept-auto-deps before writing auto dependencies
 
         let code = run_cli(
             Command::Run(crate::cli::args::RunArgs {
+                global: true,
                 command: vec![
                     "cargo".to_string(),
                     "test".to_string(),
@@ -1323,6 +1355,7 @@ agents sync needs --accept-auto-deps before writing auto dependencies
                 "--quiet".to_string()
             ]]
         );
+        assert_eq!(runtime.run_globals, [true]);
         insta::assert_snapshot!(output.stdout, @r###"
 hello
 world
@@ -1347,8 +1380,10 @@ warn
             agents_operations: Vec::new(),
             run_result: Some(Err(anyhow!("failed to run cargo"))),
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1363,6 +1398,7 @@ warn
 
         let code = run_cli(
             Command::Run(crate::cli::args::RunArgs {
+                global: false,
                 command: vec!["cargo".to_string()],
             }),
             &mut runtime,
@@ -1395,8 +1431,10 @@ run failed: failed to run cargo
                 stderr: String::new(),
             })),
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1411,6 +1449,7 @@ run failed: failed to run cargo
 
         let code = run_cli(
             Command::Run(crate::cli::args::RunArgs {
+                global: false,
                 command: vec![
                     "cargo".to_string(),
                     "test".to_string(),
@@ -1448,6 +1487,7 @@ run failed: failed to run cargo
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: Some(Ok(TaskResult {
                 path: PathBuf::from("/repo/still.toml"),
                 tasks: vec![
@@ -1464,6 +1504,7 @@ run failed: failed to run cargo
                 status: 0,
             })),
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1477,13 +1518,17 @@ run failed: failed to run cargo
         let mut output = BufferedOutput::default();
 
         let code = run_cli(
-            Command::Task(crate::cli::args::TaskArgs { name: None }),
+            Command::Task(crate::cli::args::TaskArgs {
+                global: true,
+                name: None,
+            }),
             &mut runtime,
             &mut output,
         );
 
         assert_eq!(code, 0);
         assert_eq!(runtime.task_names, [None]);
+        assert_eq!(runtime.task_globals, [true]);
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Tasks:
@@ -1508,6 +1553,7 @@ Tasks:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: Some(Ok(TaskResult {
                 path: PathBuf::from("/repo/still.toml"),
                 tasks: Vec::new(),
@@ -1521,6 +1567,7 @@ Tasks:
                 status: 2,
             })),
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1535,6 +1582,7 @@ Tasks:
 
         let code = run_cli(
             Command::Task(crate::cli::args::TaskArgs {
+                global: false,
                 name: Some("test".to_string()),
             }),
             &mut runtime,
@@ -1567,8 +1615,10 @@ failed
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: Some(Ok(ActivateResult {
                 shell: ShellKind::Posix,
                 code: "export PATH=\"/opt/still/bin:$PATH\"".to_string(),
@@ -1615,8 +1665,10 @@ export PATH="/opt/still/bin:$PATH"
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: Some(Err(anyhow!("unsupported shell"))),
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1659,8 +1711,10 @@ activate failed: unsupported shell
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: Some(Ok(DoctorResult {
@@ -1715,8 +1769,10 @@ activate failed: unsupported shell
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: Some(Err(anyhow!("home directory missing"))),
@@ -1757,8 +1813,10 @@ doctor failed: home directory missing
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1821,8 +1879,10 @@ Sync plan:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1874,8 +1934,10 @@ Sync plan:
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1898,6 +1960,7 @@ Sync plan:
 
         let code = run_cli(
             Command::Services(crate::cli::args::ServicesArgs {
+                global: true,
                 command: Some(ServicesCommand::Status {
                     name: Some("web".to_string()),
                 }),
@@ -1909,7 +1972,7 @@ Sync plan:
         assert_eq!(code, 0);
         assert_eq!(
             runtime.services_requests,
-            [(ServicesOperation::Status, Some("web".to_string()))]
+            [(ServicesOperation::Status, Some("web".to_string()), true)]
         );
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
@@ -1933,8 +1996,10 @@ web: configured - echo web
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -1962,6 +2027,7 @@ web: configured - echo web
 
         let code = run_cli(
             Command::Services(crate::cli::args::ServicesArgs {
+                global: false,
                 command: Some(ServicesCommand::Start {
                     name: Some("web".to_string()),
                 }),
@@ -1973,7 +2039,7 @@ web: configured - echo web
         assert_eq!(code, 0);
         assert_eq!(
             runtime.services_requests,
-            [(ServicesOperation::Start, Some("web".to_string()))]
+            [(ServicesOperation::Start, Some("web".to_string()), false)]
         );
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
@@ -1999,8 +2065,10 @@ web
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -2046,8 +2114,10 @@ Marker: /repo/.still/trust.toml
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -2111,8 +2181,10 @@ Removed artifact /opt/still/packages/openssl
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,
@@ -2172,8 +2244,10 @@ Removed artifact /opt/still/packages/openssl
             agents_operations: Vec::new(),
             run_result: None,
             run_commands: Vec::new(),
+            run_globals: Vec::new(),
             task_result: None,
             task_names: Vec::new(),
+            task_globals: Vec::new(),
             activate_result: None,
             activate_shells: Vec::new(),
             doctor_result: None,

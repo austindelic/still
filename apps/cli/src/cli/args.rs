@@ -187,6 +187,9 @@ pub struct DoctorArgs {}
 /// the user explicitly asks for shell execution.
 #[derive(clap::Args, Debug, Clone)]
 pub struct RunArgs {
+    /// Use the global Still config for environment resolution.
+    #[arg(short, long)]
+    pub global: bool,
     /// Child command and arguments to execute.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
     pub command: Vec<String>,
@@ -195,6 +198,9 @@ pub struct RunArgs {
 /// Arguments for task execution.
 #[derive(clap::Args, Debug, Clone)]
 pub struct TaskArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
     /// Task name. When omitted, Still lists configured tasks.
     pub name: Option<String>,
 }
@@ -202,6 +208,9 @@ pub struct TaskArgs {
 /// Arguments for service operations.
 #[derive(clap::Args, Debug, Clone)]
 pub struct ServicesArgs {
+    /// Use the global Still config.
+    #[arg(short, long)]
+    pub global: bool,
     #[command(subcommand)]
     pub command: Option<ServicesCommand>,
 }
@@ -381,12 +390,35 @@ For more information, try '--help'.
         };
         assert!(list.global);
 
+        let run = Cli::try_parse_from(["still", "run", "--global", "printenv", "PATH"])
+            .expect("run global args should parse");
+        let Some(Command::Run(run)) = run.command else {
+            panic!("expected run command");
+        };
+        assert!(run.global);
+        assert_eq!(run.command, ["printenv", "PATH"]);
+
         let sync = Cli::try_parse_from(["still", "sync", "--global"])
             .expect("sync global args should parse");
         let Some(Command::Sync(sync)) = sync.command else {
             panic!("expected sync command");
         };
         assert!(sync.global);
+
+        let task = Cli::try_parse_from(["still", "task", "--global", "lint"])
+            .expect("task global args should parse");
+        let Some(Command::Task(task)) = task.command else {
+            panic!("expected task command");
+        };
+        assert!(task.global);
+        assert_eq!(task.name.as_deref(), Some("lint"));
+
+        let services = Cli::try_parse_from(["still", "services", "--global", "status", "db"])
+            .expect("services global args should parse");
+        let Some(Command::Services(services)) = services.command else {
+            panic!("expected services command");
+        };
+        assert!(services.global);
     }
 
     #[test]
@@ -452,6 +484,7 @@ For more information, try '--help'.
             panic!("expected run command");
         };
 
+        assert!(!args.global);
         assert_eq!(args.command, ["cargo", "test", "--", "--quiet"]);
     }
 

@@ -18,6 +18,7 @@ use crate::utils::paths::PathOps;
 pub struct RunRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
     pub command: Vec<String>,
 }
 
@@ -41,7 +42,12 @@ pub async fn run(request: RunRequest) -> Result<RunResult> {
         .into());
     }
 
-    let resolved_env = resolve_env(&request.start_dir, &request.home_dir).await?;
+    let scope = if request.global {
+        ConfigScope::Global
+    } else {
+        ConfigScope::Project
+    };
+    let resolved_env = resolve_env_with_scope(&request.start_dir, &request.home_dir, scope).await?;
     let mut command = Command::new(&request.command[0]);
     command.args(&request.command[1..]);
     command.current_dir(resolved_env.working_dir);
@@ -239,12 +245,31 @@ mod tests {
         let err = run(RunRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             command: Vec::new(),
         })
         .await
         .unwrap_err();
 
         assert!(err.to_string().contains("run requires a command"));
+    }
+
+    #[tokio::test]
+    async fn run_can_resolve_global_env_when_project_config_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[env]\nVALUE = \"project\"\n").unwrap();
+        fs::write(&global, "[env]\nVALUE = \"global\"\n").unwrap();
+
+        let result = resolve_env_with_scope(&project, temp.path(), ConfigScope::Global)
+            .await
+            .unwrap();
+
+        assert_eq!(result.working_dir, global.parent().unwrap());
+        assert_eq!(result.vars["VALUE"], "global");
     }
 
     #[test]

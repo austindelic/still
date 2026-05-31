@@ -6,7 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use crate::actions::run::resolve_env;
+use crate::actions::run::resolve_env_with_scope;
 use crate::actions::task::{TaskRequest, run as run_task};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::error::EngineError;
@@ -27,6 +27,7 @@ pub enum ServicesOperation {
 pub struct ServicesRequest {
     pub start_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub global: bool,
     pub operation: ServicesOperation,
     pub name: Option<String>,
 }
@@ -74,7 +75,11 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
         &request.start_dir,
         &request.home_dir,
         ConfigSelection {
-            scope: ConfigScope::Project,
+            scope: if request.global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Project
+            },
             for_write: false,
         },
     )?;
@@ -88,13 +93,13 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
         .with_context(|| format!("failed to read {}", resolved.path.display()))?;
     let config = parse_still_toml(&content)?;
     let services = select_services(config.services, request.name.as_deref())?;
-    if request.operation != ServicesOperation::Status {
+    if request.operation != ServicesOperation::Status && resolved.scope == ConfigScope::Project {
         assert_config_trusted(&resolved.path, content.as_bytes(), "service actions").await?;
     }
     let resolved_env = if request.operation == ServicesOperation::Status {
         None
     } else {
-        Some(resolve_env(&request.start_dir, &request.home_dir).await?)
+        Some(resolve_env_with_scope(&request.start_dir, &request.home_dir, resolved.scope).await?)
     };
     let empty_env = BTreeMap::new();
     let mut reports = Vec::new();
@@ -116,6 +121,7 @@ pub async fn run(request: ServicesRequest) -> Result<ServicesResult> {
                 command_env,
                 &request.start_dir,
                 &request.home_dir,
+                request.global,
             )
             .await?,
         );
@@ -150,6 +156,7 @@ async fn service_report(
     env: &BTreeMap<String, String>,
     start_dir: &Path,
     home_dir: &Path,
+    global: bool,
 ) -> Result<ServiceReport> {
     let normalized = normalize_service(service);
     if operation == ServicesOperation::Status {
@@ -182,6 +189,7 @@ async fn service_report(
             let result = run_task(TaskRequest {
                 start_dir: start_dir.to_path_buf(),
                 home_dir: home_dir.to_path_buf(),
+                global,
                 name: Some(task.clone()),
             })
             .await?;
@@ -410,6 +418,7 @@ mod tests {
         let result = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: ServicesOperation::Status,
             name: None,
         })
@@ -426,6 +435,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn services_global_reads_global_config_when_project_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            "[services]\nproject = \"echo project\"\n",
+        )
+        .unwrap();
+        fs::write(&global, "[services]\nglobal = \"echo global\"\n").unwrap();
+
+        let result = run(ServicesRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            operation: ServicesOperation::Status,
+            name: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        assert_eq!(result.services.len(), 1);
+        assert_eq!(result.services[0].name, "global");
+    }
+
+    #[tokio::test]
+    async fn global_service_actions_use_global_env_without_project_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            "[services]\nproject = \"echo project\"\n",
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            format!(
+                r#"
+                [env]
+                VALUE = "global"
+
+                [services]
+                global = "{}"
+                "#,
+                env_echo_command("VALUE")
+            ),
+        )
+        .unwrap();
+
+        let result = run(ServicesRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            operation: ServicesOperation::Start,
+            name: Some("global".to_string()),
+        })
+        .await
+        .unwrap();
+
+        let execution = result.services[0].execution.as_ref().unwrap();
+        assert_eq!(execution.status, 0);
+        assert_eq!(execution.stdout.trim(), "global");
+    }
+
+    #[tokio::test]
     async fn services_reports_unknown_service() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
@@ -437,6 +517,7 @@ mod tests {
         let err = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: ServicesOperation::Check,
             name: Some("missing".to_string()),
         })
@@ -463,6 +544,7 @@ mod tests {
         let result = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: ServicesOperation::Start,
             name: Some("web".to_string()),
         })
@@ -495,6 +577,7 @@ mod tests {
         let result = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: ServicesOperation::Start,
             name: Some("web".to_string()),
         })
@@ -527,6 +610,7 @@ mod tests {
         let result = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: ServicesOperation::Start,
             name: Some("web".to_string()),
         })
@@ -588,6 +672,7 @@ mod tests {
         let err = run(ServicesRequest {
             start_dir: temp.path().to_path_buf(),
             home_dir: temp.path().to_path_buf(),
+            global: false,
             operation: ServicesOperation::Start,
             name: Some("web".to_string()),
         })
