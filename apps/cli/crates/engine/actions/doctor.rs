@@ -53,13 +53,17 @@ pub fn inspect(request: DoctorRequest) -> Result<DoctorResult> {
     if let Some(path) = project_config.as_deref() {
         checks.push(config_parse_check("project config syntax", path));
         checks.push(trust_check(path));
-        checks.push(lockfile_check(path));
+        checks.push(lockfile_check(path, &request.home_dir));
     }
     checks.push(global_config_check(&request.start_dir, &request.home_dir)?);
     let global_config = global_config_path(&request.home_dir);
     if global_config.is_file() {
         checks.push(config_parse_check("global config syntax", &global_config));
-        checks.push(named_lockfile_check("global lockfile", &global_config));
+        checks.push(named_lockfile_check(
+            "global lockfile",
+            &global_config,
+            &request.home_dir,
+        ));
     }
     checks.push(path_readiness_check("still root", &paths.root));
     checks.push(path_readiness_check("cache", &paths.cache));
@@ -128,11 +132,11 @@ fn config_parse_check(name: &str, path: &Path) -> DoctorCheck {
     }
 }
 
-fn lockfile_check(config_path: &Path) -> DoctorCheck {
-    named_lockfile_check("lockfile", config_path)
+fn lockfile_check(config_path: &Path, home_dir: &Path) -> DoctorCheck {
+    named_lockfile_check("lockfile", config_path, home_dir)
 }
 
-fn named_lockfile_check(name: &str, config_path: &Path) -> DoctorCheck {
+fn named_lockfile_check(name: &str, config_path: &Path, home_dir: &Path) -> DoctorCheck {
     let path = lockfile_path(config_path);
     if !path.exists() {
         return DoctorCheck {
@@ -151,7 +155,7 @@ fn named_lockfile_check(name: &str, config_path: &Path) -> DoctorCheck {
                     detail: format!("{}: {err}", path.display()),
                 };
             }
-            match expected_lockfile(config_path, &content) {
+            match expected_lockfile(config_path, home_dir, &content) {
                 Ok(expected) if expected == content => DoctorCheck {
                     name: name.to_string(),
                     status: DoctorStatus::Ok,
@@ -177,10 +181,27 @@ fn named_lockfile_check(name: &str, config_path: &Path) -> DoctorCheck {
     }
 }
 
-fn expected_lockfile(config_path: &Path, existing_lockfile: &str) -> Result<String> {
+fn expected_lockfile(
+    config_path: &Path,
+    home_dir: &Path,
+    existing_lockfile: &str,
+) -> Result<String> {
     let content = std::fs::read_to_string(config_path)?;
-    let config = parse_still_toml(&content)?;
-    let items = crate::actions::sync::sync_items(config)?;
+    let global_path = global_config_path(home_dir);
+    let items = if config_path == global_path {
+        let config = parse_still_toml(&content)?;
+        crate::actions::sync::sync_items(config)?
+    } else {
+        let global_content = match std::fs::read_to_string(&global_path) {
+            Ok(content) => Some(content),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
+        };
+        crate::actions::sync::sync_items_for_active_project_config(
+            &content,
+            global_content.as_deref(),
+        )?
+    };
     Ok(render_merged_lockfile(Some(existing_lockfile), &items))
 }
 
@@ -657,6 +678,33 @@ mod tests {
             .unwrap();
         assert_eq!(check.status, DoctorStatus::Warning);
         assert!(check.detail.contains("outdated"));
+    }
+
+    #[tokio::test]
+    async fn doctor_accepts_project_lockfile_with_global_only_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(&global, "[tools]\nrust = \"1.80.0\"\nnode = \"22\"\n").unwrap();
+        crate::actions::sync::refresh_active_lockfile(&project.join("still.toml"), temp.path())
+            .await
+            .unwrap();
+
+        let result = inspect(DoctorRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+        })
+        .unwrap();
+
+        let check = result
+            .checks
+            .iter()
+            .find(|check| check.name == "lockfile")
+            .unwrap();
+        assert_eq!(check.status, DoctorStatus::Ok);
     }
 
     #[test]

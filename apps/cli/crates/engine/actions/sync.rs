@@ -199,19 +199,32 @@ async fn sync_items_for_active_project_path(
     project_path: &Path,
     home_dir: &Path,
 ) -> Result<Vec<SyncItem>> {
-    let mut items = sync_items_for_path(project_path).await?;
+    let project_content = tokio::fs::read_to_string(project_path)
+        .await
+        .with_context(|| format!("failed to read {}", project_path.display()))?;
     let global_path = global_config_path(home_dir);
-    let global_items = match sync_items_for_path(&global_path).await {
-        Ok(items) => items,
-        Err(err)
-            if err
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
-        {
-            Vec::new()
+    let global_content = match tokio::fs::read_to_string(&global_path).await {
+        Ok(content) => Some(content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", global_path.display()));
         }
-        Err(err) => return Err(err),
     };
+
+    sync_items_for_active_project_config(&project_content, global_content.as_deref())
+}
+
+pub(crate) fn sync_items_for_active_project_config(
+    project_content: &str,
+    global_content: Option<&str>,
+) -> Result<Vec<SyncItem>> {
+    let project_config = parse_still_toml(project_content)?;
+    let mut items = sync_items(project_config)?;
+    let Some(global_content) = global_content else {
+        return Ok(items);
+    };
+    let global_config = parse_still_toml(global_content)?;
+    let global_items = sync_items(global_config)?;
     merge_global_only_items(&mut items, global_items);
     Ok(items)
 }
