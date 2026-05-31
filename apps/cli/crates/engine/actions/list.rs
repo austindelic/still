@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
+use crate::config::{
+    ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
+};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
@@ -81,7 +83,13 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
     let config = parse_still_toml(&content)?;
     let mut sections = sections_from_config(config, resolved.scope)?;
     if request.all {
-        merge_global_config_items(&mut sections, &resolved.path, &request.home_dir).await?;
+        merge_inactive_config_items(
+            &mut sections,
+            &resolved.path,
+            &request.start_dir,
+            &request.home_dir,
+        )
+        .await?;
         merge_installed_items(&mut sections, discover_installed_items().await?);
     }
 
@@ -91,22 +99,38 @@ pub async fn inspect(request: ListRequest) -> Result<ListResult> {
     })
 }
 
-async fn merge_global_config_items(
+async fn merge_inactive_config_items(
     sections: &mut [ListSection],
     active_path: &std::path::Path,
+    start_dir: &std::path::Path,
     home_dir: &std::path::Path,
 ) -> Result<()> {
-    let path = global_config_path(home_dir);
-    if path == active_path {
-        return Ok(());
+    if let Some(project_path) = find_project_config(start_dir)
+        && project_path != active_path
+    {
+        merge_config_path(sections, &project_path, ConfigScope::Project).await?;
     }
-    let content = match tokio::fs::read_to_string(&path).await {
+
+    let global_path = global_config_path(home_dir);
+    if global_path != active_path {
+        merge_config_path(sections, &global_path, ConfigScope::Global).await?;
+    }
+
+    Ok(())
+}
+
+async fn merge_config_path(
+    sections: &mut [ListSection],
+    path: &std::path::Path,
+    scope: ConfigScope,
+) -> Result<()> {
+    let content = match tokio::fs::read_to_string(path).await {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
     };
     let config = parse_still_toml(&content)?;
-    merge_config_items(sections, sections_from_config(config, ConfigScope::Global)?);
+    merge_config_items(sections, sections_from_config(config, scope)?);
     Ok(())
 }
 
@@ -701,6 +725,45 @@ mod tests {
             result.sections[2]
                 .items
                 .contains(&global_item("firefox", "latest", None))
+        );
+    }
+
+    #[tokio::test]
+    async fn list_global_all_merges_project_config_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
+        fs::write(
+            &global,
+            r#"
+            [tools]
+            node = "22"
+            "#,
+        )
+        .unwrap();
+
+        let result = inspect(ListRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            all: true,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        assert!(
+            result.sections[0]
+                .items
+                .contains(&global_item("node", "22", None))
+        );
+        assert!(
+            result.sections[0]
+                .items
+                .contains(&item("rust", "stable", None))
         );
     }
 
