@@ -151,6 +151,19 @@ fn validate_lockfile_item(index: usize, item: &LockfileItem) -> Result<()> {
     if !is_sha256_hex(&item.checksum) {
         bail!("lockfile item {index} has an invalid checksum");
     }
+    if item.outputs.is_empty() {
+        bail!("lockfile item {index} has no expected outputs");
+    }
+    if item.outputs.iter().any(|output| output.trim().is_empty()) {
+        bail!("lockfile item {index} has an empty output path");
+    }
+    if item
+        .linked_executables
+        .iter()
+        .any(|link| link.trim().is_empty())
+    {
+        bail!("lockfile item {index} has an empty linked executable path");
+    }
     Ok(())
 }
 
@@ -374,6 +387,51 @@ mod tests {
         let err = validate_lockfile(&content).unwrap_err();
 
         assert!(err.to_string().contains("invalid checksum"));
+    }
+
+    #[test]
+    fn rejects_lockfile_items_without_outputs() {
+        let content = format!(
+            r#"
+            [[items]]
+            kind = "package"
+            name = "openssl"
+            platform = "{}"
+            version = "latest"
+            source = "backend:auto"
+            checksum = "{}"
+            outputs = []
+            "#,
+            current_platform(),
+            "a".repeat(64)
+        );
+
+        let err = validate_lockfile(&content).unwrap_err();
+
+        assert!(err.to_string().contains("no expected outputs"));
+    }
+
+    #[test]
+    fn rejects_empty_lockfile_output_paths() {
+        let content = format!(
+            r#"
+            [[items]]
+            kind = "package"
+            name = "openssl"
+            platform = "{}"
+            version = "latest"
+            source = "backend:auto"
+            checksum = "{}"
+            outputs = [" "]
+            linked_executables = [""]
+            "#,
+            current_platform(),
+            "a".repeat(64)
+        );
+
+        let err = validate_lockfile(&content).unwrap_err();
+
+        assert!(err.to_string().contains("empty output path"));
     }
 
     fn item(kind: ItemKind, spec: &str) -> SyncItem {
