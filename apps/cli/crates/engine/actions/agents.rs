@@ -12,6 +12,7 @@ use crate::actions::sync::refresh_lockfile;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::add_install_items;
 use crate::error::EngineError;
+use crate::lockfile::lockfile_path;
 use crate::specs::agents::{
     NormalizedAgents, NormalizedSkill, NormalizedSkillSource, managed_skill_dir_name,
     managed_skills_gitignore, normalize_agents, parse_skill_dependency_specs,
@@ -142,19 +143,51 @@ pub async fn run_with_installer(
         missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
         auto_added = pending_auto_dependencies.clone();
         if !auto_added.is_empty() {
+            let lockfile_path = lockfile_path(&resolved.path);
+            let original_lockfile = read_optional_file(&lockfile_path).await?;
             let updated = add_install_items(&content, &auto_added)?;
             tokio::fs::write(&resolved.path, updated)
                 .await
                 .with_context(|| format!("failed to write {}", resolved.path.display()))?;
-            refresh_lockfile(&resolved.path).await?;
-            let updated_config = parse_still_toml(
+            if let Err(err) = refresh_lockfile(&resolved.path).await {
+                restore_auto_dependency_state(
+                    &resolved.path,
+                    &content,
+                    &lockfile_path,
+                    original_lockfile,
+                )
+                .await?;
+                return Err(err);
+            }
+            let updated_config = match parse_still_toml(
                 &tokio::fs::read_to_string(&resolved.path)
                     .await
                     .with_context(|| format!("failed to read {}", resolved.path.display()))?,
-            )?;
+            ) {
+                Ok(config) => config,
+                Err(err) => {
+                    restore_auto_dependency_state(
+                        &resolved.path,
+                        &content,
+                        &lockfile_path,
+                        original_lockfile,
+                    )
+                    .await?;
+                    return Err(err);
+                }
+            };
             missing_dependencies =
                 missing_skill_dependencies(&dependency_skills, &updated_config, false);
-            installer.install(auto_added.clone()).await?;
+            if let Err(err) = installer.install(auto_added.clone()).await {
+                restore_auto_dependency_state(
+                    &resolved.path,
+                    &content,
+                    &lockfile_path,
+                    original_lockfile,
+                )
+                .await?;
+                return Err(err.context("failed to install auto-added agent dependencies"));
+            }
         }
         prune_stale_managed_skills(&skills_dir, &agents.skills).await?;
         target_manifests =
@@ -663,6 +696,41 @@ where
     parse_skill_dependency_specs("manifest", values).map_err(serde::de::Error::custom)
 }
 
+async fn read_optional_file(path: &Path) -> Result<Option<String>> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+async fn restore_auto_dependency_state(
+    config_path: &Path,
+    original_config: &str,
+    lockfile_path: &Path,
+    original_lockfile: Option<String>,
+) -> Result<()> {
+    tokio::fs::write(config_path, original_config)
+        .await
+        .with_context(|| format!("failed to restore {}", config_path.display()))?;
+    match original_lockfile {
+        Some(content) => {
+            tokio::fs::write(lockfile_path, content)
+                .await
+                .with_context(|| format!("failed to restore {}", lockfile_path.display()))?;
+        }
+        None => match tokio::fs::remove_file(lockfile_path).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to remove {}", lockfile_path.display()));
+            }
+        },
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 struct ManagedSkillMetadata {
     name: String,
@@ -723,6 +791,18 @@ mod tests {
         async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
             self.installed.extend(items);
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FailingInstaller {
+        attempted: Vec<InstallItemRequest>,
+    }
+
+    impl AgentDependencyInstaller for FailingInstaller {
+        async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
+            self.attempted.extend(items);
+            Err(anyhow::anyhow!("installer failed"))
         }
     }
 
@@ -1050,6 +1130,46 @@ mod tests {
         assert!(lockfile.contains("name = \"cargo-nextest\""));
         assert!(lockfile.contains("name = \"llvm\""));
         assert!(lockfile.contains("name = \"zed\""));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_restores_config_and_lockfile_when_auto_dependency_install_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let lockfile_path = temp.path().join("still.lock.toml");
+        let config = r#"
+            [tools]
+            rust = { version = "stable", backend = "rustup" }
+
+            [agents]
+
+            [agents.skills]
+            rust-review = { auto = true, tools = ["cargo-nextest"] }
+        "#;
+        let lockfile = "[[items]]\nkind = \"tool\"\nname = \"rust\"\nplatform = \"macos\"\nversion = \"stable\"\n";
+        fs::write(&config_path, config).unwrap();
+        fs::write(&lockfile_path, lockfile).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        let mut installer = FailingInstaller::default();
+
+        let err = run_with_installer(
+            AgentsRequest {
+                start_dir: temp.path().to_path_buf(),
+                home_dir: temp.path().to_path_buf(),
+                operation: AgentsOperation::Sync,
+            },
+            &mut installer,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("failed to install auto-added agent dependencies")
+        );
+        assert_eq!(installer.attempted.len(), 1);
+        assert_eq!(fs::read_to_string(&config_path).unwrap(), config);
+        assert_eq!(fs::read_to_string(&lockfile_path).unwrap(), lockfile);
     }
 
     #[tokio::test]
