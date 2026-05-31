@@ -128,7 +128,7 @@ pub async fn run_with_installer(
     let mut missing_dependencies = missing_skill_dependencies(&dependency_skills, &config, false);
     let mut target_manifests = Vec::new();
     if request.operation == AgentsOperation::Check {
-        if has_url_skill_source(&agents.skills) {
+        if resolved.scope == ConfigScope::Project && has_url_skill_source(&agents.skills) {
             assert_config_trusted(
                 &resolved.path,
                 content.as_bytes(),
@@ -146,7 +146,9 @@ pub async fn run_with_installer(
         request.operation,
         AgentsOperation::Sync | AgentsOperation::SyncAcceptAutoDependencies
     ) {
-        assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
+        if resolved.scope == ConfigScope::Project {
+            assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
+        }
         let skills_dir = project_root.join(".agents").join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
         dependency_skills = skills_with_manifest_dependencies(&skills_dir, &agents.skills).await?;
@@ -1142,6 +1144,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agents_global_sync_uses_global_config_without_project_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            r#"
+            [agents]
+            skills = ["project-skill"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            r#"
+            [agents]
+            skills = ["global-skill"]
+            "#,
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let skills_dir = global.parent().unwrap().join(".agents/skills");
+        assert_eq!(result.path, global);
+        assert_eq!(result.gitignore_path, Some(skills_dir.join(".gitignore")));
+        assert!(skills_dir.join("global-skill/.still-managed").is_file());
+        assert!(!skills_dir.join("project-skill").exists());
+    }
+
+    #[tokio::test]
     async fn agents_sync_prunes_stale_managed_target_manifests_only() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
@@ -1752,6 +1794,55 @@ mod tests {
             err.to_string()
                 .contains("not trusted for external agent skill inspection")
         );
+    }
+
+    #[tokio::test]
+    async fn agents_global_check_reads_file_url_skill_manifest_without_project_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        let source = temp.path().join("source-skill");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(project.join("still.toml"), "[agents]\n").unwrap();
+        fs::write(source.join("SKILL.md"), "# Local skill\n").unwrap();
+        fs::write(
+            source.join("still.skill.toml"),
+            r#"
+            [dependencies]
+            tools = ["cargo-nextest"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            format!(
+                r#"
+                [agents.skills]
+                local-skill = {{ url = "file://{}", auto = true }}
+                "#,
+                source.display()
+            ),
+        )
+        .unwrap();
+
+        let result = run(AgentsRequest {
+            start_dir: project,
+            home_dir: temp.path().to_path_buf(),
+            global: true,
+            operation: AgentsOperation::Check,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.path, global);
+        assert_eq!(result.pending_auto_dependencies.len(), 1);
+        assert_eq!(
+            result.pending_auto_dependencies[0].spec.name,
+            "cargo-nextest"
+        );
+        assert!(!global.parent().unwrap().join(".agents/skills").exists());
     }
 
     #[tokio::test]
