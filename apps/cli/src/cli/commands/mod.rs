@@ -276,18 +276,18 @@ where
                     {
                         output.info("Auto-added dependencies:");
                         for item in result.auto_added {
-                            output.info(&format!("  {} {}", item.kind, item.spec.name));
+                            output.info(&format!("  {}", install_item_label(&item)));
                         }
                     } else if !result.pending_auto_dependencies.is_empty() {
                         output.info("Auto dependencies to add on sync:");
                         for item in result.pending_auto_dependencies {
-                            output.info(&format!("  {} {}", item.kind, item.spec.name));
+                            output.info(&format!("  {}", install_item_label(&item)));
                         }
                     }
                     if !result.missing_dependencies.is_empty() {
                         output.info("Missing skill dependencies:");
                         for item in result.missing_dependencies {
-                            output.info(&format!("  {} {}", item.kind, item.spec.name));
+                            output.info(&format!("  {}", install_item_label(&item)));
                         }
                     }
                     if let Some(path) = result.gitignore_path {
@@ -380,6 +380,19 @@ fn service_status_label(status: engine::actions::services::ServiceStatus) -> &'s
         engine::actions::services::ServiceStatus::Ok => "ok",
         engine::actions::services::ServiceStatus::Failed => "failed",
     }
+}
+
+fn install_item_label(item: &engine::actions::install::InstallItemRequest) -> String {
+    let backend = item
+        .spec
+        .backend
+        .as_ref()
+        .map(|backend| format!("@{backend}"))
+        .unwrap_or_default();
+    format!(
+        "{} {}@{}{}",
+        item.kind, item.spec.name, item.spec.version, backend
+    )
 }
 
 fn sync_drift_label(drift: engine::actions::sync::SyncDrift) -> &'static str {
@@ -1114,7 +1127,7 @@ Skills:
                 target_manifests: Vec::new(),
                 pending_auto_dependencies: vec![InstallItemRequest {
                     kind: ItemKind::Tool,
-                    spec: "cargo-nextest".parse().unwrap(),
+                    spec: "cargo-nextest@0.9.99@cargo".parse().unwrap(),
                 }],
                 auto_added: Vec::new(),
                 missing_dependencies: Vec::new(),
@@ -1153,7 +1166,7 @@ Instructions: AGENTS.md
 Skills:
   rust-review
 Auto dependencies to add on sync:
-  tool cargo-nextest
+  tool cargo-nextest@0.9.99@cargo
 "###);
         assert_eq!(output.stderr, "");
     }
