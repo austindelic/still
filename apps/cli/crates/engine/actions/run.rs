@@ -101,7 +101,8 @@ pub(crate) async fn resolve_env_with_scope(
     {
         vars.extend(config_vars);
     }
-    vars.insert("PATH".to_string(), managed_path());
+    let configured_path = vars.get("PATH").cloned();
+    vars.insert("PATH".to_string(), managed_path(configured_path.as_deref()));
 
     Ok(ResolvedRunEnv {
         working_dir: config_dir,
@@ -137,9 +138,11 @@ async fn load_env_vars(
     Ok(Some(vars))
 }
 
-fn managed_path() -> String {
+fn managed_path(configured: Option<&str>) -> String {
     let mut paths = vec![System::bin_dir()];
-    if let Some(existing) = std::env::var_os("PATH") {
+    if let Some(configured) = configured {
+        paths.extend(std::env::split_paths(configured));
+    } else if let Some(existing) = std::env::var_os("PATH") {
         paths.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(paths)
@@ -236,6 +239,25 @@ mod tests {
         let paths = std::env::split_paths(path).collect::<Vec<_>>();
 
         assert_eq!(paths.first(), Some(&System::bin_dir()));
+    }
+
+    #[tokio::test]
+    async fn run_env_prepends_still_bin_to_configured_path() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[env]\nPATH = \"project-bin\"\n",
+        )
+        .unwrap();
+
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
+        let path = result.vars.get("PATH").unwrap();
+        let paths = std::env::split_paths(path).collect::<Vec<_>>();
+
+        assert_eq!(paths.first(), Some(&System::bin_dir()));
+        assert_eq!(paths.get(1), Some(&PathBuf::from("project-bin")));
     }
 
     #[tokio::test]

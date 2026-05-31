@@ -87,15 +87,17 @@ async fn activation_vars(
             .await?
             .vars
     } else {
-        BTreeMap::from([("PATH".to_string(), managed_path())])
+        BTreeMap::from([("PATH".to_string(), managed_path(None))])
     };
     vars.insert("STILL_HOME".to_string(), root.display().to_string());
     Ok(vars)
 }
 
-fn managed_path() -> String {
+fn managed_path(configured: Option<&str>) -> String {
     let mut paths = vec![System::bin_dir()];
-    if let Some(existing) = std::env::var_os("PATH") {
+    if let Some(configured) = configured {
+        paths.extend(std::env::split_paths(configured));
+    } else if let Some(existing) = std::env::var_os("PATH") {
         paths.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(paths)
@@ -224,6 +226,25 @@ mod tests {
                 .code
                 .contains("export MESSAGE='hello '\"'\"'still'\"'\"''")
         );
+    }
+
+    #[tokio::test]
+    async fn activation_prepends_still_bin_to_configured_path() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[env]\nPATH = \"project-bin\"\n",
+        )
+        .unwrap();
+
+        let vars = activation_vars(temp.path(), temp.path(), &still_root(temp.path()), false)
+            .await
+            .unwrap();
+        let path = vars.get("PATH").unwrap();
+        let paths = std::env::split_paths(path).collect::<Vec<_>>();
+
+        assert_eq!(paths.first(), Some(&System::bin_dir()));
+        assert_eq!(paths.get(1), Some(&PathBuf::from("project-bin")));
     }
 
     #[tokio::test]
