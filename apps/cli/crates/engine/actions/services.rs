@@ -342,8 +342,8 @@ fn service_preset(name: &str) -> Option<ServicePreset> {
 
 fn action_command(action: ServiceAction) -> ActionCommand {
     match action {
-        ServiceAction::Task { task } => ActionCommand::Task(task),
-        ServiceAction::Command { command } => ActionCommand::Command(command),
+        ServiceAction::Task(action) => ActionCommand::Task(action.task),
+        ServiceAction::Command(action) => ActionCommand::Command(action.command),
     }
 }
 
@@ -357,8 +357,8 @@ fn action_detail(action: Option<&ActionCommand>) -> Option<String> {
 
 fn action_detail_ref(action: &ServiceAction) -> Option<String> {
     match action {
-        ServiceAction::Command { command } => Some(command.clone()),
-        ServiceAction::Task { task } => Some(format!("task:{task}")),
+        ServiceAction::Command(action) => Some(action.command.clone()),
+        ServiceAction::Task(action) => Some(format!("task:{}", action.task)),
     }
 }
 
@@ -562,9 +562,11 @@ mod tests {
     fn explicit_service_actions_override_presets() {
         let normalized = normalize_expanded_service(ExpandedService {
             preset: Some("docker-compose".to_string()),
-            check: Some(ServiceAction::Command {
-                command: "custom check".to_string(),
-            }),
+            check: Some(ServiceAction::Command(
+                crate::specs::toml::ServiceCommandAction {
+                    command: "custom check".to_string(),
+                },
+            )),
             ..ExpandedService::default()
         });
 

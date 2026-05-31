@@ -102,8 +102,20 @@ pub struct ExpandedService {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ServiceAction {
-    Task { task: String },
-    Command { command: String },
+    Task(ServiceTaskAction),
+    Command(ServiceCommandAction),
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceTaskAction {
+    pub task: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceCommandAction {
+    pub command: String,
 }
 
 /// Task config value.
@@ -436,6 +448,32 @@ mod tests {
             err.to_string()
                 .contains("service \"web\" must define preset, task, start, or check")
         );
+    }
+
+    #[test]
+    fn rejects_service_action_with_extra_fields() {
+        let err = parse_still_toml(
+            r#"
+            [services.web]
+            start = { task = "web:start", command = "npm run dev" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("failed to parse still.toml"));
+    }
+
+    #[test]
+    fn rejects_service_action_with_unknown_fields() {
+        let err = parse_still_toml(
+            r#"
+            [services.web]
+            start = { script = "npm run dev" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("failed to parse still.toml"));
     }
 
     #[test]
