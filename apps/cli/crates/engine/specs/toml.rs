@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use crate::error::EngineError;
 use crate::platform::PlatformId;
+use crate::specs::agents::normalize_agents;
 
 /// Parsed project or global Still config.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -236,6 +237,10 @@ fn validate_config(config: &StillConfig) -> Result<()> {
                 TaskRun::Command(_) | TaskRun::Commands(_) => {}
             }
         }
+    }
+
+    if let Some(agents) = &config.agents {
+        normalize_agents(agents.clone())?;
     }
 
     Ok(())
@@ -480,6 +485,35 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("app \"zed\" only contains unsupported platform \"freebsd\"")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_agent_targets_during_config_parse() {
+        let err = parse_still_toml(
+            r#"
+            [agents]
+            targets = ["claude", "unknown"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unsupported agent target"));
+    }
+
+    #[test]
+    fn rejects_invalid_agent_skill_dependencies_during_config_parse() {
+        let err = parse_still_toml(
+            r#"
+            [agents.skills]
+            rust-review = { source = "rust-review", tools = ["bad/tool"] }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("invalid agent skill tool dependency \"bad/tool\"")
         );
     }
 }
