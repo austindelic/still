@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
-use crate::lockfile::{lockfile_path, render_merged_lockfile, validate_lockfile};
+use crate::lockfile::{lockfile_path, render_merged_lockfile_for_config, validate_lockfile};
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::toml::parse_still_toml;
 use crate::trust::{TrustMarker, config_fingerprint, trust_marker_path};
@@ -202,7 +202,8 @@ fn expected_lockfile(
             global_content.as_deref(),
         )?
     };
-    Ok(render_merged_lockfile(Some(existing_lockfile), &items))
+    let config = parse_still_toml(&content)?;
+    render_merged_lockfile_for_config(Some(existing_lockfile), &items, &config, config_path)
 }
 
 fn trust_check(config_path: &Path) -> DoctorCheck {
@@ -385,6 +386,7 @@ fn platform_paths(home_dir: &Path) -> DoctorPaths {
 mod tests {
     use std::fs;
 
+    use crate::lockfile::render_merged_lockfile;
     use crate::trust::{config_fingerprint, trust_marker_path};
 
     use super::*;

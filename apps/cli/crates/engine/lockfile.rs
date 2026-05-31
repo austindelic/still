@@ -7,7 +7,11 @@ use serde::Deserialize;
 
 use crate::actions::sync::SyncItem;
 use crate::platform::{PlatformId, current_platform};
+use crate::specs::agents::{
+    NormalizedSkill, NormalizedSkillSource, managed_skill_dir_name, normalize_agents,
+};
 use crate::specs::item::{BackendId, ItemKind};
+use crate::specs::toml::StillConfig;
 use crate::system::System;
 use crate::utils::hashing::Hashing;
 use crate::utils::paths::PathOps;
@@ -30,13 +34,32 @@ pub fn render_lockfile(items: &[SyncItem]) -> String {
 
 /// Renders a lockfile that preserves valid entries for platforms other than the active host.
 pub fn render_merged_lockfile(existing: Option<&str>, items: &[SyncItem]) -> String {
+    render_merged_lockfile_entries(existing, lockfile_items(items))
+}
+
+/// Renders a merged lockfile including non-install agent skill state.
+pub fn render_merged_lockfile_for_config(
+    existing: Option<&str>,
+    items: &[SyncItem],
+    config: &StillConfig,
+    config_path: &Path,
+) -> Result<String> {
+    let mut entries = lockfile_items(items);
+    entries.extend(agent_skill_lockfile_items(config, config_path)?);
+    Ok(render_merged_lockfile_entries(existing, entries))
+}
+
+fn render_merged_lockfile_entries(
+    existing: Option<&str>,
+    current_entries: Vec<LockfileItem>,
+) -> String {
     let platform = current_platform().to_string();
     let mut entries = match existing {
         Some(existing) => parse_lockfile_items(existing),
         None => Vec::new(),
     };
     entries.retain(|item| item.platform != platform);
-    entries.extend(lockfile_items(items));
+    entries.extend(current_entries);
     render_lockfile_entries(&entries)
 }
 
@@ -97,6 +120,60 @@ fn lockfile_items(items: &[SyncItem]) -> Vec<LockfileItem> {
         .collect()
 }
 
+fn agent_skill_lockfile_items(
+    config: &StillConfig,
+    config_path: &Path,
+) -> Result<Vec<LockfileItem>> {
+    let Some(agents) = config.agents.clone() else {
+        return Ok(Vec::new());
+    };
+    let agents = normalize_agents(agents)?;
+    let root = config_path.parent().unwrap_or_else(|| Path::new("."));
+    agents
+        .skills
+        .iter()
+        .map(|skill| agent_skill_lockfile_item(skill, root))
+        .collect()
+}
+
+fn agent_skill_lockfile_item(skill: &NormalizedSkill, root: &Path) -> Result<LockfileItem> {
+    let source = agent_skill_source_identity(skill);
+    let version = agent_skill_version(skill);
+    let output = root
+        .join(".agents")
+        .join("skills")
+        .join(managed_skill_dir_name(&skill.name)?);
+    Ok(LockfileItem {
+        kind: "agent-skill".to_string(),
+        name: skill.name.clone(),
+        platform: current_platform().to_string(),
+        version: version.clone(),
+        backend: None,
+        checksum: agent_skill_checksum(skill, &source, &version),
+        source,
+        outputs: vec![output.display().to_string()],
+        linked_executables: Vec::new(),
+    })
+}
+
+fn agent_skill_source_identity(skill: &NormalizedSkill) -> String {
+    match &skill.source {
+        NormalizedSkillSource::Official { name, .. } => format!("official:{name}"),
+        NormalizedSkillSource::GitHub { path, .. } => format!("github:{path}"),
+        NormalizedSkillSource::Url { url, .. } => format!("url:{url}"),
+    }
+}
+
+fn agent_skill_version(skill: &NormalizedSkill) -> String {
+    match &skill.source {
+        NormalizedSkillSource::Official { version, .. }
+        | NormalizedSkillSource::GitHub { version, .. }
+        | NormalizedSkillSource::Url { version, .. } => {
+            version.clone().unwrap_or_else(|| "latest".to_string())
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct Lockfile {
     #[serde(default)]
@@ -128,9 +205,11 @@ fn validate_lockfile_item(index: usize, item: &LockfileItem) -> Result<()> {
     if item.name.trim().is_empty() {
         bail!("lockfile item {index} has an empty name");
     }
-    item.kind
-        .parse::<ItemKind>()
-        .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid kind: {err}"))?;
+    if item.kind != "agent-skill" {
+        item.kind
+            .parse::<ItemKind>()
+            .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid kind: {err}"))?;
+    }
     item.platform
         .parse::<PlatformId>()
         .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid platform: {err}"))?;
@@ -224,9 +303,26 @@ fn desired_state_checksum(item: &SyncItem, source: &str) -> String {
     Hashing::sha256(identity.as_bytes())
 }
 
+fn agent_skill_checksum(skill: &NormalizedSkill, source: &str, version: &str) -> String {
+    let identity = format!(
+        "agent-skill\n{}\n{}\n{}\n{}\n{}\n{:?}\n{:?}\n{:?}\n{}\n",
+        skill.name,
+        current_platform(),
+        version,
+        source,
+        skill.auto,
+        skill.tools,
+        skill.packages,
+        skill.apps,
+        agent_skill_source_identity(skill)
+    );
+    Hashing::sha256(identity.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::specs::item::ItemKind;
+    use crate::specs::toml::parse_still_toml;
 
     use super::*;
 
@@ -246,6 +342,27 @@ mod tests {
         assert!(output.contains("outputs = ["));
         assert!(output.contains("linked_executables = []"));
         assert!(output.contains("kind = \"package\""));
+    }
+
+    #[test]
+    fn renders_agent_skills_as_lockfile_items() {
+        let config = parse_still_toml(
+            r#"
+            [agents.skills]
+            rust-review = { url = "https://example.com/rust-review", version = "v1.2.3", auto = true, tools = ["cargo-nextest"] }
+            "#,
+        )
+        .unwrap();
+        let config_path = Path::new("/repo/still.toml");
+
+        let output = render_merged_lockfile_for_config(None, &[], &config, config_path).unwrap();
+
+        assert!(output.contains("kind = \"agent-skill\""));
+        assert!(output.contains("name = \"rust-review\""));
+        assert!(output.contains("version = \"v1.2.3\""));
+        assert!(output.contains("source = \"url:https://example.com/rust-review\""));
+        assert!(output.contains("outputs = [\"/repo/.agents/skills/rust-review\"]"));
+        validate_lockfile(&output).unwrap();
     }
 
     #[test]
