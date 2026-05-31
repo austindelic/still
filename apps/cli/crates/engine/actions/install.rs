@@ -3,6 +3,9 @@
 use crate::error::EngineError;
 use crate::platform::{PlatformId, current_platform};
 use crate::registries::specs::tool::ToolSpec;
+use crate::specs::backend::{
+    default_backend, normalize_auto_backend as normalize_backend_selection,
+};
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::system::{Linux, MacOS, System, Windows};
@@ -377,12 +380,11 @@ struct ToolInstallCommand {
 }
 
 fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand> {
-    let backend = item
-        .spec
-        .backend
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(default_tool_backend);
+    let backend = install_backend(
+        ItemKind::Tool,
+        item.spec.backend.as_ref().map(|backend| backend.as_str()),
+        current_platform(),
+    );
     tool_install_command_for_backend(&item.spec.name, item.spec.version.as_str(), &backend)
 }
 
@@ -391,7 +393,7 @@ fn tool_install_command_for_backend(
     version: &str,
     backend: &str,
 ) -> Result<ToolInstallCommand> {
-    let normalized = normalize_auto_backend(backend, default_tool_backend);
+    let normalized = install_backend(ItemKind::Tool, Some(backend), current_platform());
     match normalized.as_str() {
         "rustup" => Ok(ToolInstallCommand {
             backend: "rustup".to_string(),
@@ -471,10 +473,6 @@ fn tool_install_command_for_backend(
     }
 }
 
-fn default_tool_backend() -> String {
-    "homebrew".to_string()
-}
-
 fn package_with_version(name: &str, version: &str) -> String {
     if version == "latest" {
         name.to_string()
@@ -548,17 +546,16 @@ struct PackageInstallCommand {
 }
 
 fn package_install_command(item: &InstallItemRequest) -> Result<PackageInstallCommand> {
-    let backend = item
-        .spec
-        .backend
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(default_package_backend);
+    let backend = install_backend(
+        ItemKind::Package,
+        item.spec.backend.as_ref().map(|backend| backend.as_str()),
+        current_platform(),
+    );
     package_install_command_for_backend(&item.spec.name, &backend)
 }
 
 fn package_install_command_for_backend(name: &str, backend: &str) -> Result<PackageInstallCommand> {
-    let normalized = normalize_auto_backend(backend, default_package_backend);
+    let normalized = install_backend(ItemKind::Package, Some(backend), current_platform());
     package_install_command_for_platform(name, &normalized, current_platform())
 }
 
@@ -686,17 +683,16 @@ struct AppInstallCommand {
 }
 
 fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
-    let backend = item
-        .spec
-        .backend
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(default_app_backend);
+    let backend = install_backend(
+        ItemKind::App,
+        item.spec.backend.as_ref().map(|backend| backend.as_str()),
+        current_platform(),
+    );
     app_install_command_for_backend(&item.spec.name, &backend)
 }
 
 fn app_install_command_for_backend(name: &str, backend: &str) -> Result<AppInstallCommand> {
-    let normalized = normalize_auto_backend(backend, default_app_backend);
+    let normalized = install_backend(ItemKind::App, Some(backend), current_platform());
     app_install_command_for_platform(name, &normalized, current_platform())
 }
 
@@ -768,30 +764,6 @@ fn app_install_command_for_platform(
     }
 }
 
-fn normalize_auto_backend(backend: &str, default_backend: impl FnOnce() -> String) -> String {
-    let trimmed = backend.trim();
-    if trimmed.is_empty() || trimmed == "auto" {
-        default_backend()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn default_app_backend() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        "homebrew-cask".to_string()
-    }
-    #[cfg(target_os = "linux")]
-    {
-        "flatpak".to_string()
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "winget".to_string()
-    }
-}
-
 fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
     Err(EngineError::UnsupportedPlatform {
         feature: format!("app backend {backend}"),
@@ -800,27 +772,21 @@ fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
     .into())
 }
 
-fn default_package_backend() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        "homebrew".to_string()
-    }
-    #[cfg(target_os = "linux")]
-    {
-        "apt".to_string()
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "winget".to_string()
-    }
-}
-
 fn unsupported_package_backend(backend: &str) -> Result<PackageInstallCommand> {
     Err(EngineError::UnsupportedPlatform {
         feature: format!("package backend {backend}"),
         platform: std::env::consts::OS.to_string(),
     }
     .into())
+}
+
+fn install_backend(kind: ItemKind, backend: Option<&str>, platform: PlatformId) -> String {
+    let backend = backend.and_then(|backend| {
+        let trimmed = backend.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    });
+    normalize_backend_selection(kind, backend, platform)
+        .unwrap_or_else(|| default_backend(kind, platform).to_string())
 }
 
 async fn write_install_marker(
@@ -1351,6 +1317,18 @@ mod tests {
         assert_eq!(command.backend, "flatpak");
         #[cfg(target_os = "windows")]
         assert_eq!(command.backend, "winget");
+    }
+
+    #[test]
+    fn install_backend_treats_empty_backend_as_platform_default() {
+        assert_eq!(
+            install_backend(ItemKind::App, Some(" "), PlatformId::Linux),
+            "flatpak"
+        );
+        assert_eq!(
+            install_backend(ItemKind::Package, None, PlatformId::Windows),
+            "winget"
+        );
     }
 
     #[test]
