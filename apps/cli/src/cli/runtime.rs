@@ -525,6 +525,7 @@ mod tests {
                 version: version.parse().unwrap(),
                 backend: backend.map(|backend| backend.parse().unwrap()),
             },
+            tool: Default::default(),
         }
     }
 

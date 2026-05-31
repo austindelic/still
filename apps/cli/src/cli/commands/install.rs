@@ -135,6 +135,7 @@ fn push_items(items: &mut Vec<InstallItemRequest>, kind: ItemKind, specs: Vec<To
             version: spec.version.parse().expect("validated ToolSpec version"),
             backend: spec.backend,
         },
+        tool: Default::default(),
     }));
 }
 

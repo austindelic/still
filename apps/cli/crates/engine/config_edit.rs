@@ -747,6 +747,7 @@ mod tests {
         InstallItemRequest {
             kind,
             spec: spec.parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         }
     }
 

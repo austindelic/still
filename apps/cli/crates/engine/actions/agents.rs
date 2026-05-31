@@ -272,6 +272,7 @@ fn extend_missing(
             items.push(InstallItemRequest {
                 kind,
                 spec: spec.clone(),
+                tool: Default::default(),
             });
         }
     }

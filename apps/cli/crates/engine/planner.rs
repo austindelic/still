@@ -95,6 +95,7 @@ mod tests {
         InstallItemRequest {
             kind,
             spec: spec.parse().unwrap(),
+            tool: Default::default(),
         }
     }
 }

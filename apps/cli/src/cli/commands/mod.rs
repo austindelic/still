@@ -1134,6 +1134,7 @@ Skills:
                 pending_auto_dependencies: vec![InstallItemRequest {
                     kind: ItemKind::Tool,
                     spec: "cargo-nextest@0.9.99@cargo".parse().unwrap(),
+                    tool: Default::default(),
                 }],
                 auto_added: Vec::new(),
                 missing_dependencies: Vec::new(),
@@ -2170,6 +2171,7 @@ Removed artifact /opt/still/packages/openssl
             kind,
             logical_name: parsed.name.clone(),
             spec: parsed,
+            tool: Default::default(),
             desired_state: spec.to_string(),
         }
     }

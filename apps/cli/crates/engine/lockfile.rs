@@ -440,6 +440,7 @@ mod tests {
             kind,
             logical_name: parsed.name.clone(),
             spec: parsed,
+            tool: Default::default(),
             desired_state: spec.to_string(),
         }
     }

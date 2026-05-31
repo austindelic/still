@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::actions::install::{InstallItemRequest, InstallRequest};
+use crate::actions::install::{InstallItemRequest, InstallRequest, ToolInstallOptions};
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::error::EngineError;
 use crate::lockfile::{lockfile_path, render_merged_lockfile};
@@ -40,6 +40,7 @@ pub struct SyncItem {
     pub kind: ItemKind,
     pub logical_name: String,
     pub spec: ItemSpec,
+    pub tool: ToolInstallOptions,
     pub desired_state: String,
 }
 
@@ -238,6 +239,7 @@ fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
         .map(|item| InstallItemRequest {
             kind: item.kind,
             spec: item.spec.clone(),
+            tool: item.tool.clone(),
         })
         .collect()
 }
@@ -298,10 +300,12 @@ pub(crate) fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
     let mut items = Vec::new();
     for (name, entry) in config.tools {
         let desired_state = format!("tool:{name}:{entry:?}");
+        let (spec, tool) = tool_spec(name.clone(), entry, platform)?;
         items.push(SyncItem {
             kind: ItemKind::Tool,
             logical_name: name.clone(),
-            spec: tool_spec(name, entry, platform)?,
+            spec,
+            tool,
             desired_state,
         });
     }
@@ -310,20 +314,33 @@ pub(crate) fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
     Ok(items)
 }
 
-fn tool_spec(name: String, entry: ToolEntry, platform: PlatformId) -> Result<ItemSpec> {
+fn tool_spec(
+    name: String,
+    entry: ToolEntry,
+    platform: PlatformId,
+) -> Result<(ItemSpec, ToolInstallOptions)> {
     match entry {
-        ToolEntry::Version(version) => item_spec(name, version, None),
+        ToolEntry::Version(version) => Ok((
+            item_spec(name, version, None)?,
+            ToolInstallOptions::default(),
+        )),
         ToolEntry::Expanded(tool) => {
             let version = if tool.version.is_empty() {
                 "latest".to_string()
             } else {
                 tool.version
             };
-            item_spec(
-                name,
-                version,
-                backend_for_platform(ItemKind::Tool, tool.backend, tool.backends, platform)?,
-            )
+            Ok((
+                item_spec(
+                    name,
+                    version,
+                    backend_for_platform(ItemKind::Tool, tool.backend, tool.backends, platform)?,
+                )?,
+                ToolInstallOptions {
+                    components: tool.components,
+                    targets: tool.targets,
+                },
+            ))
         }
     }
 }
@@ -342,6 +359,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
                 "latest".to_string(),
                 latest_backend_for_kind(kind, platform),
             )?,
+            tool: ToolInstallOptions::default(),
             desired_state,
         });
     }
@@ -369,6 +387,7 @@ fn package_items(kind: ItemKind, map: PackageMap, platform: PlatformId) -> Resul
                 package.version.unwrap_or_else(|| "latest".to_string()),
                 backend_for_platform(kind, package.backend, package.backends, platform)?,
             )?,
+            tool: ToolInstallOptions::default(),
             desired_state,
         });
     }
@@ -690,6 +709,8 @@ mod tests {
             .unwrap();
         assert!(rust.desired_state.contains("rustfmt"));
         assert!(rust.desired_state.contains("wasm32-unknown-unknown"));
+        assert_eq!(rust.tool.components, ["rustfmt", "clippy"]);
+        assert_eq!(rust.tool.targets, ["wasm32-unknown-unknown"]);
     }
 
     #[tokio::test]

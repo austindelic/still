@@ -54,6 +54,14 @@ pub trait InstallOps {
 pub struct InstallItemRequest {
     pub kind: ItemKind,
     pub spec: ItemSpec,
+    pub tool: ToolInstallOptions,
+}
+
+/// Tool-specific install extras from expanded tool config.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolInstallOptions {
+    pub components: Vec<String>,
+    pub targets: Vec<String>,
 }
 
 /// Request to install parsed tool/package/app specs.
@@ -334,19 +342,21 @@ fn should_use_tool_command_backend(item: &InstallItemRequest) -> bool {
 
 async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallResult> {
     let command = tool_install_command(item)?;
-    let output = Command::new(&command.program)
-        .args(&command.args)
-        .output()
-        .with_context(|| format!("failed to run tool backend {}", command.backend))?;
-    if !output.status.success() {
-        return Err(EngineError::Conflict {
-            message: format!(
-                "tool backend {} failed: {}",
-                command.backend,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
+    for step in command.steps() {
+        let output = Command::new(&step.program)
+            .args(&step.args)
+            .output()
+            .with_context(|| format!("failed to run tool backend {}", command.backend))?;
+        if !output.status.success() {
+            return Err(EngineError::Conflict {
+                message: format!(
+                    "tool backend {} failed: {}",
+                    command.backend,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            }
+            .into());
         }
-        .into());
     }
 
     let install_path = System::tool_dir()
@@ -377,6 +387,24 @@ struct ToolInstallCommand {
     backend: String,
     program: String,
     args: Vec<String>,
+    after: Vec<ToolInstallStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolInstallStep {
+    program: String,
+    args: Vec<String>,
+}
+
+impl ToolInstallCommand {
+    fn steps(&self) -> Vec<ToolInstallStep> {
+        let mut steps = vec![ToolInstallStep {
+            program: self.program.clone(),
+            args: self.args.clone(),
+        }];
+        steps.extend(self.after.clone());
+        steps
+    }
 }
 
 fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand> {
@@ -385,13 +413,19 @@ fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand>
         item.spec.backend.as_ref().map(|backend| backend.as_str()),
         current_platform(),
     );
-    tool_install_command_for_backend(&item.spec.name, item.spec.version.as_str(), &backend)
+    tool_install_command_for_backend(
+        &item.spec.name,
+        item.spec.version.as_str(),
+        &backend,
+        &item.tool,
+    )
 }
 
 fn tool_install_command_for_backend(
     name: &str,
     version: &str,
     backend: &str,
+    options: &ToolInstallOptions,
 ) -> Result<ToolInstallCommand> {
     let normalized = install_backend(ItemKind::Tool, Some(backend), current_platform());
     match normalized.as_str() {
@@ -403,8 +437,10 @@ fn tool_install_command_for_backend(
                 "install".to_string(),
                 version.to_string(),
             ],
+            after: rustup_extra_steps(version, options),
         }),
         "cargo" => {
+            reject_tool_extras(&normalized, options)?;
             let mut args = vec!["install".to_string(), name.to_string()];
             if version != "latest" {
                 args.extend(["--version".to_string(), version.to_string()]);
@@ -413,64 +449,127 @@ fn tool_install_command_for_backend(
                 backend: "cargo".to_string(),
                 program: "cargo".to_string(),
                 args,
+                after: Vec::new(),
             })
         }
-        "npm" => Ok(ToolInstallCommand {
-            backend: "npm".to_string(),
-            program: "npm".to_string(),
-            args: vec![
-                "install".to_string(),
-                "--global".to_string(),
-                package_with_version(name, version),
-            ],
-        }),
-        "pnpm" => Ok(ToolInstallCommand {
-            backend: "pnpm".to_string(),
-            program: "pnpm".to_string(),
-            args: vec![
-                "add".to_string(),
-                "--global".to_string(),
-                package_with_version(name, version),
-            ],
-        }),
-        "yarn" => Ok(ToolInstallCommand {
-            backend: "yarn".to_string(),
-            program: "yarn".to_string(),
-            args: vec![
-                "global".to_string(),
-                "add".to_string(),
-                package_with_version(name, version),
-            ],
-        }),
-        "pipx" => Ok(ToolInstallCommand {
-            backend: "pipx".to_string(),
-            program: "pipx".to_string(),
-            args: vec![
-                "install".to_string(),
-                python_package_with_version(name, version),
-            ],
-        }),
-        "mise" => Ok(ToolInstallCommand {
-            backend: "mise".to_string(),
-            program: "mise".to_string(),
-            args: vec!["install".to_string(), format!("{name}@{version}")],
-        }),
-        "asdf" => Ok(ToolInstallCommand {
-            backend: "asdf".to_string(),
-            program: "asdf".to_string(),
-            args: vec!["install".to_string(), name.to_string(), version.to_string()],
-        }),
-        "aqua" => Ok(ToolInstallCommand {
-            backend: "aqua".to_string(),
-            program: "aqua".to_string(),
-            args: vec!["install".to_string(), package_with_version(name, version)],
-        }),
+        "npm" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "npm".to_string(),
+                program: "npm".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    "--global".to_string(),
+                    package_with_version(name, version),
+                ],
+                after: Vec::new(),
+            })
+        }
+        "pnpm" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "pnpm".to_string(),
+                program: "pnpm".to_string(),
+                args: vec![
+                    "add".to_string(),
+                    "--global".to_string(),
+                    package_with_version(name, version),
+                ],
+                after: Vec::new(),
+            })
+        }
+        "yarn" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "yarn".to_string(),
+                program: "yarn".to_string(),
+                args: vec![
+                    "global".to_string(),
+                    "add".to_string(),
+                    package_with_version(name, version),
+                ],
+                after: Vec::new(),
+            })
+        }
+        "pipx" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "pipx".to_string(),
+                program: "pipx".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    python_package_with_version(name, version),
+                ],
+                after: Vec::new(),
+            })
+        }
+        "mise" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "mise".to_string(),
+                program: "mise".to_string(),
+                args: vec!["install".to_string(), format!("{name}@{version}")],
+                after: Vec::new(),
+            })
+        }
+        "asdf" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "asdf".to_string(),
+                program: "asdf".to_string(),
+                args: vec!["install".to_string(), name.to_string(), version.to_string()],
+                after: Vec::new(),
+            })
+        }
+        "aqua" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "aqua".to_string(),
+                program: "aqua".to_string(),
+                args: vec!["install".to_string(), package_with_version(name, version)],
+                after: Vec::new(),
+            })
+        }
         "homebrew" | "brew" => Err(EngineError::Conflict {
             message: "homebrew tool installs use the Still-managed bottle installer".to_string(),
         }
         .into()),
         _ => unsupported_tool_backend(&normalized),
     }
+}
+
+fn rustup_extra_steps(version: &str, options: &ToolInstallOptions) -> Vec<ToolInstallStep> {
+    let mut steps = Vec::new();
+    if !options.components.is_empty() {
+        let mut args = vec!["component".to_string(), "add".to_string()];
+        args.extend(options.components.clone());
+        args.extend(["--toolchain".to_string(), version.to_string()]);
+        steps.push(ToolInstallStep {
+            program: "rustup".to_string(),
+            args,
+        });
+    }
+    if !options.targets.is_empty() {
+        let mut args = vec!["target".to_string(), "add".to_string()];
+        args.extend(options.targets.clone());
+        args.extend(["--toolchain".to_string(), version.to_string()]);
+        steps.push(ToolInstallStep {
+            program: "rustup".to_string(),
+            args,
+        });
+    }
+    steps
+}
+
+fn reject_tool_extras(backend: &str, options: &ToolInstallOptions) -> Result<()> {
+    if options.components.is_empty() && options.targets.is_empty() {
+        return Ok(());
+    }
+    Err(EngineError::UnsupportedPlatform {
+        feature: format!("tool backend {backend} components or targets"),
+        platform: std::env::consts::OS.to_string(),
+    }
+    .into())
 }
 
 fn package_with_version(name: &str, version: &str) -> String {
@@ -1389,6 +1488,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::App,
             spec: "firefox".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         let command = app_install_command(&item).unwrap();
@@ -1406,6 +1506,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::App,
             spec: "firefox@latest@auto".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         let command = app_install_command(&item).unwrap();
@@ -1437,6 +1538,7 @@ mod tests {
             spec: "firefox@latest@unknown-backend"
                 .parse::<ItemSpec>()
                 .unwrap(),
+            tool: Default::default(),
         };
 
         let err = app_install_command(&item).unwrap_err();
@@ -1511,6 +1613,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::App,
             spec: "firefox@latest@flatpak".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         assert_eq!(
@@ -1524,6 +1627,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::Package,
             spec: "openssl".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         let command = package_install_command(&item).unwrap();
@@ -1541,6 +1645,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::Package,
             spec: "openssl@latest@auto".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         let command = package_install_command(&item).unwrap();
@@ -1560,6 +1665,7 @@ mod tests {
             spec: "openssl@latest@unknown-backend"
                 .parse::<ItemSpec>()
                 .unwrap(),
+            tool: Default::default(),
         };
 
         let err = package_install_command(&item).unwrap_err();
@@ -1622,6 +1728,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "rust@stable@rustup".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         let command = tool_install_command(&item).unwrap();
@@ -1631,20 +1738,84 @@ mod tests {
     }
 
     #[test]
+    fn tool_install_command_plans_rustup_components_and_targets() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "rust@stable@rustup".parse::<ItemSpec>().unwrap(),
+            tool: ToolInstallOptions {
+                components: vec!["rustfmt".to_string(), "clippy".to_string()],
+                targets: vec!["wasm32-unknown-unknown".to_string()],
+            },
+        };
+
+        let command = tool_install_command(&item).unwrap();
+
+        assert_eq!(command.args, ["toolchain", "install", "stable"]);
+        assert_eq!(
+            command.after,
+            [
+                ToolInstallStep {
+                    program: "rustup".to_string(),
+                    args: vec![
+                        "component".to_string(),
+                        "add".to_string(),
+                        "rustfmt".to_string(),
+                        "clippy".to_string(),
+                        "--toolchain".to_string(),
+                        "stable".to_string()
+                    ]
+                },
+                ToolInstallStep {
+                    program: "rustup".to_string(),
+                    args: vec![
+                        "target".to_string(),
+                        "add".to_string(),
+                        "wasm32-unknown-unknown".to_string(),
+                        "--toolchain".to_string(),
+                        "stable".to_string()
+                    ]
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn tool_install_command_rejects_tool_extras_for_non_rustup_backend() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "node@22@mise".parse::<ItemSpec>().unwrap(),
+            tool: ToolInstallOptions {
+                components: vec!["rustfmt".to_string()],
+                targets: Vec::new(),
+            },
+        };
+
+        let err = tool_install_command(&item).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("tool backend mise components or targets")
+        );
+    }
+
+    #[test]
     fn tool_install_command_plans_language_package_managers() {
         let cargo = tool_install_command(&InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "cargo-nextest@0.9.99@cargo".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         })
         .unwrap();
         let npm = tool_install_command(&InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "typescript@5.8.0@npm".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         })
         .unwrap();
         let pipx = tool_install_command(&InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "ruff@0.11.0@pipx".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         })
         .unwrap();
 
@@ -1661,16 +1832,19 @@ mod tests {
         let mise = tool_install_command(&InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "node@22@mise".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         })
         .unwrap();
         let asdf = tool_install_command(&InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "node@22@asdf".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         })
         .unwrap();
         let aqua = tool_install_command(&InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "ripgrep@14.1.1@aqua".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         })
         .unwrap();
 
@@ -1686,6 +1860,7 @@ mod tests {
             spec: "ripgrep@latest@unknown-backend"
                 .parse::<ItemSpec>()
                 .unwrap(),
+            tool: Default::default(),
         };
 
         let err = tool_install_command(&item).unwrap_err();
@@ -1700,6 +1875,7 @@ mod tests {
         let item = InstallItemRequest {
             kind: ItemKind::Tool,
             spec: "ripgrep@14.1.1@homebrew".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         };
 
         write_install_marker(
@@ -1760,6 +1936,7 @@ mod tests {
         InstallItemRequest {
             kind,
             spec: spec.parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
         }
     }
 }
