@@ -23,19 +23,18 @@ The core loop is:
 
 ```bash
 still init
-still trust
-still sync
+still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
 still run cargo test
 still task lint
 ```
 
 ## Command Goals
 
-- `init`: create a starter `still.toml`. CLI mode may infer project defaults; TUI mode can review choices interactively.
+- `init`: create a starter `still.toml`, infer project defaults, and trust the newly created config.
 - `trust`: mark the current project/config as trusted before executing project-defined behavior.
 - `sync`: read `still.toml`, resolve desired state, update the lockfile, install missing items, and report drift.
-- `install`: install requested tools/packages/apps now and add them to config.
-- `uninstall <TOOL@VERSION>`: remove a Still-managed install and related links.
+- `install`: install requested tools/packages/apps now, add them to config, and refresh the lockfile.
+- `uninstall`: remove a tool, package, or app from desired state and remove related Still-managed artifacts.
 - `run <COMMAND...>`: run an arbitrary command with Still-managed PATH/env and return the child exit code.
 - `task <NAME>`: run a named task from config; no name should list available tasks.
 - `config check`: validate `still.toml` through the typed TOML parser and engine config validators.
