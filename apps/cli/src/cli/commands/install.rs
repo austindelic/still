@@ -5,6 +5,7 @@ use crate::cli::output::Output;
 use crate::cli::runtime::{CliRuntime, InstallCommandRequest};
 use engine::actions::install::{InstallItemRequest, InstallRequest, InstallResult};
 use engine::registries::specs::tool::ToolSpec;
+use engine::specs::backend::infer_item_kind_from_backend;
 use engine::specs::item::{ItemKind, ItemSpec};
 
 /// Runs the install command through the configured runtime.
@@ -144,19 +145,14 @@ fn infer_item_kind(spec: &ToolSpec) -> anyhow::Result<ItemKind> {
             spec.name
         );
     };
-    match backend.as_str() {
-        "rustup" | "mise" | "asdf" | "aqua" | "npm" | "pnpm" | "yarn" | "cargo" | "go" | "pipx" => {
-            Ok(ItemKind::Tool)
-        }
-        "homebrew" | "brew" | "apt" | "apt-get" | "dnf" | "pacman" | "nix" => Ok(ItemKind::Package),
-        "homebrew-cask" | "brew-cask" | "cask" | "flatpak" | "snap" | "mas" => Ok(ItemKind::App),
-        backend => anyhow::bail!(
+    infer_item_kind_from_backend(backend.as_str()).ok_or_else(|| {
+        anyhow::anyhow!(
             "cannot infer whether {}@{}@{} is a tool, package, or app; use --tool, --package, or --app",
             spec.name,
             spec.version,
             backend
-        ),
-    }
+        )
+    })
 }
 
 #[cfg(test)]

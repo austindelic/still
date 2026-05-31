@@ -32,6 +32,20 @@ pub fn normalize_auto_backend(
     }
 }
 
+/// Returns the item kind implied by an unclassified, type-specific backend.
+pub fn infer_item_kind_from_backend(backend: &str) -> Option<ItemKind> {
+    match backend {
+        "rustup" | "mise" | "asdf" | "aqua" | "npm" | "pnpm" | "yarn" | "cargo" | "go" | "pipx" => {
+            Some(ItemKind::Tool)
+        }
+        "homebrew" | "brew" | "apt" | "apt-get" | "dnf" | "pacman" | "nix" => {
+            Some(ItemKind::Package)
+        }
+        "homebrew-cask" | "brew-cask" | "cask" | "flatpak" | "snap" | "mas" => Some(ItemKind::App),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +79,16 @@ mod tests {
             normalize_auto_backend(ItemKind::Tool, None, PlatformId::Linux),
             None
         );
+    }
+
+    #[test]
+    fn infers_item_kind_from_type_specific_backend() {
+        assert_eq!(infer_item_kind_from_backend("rustup"), Some(ItemKind::Tool));
+        assert_eq!(
+            infer_item_kind_from_backend("apt-get"),
+            Some(ItemKind::Package)
+        );
+        assert_eq!(infer_item_kind_from_backend("cask"), Some(ItemKind::App));
+        assert_eq!(infer_item_kind_from_backend("unknown"), None);
     }
 }
