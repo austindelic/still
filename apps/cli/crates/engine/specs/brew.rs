@@ -1,8 +1,10 @@
+//! Homebrew formula and cask JSON models.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Top-level: your snippet is a JSON array of these.
+/// Homebrew formula metadata from the formula JSON API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormulaSpec {
     pub name: String,
@@ -155,24 +157,33 @@ pub struct FormulaSpec {
     pub extra: HashMap<String, Value>,
 }
 
+/// Formula version metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionsSpec {
+    /// Stable release version.
     pub stable: String,
+    /// Head version when Homebrew exposes one.
     #[serde(default)]
     pub head: Option<String>,
+    /// Whether bottle metadata exists.
     #[serde(default)]
     pub bottle: bool,
 }
 
+/// Source URL metadata for stable and head builds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UrlsSpec {
+    /// Stable source URL metadata.
     pub stable: UrlStableSpec,
+    /// Optional head source URL metadata.
     #[serde(default)]
     pub head: Option<UrlHeadSpec>,
 }
 
+/// Stable source URL metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UrlStableSpec {
+    /// Stable source URL.
     pub url: String,
     #[serde(default)]
     pub tag: Option<String>,
@@ -187,8 +198,10 @@ pub struct UrlStableSpec {
     pub checksum: Option<String>,
 }
 
+/// Head source URL metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UrlHeadSpec {
+    /// Head source URL.
     pub url: String,
     #[serde(default)]
     pub branch: Option<String>,
@@ -197,11 +210,14 @@ pub struct UrlHeadSpec {
     pub using_: Option<String>,
 }
 
+/// Bottle metadata for a formula.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BottleSpec {
+    /// Stable bottle metadata.
     pub stable: BottleStableSpec,
 }
 
+/// Stable bottle metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BottleStableSpec {
     #[serde(default)]
@@ -214,10 +230,14 @@ pub struct BottleStableSpec {
     pub files: HashMap<String, BottleFileSpec>,
 }
 
+/// Downloadable bottle file for one platform.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BottleFileSpec {
+    /// Homebrew cellar value for the bottle.
     pub cellar: String,
+    /// Download URL for the bottle archive.
     pub url: String,
+    /// Expected SHA-256 checksum.
     pub sha256: String,
 }
 
@@ -232,15 +252,19 @@ pub enum UsesFromMacosSpec {
 /// Often `{}` or `{ "since": "sequoia" }`
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MacosBoundSpec {
+    /// macOS version where this bound starts applying.
     #[serde(default)]
     pub since: Option<String>,
 
+    /// Additional Homebrew fields not modeled directly.
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
 
+/// Homebrew requirement metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequirementSpec {
+    /// Requirement name.
     pub name: String,
 
     #[serde(default)]
@@ -261,9 +285,12 @@ pub struct RequirementSpec {
     pub extra: HashMap<String, Value>,
 }
 
+/// Homebrew deprecation metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeprecateArgsSpec {
+    /// Deprecation date.
     pub date: String,
+    /// Deprecation reason.
     pub because: String,
 
     #[serde(default)]
@@ -275,9 +302,12 @@ pub struct DeprecateArgsSpec {
     pub extra: HashMap<String, Value>,
 }
 
+/// Homebrew disable metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisableArgsSpec {
+    /// Disable date.
     pub date: String,
+    /// Disable reason.
     pub because: String,
 
     #[serde(default)]
@@ -289,15 +319,21 @@ pub struct DisableArgsSpec {
     pub extra: HashMap<String, Value>,
 }
 
+/// Checksum metadata from Homebrew JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChecksumSpec {
+    /// SHA-256 checksum.
     pub sha256: String,
 
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
 
-/// Example usage
+/// Parses Homebrew formula JSON into typed formula metadata.
+///
+/// `json` must be the complete JSON array returned by Homebrew's formula API.
+/// Unknown fields are preserved through `extra` maps on the modeled structs.
+/// Returns serde errors for invalid JSON or incompatible field shapes.
 pub fn parse_formulae(json: &str) -> Result<Vec<FormulaSpec>, serde_json::Error> {
     serde_json::from_str::<Vec<FormulaSpec>>(json)
 }
@@ -322,6 +358,11 @@ pub struct CaskSpec {
     pub extra: HashMap<String, Value>,
 }
 
+/// Parses Homebrew cask JSON into typed cask metadata.
+///
+/// `json` must be the complete JSON array returned by Homebrew's cask API.
+/// Unknown fields are preserved through `extra`; invalid JSON or incompatible
+/// field shapes return serde errors.
 pub fn parse_casks(json: &str) -> Result<Vec<CaskSpec>, serde_json::Error> {
     serde_json::from_str::<Vec<CaskSpec>>(json)
 }

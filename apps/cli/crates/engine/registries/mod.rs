@@ -1,4 +1,7 @@
+//! Registry integration modules.
+
+/// Homebrew registry integration.
 pub mod homebrew;
 
-// Re-export specs module for convenience
+/// Compatibility re-export for callers that access specs through registries.
 pub use crate::specs;

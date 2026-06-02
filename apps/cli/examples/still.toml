@@ -23,7 +23,7 @@ files = [
 ]
 
 [packages]
-latest = ["pandoc", "ripgrep", "fd", "jq", "ffmpeg"]
+latest = ["pandoc", "ripgrep", "jq", "ffmpeg"]
 postgresql = {version = "16", backend = "auto"}
 
 [packages.llvm]
@@ -54,7 +54,7 @@ backend = "auto"
 #
 # You should not need to write start/check/stop commands every time.
 # Still should ship built-in service presets.
-# auto watches if enabled so that the service is never stale
+# Services are explicit in v0.1; Still does not auto-watch or restart them.
 
 [services]
 docker-compose = "docker compose up" # Shorthand for a start command.
@@ -71,9 +71,9 @@ check = { task = "docker:check" }
 test = "cargo test"
 fmt = "cargo fmt"
 dev = "cargo run"
-docker:check = "docker info"
-docker:start = "open -a Docker"
-docker:stop = "osascript -e 'quit app \"Docker\"'"
+"docker:check" = "docker info"
+"docker:start" = "open -a Docker"
+"docker:stop" = "osascript -e 'quit app \"Docker\"'"
 
 # Expanded task syntax.
 
@@ -97,3 +97,14 @@ run = "echo CI passed"
 description = "Run development server"
 requires = ["docker"]
 run = "cargo run"
+
+[agents]
+targets = ["claude", "codex"]
+instructions = "AGENTS.md"
+
+[agents.skills]
+rust-review = { source = "rust-review", auto = true, tools = ["rust@stable@rustup"], packages = ["llvm"] }
+repo-auditor = "repo-auditor"
+external-skill = { url = "https://example.com/skill", version = "1.2.0" }
+pinned-skill = "https://example.com/skill:1.2.0"
+latest-skill = "https://example.com/skill"

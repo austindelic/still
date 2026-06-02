@@ -1,0 +1,461 @@
+//! Engine action for running a command in the Still environment.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Context, Result};
+
+use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
+use crate::error::EngineError;
+use crate::specs::toml::parse_still_toml;
+use crate::system::System;
+use crate::trust::assert_config_trusted;
+use crate::utils::paths::PathOps;
+
+/// Request to run a child command with configured environment values.
+#[derive(Debug, Clone)]
+pub struct RunRequest {
+    pub start_dir: PathBuf,
+    pub home_dir: PathBuf,
+    pub global: bool,
+    pub command: Vec<String>,
+}
+
+/// Captured result from a child command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunResult {
+    pub status: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Runs a command with Still config environment applied.
+/// # Errors
+/// Fails when no command is supplied, config/env files cannot be read, or the
+/// child process cannot be spawned.
+pub async fn run(request: RunRequest) -> Result<RunResult> {
+    if request.command.is_empty() {
+        return Err(EngineError::Conflict {
+            message: "run requires a command".to_string(),
+        }
+        .into());
+    }
+
+    let scope = if request.global {
+        ConfigScope::Global
+    } else {
+        ConfigScope::Project
+    };
+    let resolved_env = resolve_env_with_scope(&request.start_dir, &request.home_dir, scope).await?;
+    let mut command = Command::new(&request.command[0]);
+    command.args(&request.command[1..]);
+    command.current_dir(resolved_env.working_dir);
+    command.envs(resolved_env.vars);
+
+    let output = command
+        .output()
+        .with_context(|| format!("failed to run {}", request.command[0]))?;
+
+    Ok(RunResult {
+        status: output.status.code().unwrap_or(1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedRunEnv {
+    pub(crate) working_dir: PathBuf,
+    pub(crate) vars: BTreeMap<String, String>,
+}
+
+pub(crate) async fn resolve_env_with_scope(
+    start_dir: &Path,
+    home_dir: &Path,
+    scope: ConfigScope,
+) -> Result<ResolvedRunEnv> {
+    let resolved = resolve_config_path(
+        start_dir,
+        home_dir,
+        ConfigSelection {
+            scope,
+            for_write: false,
+        },
+    )?;
+    let config_dir = resolved
+        .path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let mut vars = BTreeMap::new();
+    if scope == ConfigScope::Project && resolved.scope == ConfigScope::Project {
+        let global_path = global_config_path(home_dir);
+        if let Some(global_vars) = load_env_vars(&global_path, false).await? {
+            vars.extend(global_vars);
+        }
+    }
+
+    if let Some(config_vars) =
+        load_env_vars(&resolved.path, resolved.scope == ConfigScope::Project).await?
+    {
+        vars.extend(config_vars);
+    }
+    let configured_path = vars.get("PATH").cloned();
+    vars.insert("PATH".to_string(), managed_path(configured_path.as_deref()));
+
+    Ok(ResolvedRunEnv {
+        working_dir: config_dir,
+        vars,
+    })
+}
+
+async fn load_env_vars(
+    config_path: &Path,
+    trust_sensitive: bool,
+) -> Result<Option<BTreeMap<String, String>>> {
+    let content = match tokio::fs::read_to_string(config_path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", config_path.display()));
+        }
+    };
+    let config = parse_still_toml(&content)?;
+    if trust_sensitive && !config.env.files.is_empty() {
+        assert_config_trusted(config_path, content.as_bytes(), "env file loading").await?;
+    }
+    let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut vars = BTreeMap::new();
+    for file in config.env.files {
+        let path = config_dir.join(&file);
+        let content = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("failed to read env file {}", path.display()))?;
+        vars.extend(parse_env_file(&content)?);
+    }
+    vars.extend(config.env.vars);
+    Ok(Some(vars))
+}
+
+fn managed_path(configured: Option<&str>) -> String {
+    let mut paths = vec![System::bin_dir()];
+    if let Some(configured) = configured {
+        paths.extend(std::env::split_paths(configured));
+    } else if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(paths)
+        .unwrap_or_else(|_| System::bin_dir().into_os_string())
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn parse_env_file(input: &str) -> Result<BTreeMap<String, String>> {
+    let mut vars = BTreeMap::new();
+    for (index, line) in input.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("invalid env file line {}", index + 1),
+            }
+            .into());
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(EngineError::InvalidConfig {
+                reason: format!("invalid env file line {}", index + 1),
+            }
+            .into());
+        }
+        vars.insert(key.to_string(), unquote_env_value(value.trim()));
+    }
+    Ok(vars)
+}
+
+fn unquote_env_value(value: &str) -> String {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use crate::trust::{config_fingerprint, trust_marker_path};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn resolves_env_files_then_config_vars() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [env]
+            files = [".env", ".env.local"]
+            SHARED = "config"
+            INLINE = "yes"
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+        fs::write(temp.path().join(".env"), "SHARED=file\nFROM_FILE=one\n").unwrap();
+        fs::write(
+            temp.path().join(".env.local"),
+            "FROM_LOCAL='two'\nFROM_FILE=override\n",
+        )
+        .unwrap();
+
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
+
+        assert_eq!(result.working_dir, temp.path());
+        assert_eq!(result.vars["SHARED"], "config");
+        assert_eq!(result.vars["INLINE"], "yes");
+        assert_eq!(result.vars["FROM_FILE"], "override");
+        assert_eq!(result.vars["FROM_LOCAL"], "two");
+    }
+
+    #[tokio::test]
+    async fn run_env_prepends_still_bin_to_path() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("still.toml"), "[env]\n").unwrap();
+
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
+        let path = result.vars.get("PATH").unwrap();
+        let paths = std::env::split_paths(path).collect::<Vec<_>>();
+
+        assert_eq!(paths.first(), Some(&System::bin_dir()));
+    }
+
+    #[tokio::test]
+    async fn run_env_prepends_still_bin_to_configured_path() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            "[env]\nPATH = \"project-bin\"\n",
+        )
+        .unwrap();
+
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
+        let path = result.vars.get("PATH").unwrap();
+        let paths = std::env::split_paths(path).collect::<Vec<_>>();
+
+        assert_eq!(paths.first(), Some(&System::bin_dir()));
+        assert_eq!(paths.get(1), Some(&PathBuf::from("project-bin")));
+    }
+
+    #[tokio::test]
+    async fn run_rejects_empty_command() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let err = run(RunRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            command: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("run requires a command"));
+    }
+
+    #[tokio::test]
+    async fn run_can_resolve_global_env_when_project_config_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(project.join("still.toml"), "[env]\nVALUE = \"project\"\n").unwrap();
+        fs::write(&global, "[env]\nVALUE = \"global\"\n").unwrap();
+
+        let result = resolve_env_with_scope(&project, temp.path(), ConfigScope::Global)
+            .await
+            .unwrap();
+
+        assert_eq!(result.working_dir, global.parent().unwrap());
+        assert_eq!(result.vars["VALUE"], "global");
+    }
+
+    #[test]
+    fn env_file_parser_rejects_invalid_lines() {
+        let err = parse_env_file("ok=yes\ninvalid\n").unwrap_err();
+
+        assert!(err.to_string().contains("line 2"));
+    }
+
+    #[test]
+    fn env_file_parser_keeps_values_literal() {
+        let vars = parse_env_file("HOME_COPY=$HOME\nMESSAGE=\"hello $USER\"\n").unwrap();
+
+        assert_eq!(vars["HOME_COPY"], "$HOME");
+        assert_eq!(vars["MESSAGE"], "hello $USER");
+    }
+
+    #[tokio::test]
+    async fn env_file_loading_requires_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(temp.path().join(".env"), "TOKEN=secret\n").unwrap();
+
+        let err = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("not trusted"));
+        assert!(err.to_string().contains("env file loading"));
+    }
+
+    #[tokio::test]
+    async fn global_env_files_do_not_require_project_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            &global,
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(global.parent().unwrap().join(".env"), "GLOBAL_FILE=yes\n").unwrap();
+
+        let result = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Global)
+            .await
+            .unwrap();
+
+        assert_eq!(result.vars["GLOBAL_FILE"], "yes");
+    }
+
+    #[tokio::test]
+    async fn project_env_includes_global_defaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("still.toml"),
+            r#"
+            [env]
+            PROJECT_ONLY = "project"
+            SHARED = "project"
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &global,
+            r#"
+            [env]
+            GLOBAL_ONLY = "global"
+            SHARED = "global"
+            "#,
+        )
+        .unwrap();
+
+        let result = resolve_env_with_scope(&project, temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
+
+        assert_eq!(result.working_dir, project);
+        assert_eq!(result.vars["GLOBAL_ONLY"], "global");
+        assert_eq!(result.vars["PROJECT_ONLY"], "project");
+        assert_eq!(result.vars["SHARED"], "project");
+    }
+
+    #[tokio::test]
+    async fn project_env_files_override_global_env_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("repo");
+        let project_config = project.join("still.toml");
+        let global = temp.path().join(".config/still/config.toml");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        let project_content = r#"
+            [env]
+            files = [".env"]
+            "#;
+        fs::write(&project_config, project_content).unwrap();
+        fs::write(project.join(".env"), "SHARED=project\nPROJECT_FILE=yes\n").unwrap();
+        write_trust_marker(&project_config, project_content.as_bytes());
+        fs::write(
+            &global,
+            r#"
+            [env]
+            files = [".env"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            global.parent().unwrap().join(".env"),
+            "SHARED=global\nGLOBAL_FILE=yes\n",
+        )
+        .unwrap();
+
+        let result = resolve_env_with_scope(&project, temp.path(), ConfigScope::Project)
+            .await
+            .unwrap();
+
+        assert_eq!(result.vars["GLOBAL_FILE"], "yes");
+        assert_eq!(result.vars["PROJECT_FILE"], "yes");
+        assert_eq!(result.vars["SHARED"], "project");
+    }
+
+    #[tokio::test]
+    async fn missing_env_files_are_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [env]
+            files = [".env.missing"]
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let err = resolve_env_with_scope(temp.path(), temp.path(), ConfigScope::Project)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("failed to read env file"));
+        assert!(err.to_string().contains(".env.missing"));
+    }
+
+    fn write_trust_marker(config_path: &Path, content: &[u8]) {
+        let marker_path = trust_marker_path(config_path);
+        fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        fs::write(
+            marker_path,
+            format!(
+                "config = \"{}\"\nfingerprint = \"{}\"\n",
+                config_path.display(),
+                config_fingerprint(content)
+            ),
+        )
+        .unwrap();
+    }
+}
