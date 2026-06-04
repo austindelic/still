@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use anyhow::Result;
+use crate::error::{EngineError, Result};
 
 use super::item::{BackendId, ItemSpec};
 
@@ -34,7 +34,7 @@ impl fmt::Display for ParseToolSpecError {
 }
 
 impl FromStr for ToolSpec {
-    type Err = anyhow::Error;
+    type Err = EngineError;
 
     fn from_str(input: &str) -> Result<Self> {
         let item = ItemSpec::parse(input).map_err(|e| {
@@ -43,7 +43,7 @@ impl FromStr for ToolSpec {
                 .strip_prefix("invalid item spec: ")
                 .unwrap_or(&message)
                 .to_string();
-            anyhow::anyhow!(ParseToolSpecError::Invalid { reason })
+            EngineError::message(ParseToolSpecError::Invalid { reason }.to_string())
         })?;
 
         Ok(Self {

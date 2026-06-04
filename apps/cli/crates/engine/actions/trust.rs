@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::trust::{config_fingerprint, trust_marker_path};

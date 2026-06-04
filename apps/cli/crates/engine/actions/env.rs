@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 
 use crate::actions::run::resolve_env_with_scope;
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};

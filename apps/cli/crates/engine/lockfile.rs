@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use crate::error::{EngineError, Result};
 use serde::Deserialize;
 
 use crate::actions::sync::SyncItem;
@@ -203,45 +203,61 @@ fn parse_lockfile_items(input: &str) -> Vec<LockfileItem> {
 
 fn validate_lockfile_item(index: usize, item: &LockfileItem) -> Result<()> {
     if item.name.trim().is_empty() {
-        bail!("lockfile item {index} has an empty name");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an empty name"
+        )));
     }
     if item.kind != "agent-skill" {
-        item.kind
-            .parse::<ItemKind>()
-            .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid kind: {err}"))?;
+        item.kind.parse::<ItemKind>().map_err(|err| {
+            EngineError::message(format!("lockfile item {index} has invalid kind: {err}"))
+        })?;
     }
-    item.platform
-        .parse::<PlatformId>()
-        .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid platform: {err}"))?;
+    item.platform.parse::<PlatformId>().map_err(|err| {
+        EngineError::message(format!("lockfile item {index} has invalid platform: {err}"))
+    })?;
     if item.version.trim().is_empty() {
-        bail!("lockfile item {index} has an empty version");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an empty version"
+        )));
     }
     if let Some(backend) = &item.backend {
-        backend
-            .parse::<BackendId>()
-            .map_err(|err| anyhow::anyhow!("lockfile item {index} has invalid backend: {err}"))?;
+        backend.parse::<BackendId>().map_err(|err| {
+            EngineError::message(format!("lockfile item {index} has invalid backend: {err}"))
+        })?;
     }
     if item.source.trim().is_empty() {
-        bail!("lockfile item {index} has an empty source");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an empty source"
+        )));
     }
     if item.checksum.trim().is_empty() {
-        bail!("lockfile item {index} has an empty checksum");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an empty checksum"
+        )));
     }
     if !is_sha256_hex(&item.checksum) {
-        bail!("lockfile item {index} has an invalid checksum");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an invalid checksum"
+        )));
     }
     if item.outputs.is_empty() {
-        bail!("lockfile item {index} has no expected outputs");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has no expected outputs"
+        )));
     }
     if item.outputs.iter().any(|output| output.trim().is_empty()) {
-        bail!("lockfile item {index} has an empty output path");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an empty output path"
+        )));
     }
     if item
         .linked_executables
         .iter()
         .any(|link| link.trim().is_empty())
     {
-        bail!("lockfile item {index} has an empty linked executable path");
+        return Err(EngineError::message(format!(
+            "lockfile item {index} has an empty linked executable path"
+        )));
     }
     Ok(())
 }

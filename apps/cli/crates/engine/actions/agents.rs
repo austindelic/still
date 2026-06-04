@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
@@ -935,7 +935,7 @@ mod tests {
     impl AgentDependencyInstaller for FailingInstaller {
         async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
             self.attempted.extend(items);
-            Err(anyhow::anyhow!("installer failed"))
+            Err(EngineError::message("installer failed"))
         }
     }
 

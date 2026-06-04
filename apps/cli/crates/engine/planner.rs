@@ -88,7 +88,10 @@ mod tests {
     fn install_plan_rejects_empty_requests() {
         let err = InstallPlan::from_request(InstallRequest { items: Vec::new() }).unwrap_err();
 
-        assert_eq!(err, crate::error::EngineError::EmptyInstallRequest);
+        assert!(matches!(
+            err,
+            crate::error::EngineError::EmptyInstallRequest
+        ));
     }
 
     fn item(kind: ItemKind, spec: &str) -> InstallItemRequest {

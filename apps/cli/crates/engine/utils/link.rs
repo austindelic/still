@@ -1,8 +1,6 @@
 //! Symlink helpers for host platform implementations.
 
-use crate::system::MacOS;
-use std::io;
-use std::path::Path;
+use std::{io, path::Path};
 
 /// Platform-specific symlink creation behavior.
 ///
@@ -15,11 +13,4 @@ pub trait SymlinkOps {
     /// error when the target cannot be linked, the parent directory is missing,
     /// or the link path already exists.
     fn create_symlink(target_path: &Path, link_path: &Path) -> io::Result<()>;
-}
-
-impl SymlinkOps for MacOS {
-    fn create_symlink(target_path: &Path, link_path: &Path) -> io::Result<()> {
-        std::os::unix::fs::symlink(target_path, link_path)?;
-        Ok(())
-    }
 }

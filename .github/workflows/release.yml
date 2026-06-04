@@ -14,22 +14,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.5
+      - uses: dtolnay/rust-toolchain@stable
 
       - run: bun install --frozen-lockfile
 
       - name: Build
         run: bun run build --filter=cli...
 
+      - name: Configure npm auth
+        run: printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:
+          version: bunx changeset version
           publish: bun publish --cwd apps/cli
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -117,9 +117,6 @@ fn write_one_install<O: Output>(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use anyhow::anyhow;
     use engine::actions::activate::ActivateResult;
     use engine::actions::agents::{AgentsOperation, AgentsResult};
     use engine::actions::config::CheckConfigResult;
@@ -134,6 +131,7 @@ mod tests {
     use engine::actions::task::TaskResult;
     use engine::actions::trust::TrustResult;
     use engine::actions::uninstall::{UninstallResult, UninstallTarget};
+    use std::path::PathBuf;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
@@ -141,14 +139,17 @@ mod tests {
 
     #[derive(Default)]
     struct FakeRuntime {
-        install_result: Option<anyhow::Result<InstallResult>>,
+        install_result: Option<engine::error::Result<InstallResult>>,
         install_requests: Vec<(ItemKind, String, String, Option<String>)>,
         install_globals: Vec<bool>,
         install_forces: Vec<bool>,
     }
 
     impl ActionRuntime for FakeRuntime {
-        fn install(&mut self, request: ScopedInstallRequest) -> anyhow::Result<InstallResult> {
+        fn install(
+            &mut self,
+            request: ScopedInstallRequest,
+        ) -> engine::error::Result<InstallResult> {
             self.install_globals.push(request.global);
             self.install_forces.push(request.force);
             self.install_requests
@@ -165,19 +166,19 @@ mod tests {
                 .expect("test runtime install result was not configured")
         }
 
-        fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
+        fn config_check(&mut self, _global: bool) -> engine::error::Result<CheckConfigResult> {
             panic!("config_check should not run in install tests");
         }
 
-        fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
+        fn init(&mut self, _force: bool) -> engine::error::Result<InitResult> {
             panic!("init should not run in install tests");
         }
 
-        fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
+        fn env(&mut self, _global: bool) -> engine::error::Result<EnvResult> {
             panic!("env should not run in install tests");
         }
 
-        fn list(&mut self, _all: bool, _global: bool) -> anyhow::Result<ListResult> {
+        fn list(&mut self, _all: bool, _global: bool) -> engine::error::Result<ListResult> {
             panic!("list should not run in install tests");
         }
 
@@ -185,7 +186,7 @@ mod tests {
             &mut self,
             _operation: AgentsOperation,
             _global: bool,
-        ) -> anyhow::Result<AgentsResult> {
+        ) -> engine::error::Result<AgentsResult> {
             panic!("agents should not run in install tests");
         }
 
@@ -193,11 +194,15 @@ mod tests {
             &mut self,
             _command: Vec<String>,
             _global: bool,
-        ) -> anyhow::Result<RunResult> {
+        ) -> engine::error::Result<RunResult> {
             panic!("run_command should not run in install tests");
         }
 
-        fn task(&mut self, _name: Option<String>, _global: bool) -> anyhow::Result<TaskResult> {
+        fn task(
+            &mut self,
+            _name: Option<String>,
+            _global: bool,
+        ) -> engine::error::Result<TaskResult> {
             panic!("task should not run in install tests");
         }
 
@@ -205,15 +210,15 @@ mod tests {
             &mut self,
             _shell: Option<String>,
             _global: bool,
-        ) -> anyhow::Result<ActivateResult> {
+        ) -> engine::error::Result<ActivateResult> {
             panic!("activate should not run in install tests");
         }
 
-        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
             panic!("doctor should not run in install tests");
         }
 
-        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
+        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
             panic!("sync should not run in install tests");
         }
 
@@ -222,11 +227,11 @@ mod tests {
             _operation: ServicesOperation,
             _name: Option<String>,
             _global: bool,
-        ) -> anyhow::Result<ServicesResult> {
+        ) -> engine::error::Result<ServicesResult> {
             panic!("services should not run in install tests");
         }
 
-        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+        fn trust(&mut self) -> engine::error::Result<TrustResult> {
             panic!("trust should not run in install tests");
         }
 
@@ -234,7 +239,7 @@ mod tests {
             &mut self,
             _target: UninstallTarget,
             _global: bool,
-        ) -> anyhow::Result<UninstallResult> {
+        ) -> engine::error::Result<UninstallResult> {
             panic!("uninstall should not run in install tests");
         }
     }
@@ -309,7 +314,9 @@ Tools:
     fn install_error_writes_stderr_and_returns_nonzero() {
         let args = install_args("ripgrep");
         let mut runtime = FakeRuntime {
-            install_result: Some(Err(anyhow!("formula.json not found"))),
+            install_result: Some(Err(engine::error::EngineError::message(
+                "formula.json not found",
+            ))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();

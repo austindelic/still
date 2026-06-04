@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 use serde::Deserialize;
 
 use crate::config::{
@@ -619,11 +619,7 @@ mod tests {
     async fn list_uses_platform_filters_and_names() {
         let temp = tempfile::tempdir().unwrap();
         let platform = current_platform().to_string();
-        let other_platform = if cfg!(target_os = "windows") {
-            "linux"
-        } else {
-            "windows"
-        };
+        let other_platform = inactive_platform();
         fs::write(
             temp.path().join("still.toml"),
             format!(
@@ -690,11 +686,7 @@ mod tests {
     #[tokio::test]
     async fn list_all_includes_project_items_inactive_on_current_platform() {
         let temp = tempfile::tempdir().unwrap();
-        let other_platform = if cfg!(target_os = "windows") {
-            "linux"
-        } else {
-            "windows"
-        };
+        let other_platform = inactive_platform();
         fs::write(
             temp.path().join("still.toml"),
             format!(
@@ -735,11 +727,7 @@ mod tests {
     #[tokio::test]
     async fn list_global_all_includes_global_items_inactive_on_current_platform() {
         let temp = tempfile::tempdir().unwrap();
-        let other_platform = if cfg!(target_os = "windows") {
-            "linux"
-        } else {
-            "windows"
-        };
+        let other_platform = inactive_platform();
         let global = temp.path().join(".config/still/config.toml");
         fs::create_dir_all(global.parent().unwrap()).unwrap();
         fs::write(
@@ -1093,11 +1081,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("repo");
         let global = temp.path().join(".config/still/config.toml");
-        let other_platform = if cfg!(target_os = "windows") {
-            "linux"
-        } else {
-            "windows"
-        };
+        let other_platform = inactive_platform();
         fs::create_dir_all(&project).unwrap();
         fs::create_dir_all(global.parent().unwrap()).unwrap();
         fs::write(project.join("still.toml"), "[tools]\nrust = \"stable\"\n").unwrap();
@@ -1372,5 +1356,12 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    fn inactive_platform() -> &'static str {
+        match current_platform() {
+            PlatformId::Windows => "linux",
+            _ => "windows",
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 
 use crate::config::PROJECT_CONFIG_FILE;
 use crate::error::EngineError;

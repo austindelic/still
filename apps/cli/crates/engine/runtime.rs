@@ -2,8 +2,6 @@
 
 use std::{future::Future, path::PathBuf};
 
-use anyhow::{Context, Result};
-
 use crate::actions::{
     activate::{ActivateRequest, ActivateResult},
     agents::{AgentsOperation, AgentsRequest, AgentsResult},
@@ -20,6 +18,7 @@ use crate::actions::{
     trust::{TrustRequest, TrustResult},
     uninstall::{UninstallRequest, UninstallResult, UninstallTarget},
 };
+use crate::error::{EngineContext, EngineError, Result};
 
 /// Install request plus desired-state write scope.
 #[derive(Debug, Clone)]
@@ -255,7 +254,7 @@ fn current_dir() -> Result<PathBuf> {
 }
 
 fn home_dir() -> Result<PathBuf> {
-    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("failed to find home directory"))
+    dirs::home_dir().ok_or_else(|| EngineError::message("failed to find home directory"))
 }
 
 fn block_on<T>(future: impl Future<Output = Result<T>>) -> Result<T> {

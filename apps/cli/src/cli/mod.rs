@@ -140,23 +140,23 @@ mod tests {
         fn install(
             &mut self,
             _request: ScopedInstallRequest,
-        ) -> anyhow::Result<engine::actions::install::InstallResult> {
+        ) -> engine::error::Result<engine::actions::install::InstallResult> {
             panic!("install should not run in these routing tests");
         }
 
-        fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
+        fn config_check(&mut self, _global: bool) -> engine::error::Result<CheckConfigResult> {
             panic!("config_check should not run in these routing tests");
         }
 
-        fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
+        fn init(&mut self, _force: bool) -> engine::error::Result<InitResult> {
             panic!("init should not run in these routing tests");
         }
 
-        fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
+        fn env(&mut self, _global: bool) -> engine::error::Result<EnvResult> {
             panic!("env should not run in these routing tests");
         }
 
-        fn list(&mut self, _all: bool, _global: bool) -> anyhow::Result<ListResult> {
+        fn list(&mut self, _all: bool, _global: bool) -> engine::error::Result<ListResult> {
             panic!("list should not run in these routing tests");
         }
 
@@ -164,7 +164,7 @@ mod tests {
             &mut self,
             _operation: AgentsOperation,
             _global: bool,
-        ) -> anyhow::Result<AgentsResult> {
+        ) -> engine::error::Result<AgentsResult> {
             panic!("agents should not run in these routing tests");
         }
 
@@ -172,11 +172,15 @@ mod tests {
             &mut self,
             _command: Vec<String>,
             _global: bool,
-        ) -> anyhow::Result<RunResult> {
+        ) -> engine::error::Result<RunResult> {
             panic!("run_command should not run in these routing tests");
         }
 
-        fn task(&mut self, _name: Option<String>, _global: bool) -> anyhow::Result<TaskResult> {
+        fn task(
+            &mut self,
+            _name: Option<String>,
+            _global: bool,
+        ) -> engine::error::Result<TaskResult> {
             panic!("task should not run in these routing tests");
         }
 
@@ -184,11 +188,11 @@ mod tests {
             &mut self,
             _shell: Option<String>,
             _global: bool,
-        ) -> anyhow::Result<ActivateResult> {
+        ) -> engine::error::Result<ActivateResult> {
             panic!("activate should not run in these routing tests");
         }
 
-        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
             Ok(DoctorResult {
                 checks: vec![DoctorCheck {
                     name: "platform".to_string(),
@@ -198,7 +202,7 @@ mod tests {
             })
         }
 
-        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
+        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
             panic!("sync should not run in these routing tests");
         }
 
@@ -207,11 +211,11 @@ mod tests {
             _operation: ServicesOperation,
             _name: Option<String>,
             _global: bool,
-        ) -> anyhow::Result<ServicesResult> {
+        ) -> engine::error::Result<ServicesResult> {
             panic!("services should not run in these routing tests");
         }
 
-        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+        fn trust(&mut self) -> engine::error::Result<TrustResult> {
             panic!("trust should not run in these routing tests");
         }
 
@@ -219,7 +223,7 @@ mod tests {
             &mut self,
             _target: UninstallTarget,
             _global: bool,
-        ) -> anyhow::Result<UninstallResult> {
+        ) -> engine::error::Result<UninstallResult> {
             panic!("uninstall should not run in these routing tests");
         }
     }
