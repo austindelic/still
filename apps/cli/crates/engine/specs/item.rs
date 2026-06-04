@@ -5,6 +5,7 @@ use std::{fmt, str::FromStr};
 use crate::error::Result;
 
 use crate::error::EngineError;
+use crate::specs::source::{SourceId, SourceIntent};
 
 /// User-facing role an item plays in a Still project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,37 +40,7 @@ impl FromStr for ItemKind {
     }
 }
 
-/// Backend selected for resolution and install.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BackendId(String);
-
-impl BackendId {
-    /// Creates a backend id after validating command/config input.
-    pub fn new(value: impl Into<String>) -> Result<Self> {
-        let value = value.into();
-        validate_identifier("backend", &value, false)?;
-        Ok(Self(value))
-    }
-
-    /// Returns the backend id as written after normalization.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for BackendId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl FromStr for BackendId {
-    type Err = EngineError;
-
-    fn from_str(input: &str) -> Result<Self> {
-        Self::new(input)
-    }
-}
+pub type BackendId = SourceId;
 
 /// Requested version string from CLI or config.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -89,7 +60,7 @@ impl VersionReq {
         &self.0
     }
 
-    /// Returns whether the request tracks the backend's latest version.
+    /// Returns whether the request tracks the selected source's latest version.
     pub fn is_latest(&self) -> bool {
         self.0.eq_ignore_ascii_case("latest")
     }
@@ -115,7 +86,7 @@ impl FromStr for VersionReq {
     }
 }
 
-/// Parsed item request before backend resolution.
+/// Parsed item request before source resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemSpec {
     pub name: String,
@@ -124,17 +95,18 @@ pub struct ItemSpec {
 }
 
 impl ItemSpec {
-    /// Parses `name`, `name@version`, or `name@version@backend`.
+    /// Parses `name`, `name@version`, `source:name`, or `source:name@version`.
     pub fn parse(input: &str) -> Result<Self> {
         let value = input.trim();
         if value.is_empty() {
             return Err(invalid_item_spec("item spec cannot be empty"));
         }
 
-        let parts: Vec<&str> = value.split('@').collect();
-        if parts.len() > 3 {
+        let (source_prefix, body) = split_source_prefix(value)?;
+        let parts: Vec<&str> = body.split('@').collect();
+        if parts.len() > 3 || (source_prefix.is_some() && parts.len() > 2) {
             return Err(invalid_item_spec(format!(
-                "invalid item spec \"{value}\": expected name, name@version, or name@version@backend"
+                "invalid item spec \"{value}\": expected name, name@version, source:name, or source:name@version"
             )));
         }
 
@@ -142,21 +114,31 @@ impl ItemSpec {
         validate_identifier("item", name, false)?;
 
         let version = VersionReq::new(parts.get(1).copied().unwrap_or("latest"))?;
-        let backend = match parts.get(2).map(|value| value.trim()) {
+        let legacy_source = match parts.get(2).map(|value| value.trim()) {
             Some("") => {
                 return Err(invalid_item_spec(format!(
-                    "invalid item spec \"{value}\": backend cannot be empty"
+                    "invalid item spec \"{value}\": source cannot be empty"
                 )));
             }
-            Some(value) => Some(BackendId::new(value)?),
+            Some(value) => Some(SourceId::new(value)?),
             None => None,
         };
+        let backend = source_prefix.or(legacy_source);
 
         Ok(Self {
             name: name.to_string(),
             version,
             backend,
         })
+    }
+
+    /// Returns the source intent represented by this parsed spec.
+    pub fn source_intent(&self) -> SourceIntent {
+        match &self.backend {
+            Some(source) if source.as_str() == "auto" => SourceIntent::Auto,
+            Some(source) => SourceIntent::Explicit(source.clone()),
+            None => SourceIntent::Auto,
+        }
     }
 }
 
@@ -207,6 +189,23 @@ fn validate_version_req(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn split_source_prefix(value: &str) -> Result<(Option<SourceId>, &str)> {
+    let Some((source, body)) = value.split_once(':') else {
+        return Ok((None, value));
+    };
+    if source.trim().is_empty() {
+        return Err(invalid_item_spec(format!(
+            "invalid item spec \"{value}\": source cannot be empty"
+        )));
+    }
+    if body.trim().is_empty() {
+        return Err(invalid_item_spec(format!(
+            "invalid item spec \"{value}\": item name cannot be empty"
+        )));
+    }
+    Ok((Some(SourceId::new(source.trim())?), body))
+}
+
 fn invalid_item_spec(reason: impl Into<String>) -> EngineError {
     EngineError::InvalidItemSpec {
         reason: reason.into(),
@@ -218,16 +217,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_name_as_latest_auto_backend() {
+    fn parses_name_as_latest_auto_source() {
         let spec: ItemSpec = "ripgrep".parse().unwrap();
 
         assert_eq!(spec.name, "ripgrep");
         assert_eq!(spec.version.as_str(), "latest");
         assert_eq!(spec.backend, None);
+        assert_eq!(spec.source_intent(), SourceIntent::Auto);
     }
 
     #[test]
-    fn parses_version_and_backend() {
+    fn parses_source_prefix_and_version() {
+        let spec: ItemSpec = "cargo:ripgrep@14.1.1".parse().unwrap();
+
+        assert_eq!(spec.name, "ripgrep");
+        assert_eq!(spec.version.as_str(), "14.1.1");
+        assert_eq!(spec.backend.unwrap().as_str(), "cargo");
+    }
+
+    #[test]
+    fn parses_legacy_version_and_source_suffix() {
         let spec: ItemSpec = "rust@stable@rustup".parse().unwrap();
 
         assert_eq!(spec.name, "rust");
@@ -236,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_backend_names_with_hyphens() {
+    fn parses_source_names_with_hyphens() {
         let spec: ItemSpec = "firefox@latest@homebrew-cask".parse().unwrap();
 
         assert_eq!(spec.name, "firefox");
@@ -245,10 +254,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_backend() {
+    fn rejects_empty_source_suffix() {
         let err = ItemSpec::parse("ripgrep@latest@").unwrap_err();
 
-        assert!(err.to_string().contains("backend cannot be empty"));
+        assert!(err.to_string().contains("source cannot be empty"));
+    }
+
+    #[test]
+    fn rejects_empty_source_prefix() {
+        let err = ItemSpec::parse(":ripgrep").unwrap_err();
+
+        assert!(err.to_string().contains("source cannot be empty"));
     }
 
     #[test]

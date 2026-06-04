@@ -9,7 +9,22 @@ name = "still"
 path = "src/main.rs"
 
 [workspace]
-members = ["crates/engine", "crates/tui"]
+members = [
+  "crates/engine",
+  "crates/source-kit",
+  "crates/sources/aqua",
+  "crates/sources/apt",
+  "crates/sources/cargo",
+  "crates/sources/dnf",
+  "crates/sources/flatpak",
+  "crates/sources/go",
+  "crates/sources/homebrew",
+  "crates/sources/npm",
+  "crates/sources/pacman",
+  "crates/sources/pipx",
+  "crates/sources/winget",
+  "crates/tui",
+]
 resolver = "2"
 
 [workspace.package]
@@ -19,8 +34,12 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
+anstream = "0.6.21"
+anstyle = "1.0.13"
 clap = { version = "4.5.53", features = ["derive"] }
 dirs = "6.0.0"
+indicatif = "0.18.3"
+miette = { version = "7.6.0", features = ["fancy"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
 thiserror = "2.0.17"
@@ -29,8 +48,27 @@ insta = "1.44.1"
 
 [dependencies]
 anyhow = { workspace = true }
+anstream = { workspace = true }
+anstyle = { workspace = true }
+clap = { workspace = true }
+dirs = { workspace = true }
 engine = { path = "crates/engine" }
+indicatif = { workspace = true }
+miette = { workspace = true }
+still_source_aqua = { package = "still-source-aqua", path = "crates/sources/aqua", optional = true }
+still_source_apt = { package = "still-source-apt", path = "crates/sources/apt", optional = true }
+still_source_cargo = { package = "still-source-cargo", path = "crates/sources/cargo", optional = true }
+still_source_dnf = { package = "still-source-dnf", path = "crates/sources/dnf", optional = true }
+still_source_flatpak = { package = "still-source-flatpak", path = "crates/sources/flatpak", optional = true }
+still_source_go = { package = "still-source-go", path = "crates/sources/go", optional = true }
+still_source_homebrew = { package = "still-source-homebrew", path = "crates/sources/homebrew", optional = true }
+still_source_kit = { package = "still-source-kit", path = "crates/source-kit", optional = true }
+still_source_npm = { package = "still-source-npm", path = "crates/sources/npm", optional = true }
+still_source_pacman = { package = "still-source-pacman", path = "crates/sources/pacman", optional = true }
+still_source_pipx = { package = "still-source-pipx", path = "crates/sources/pipx", optional = true }
+still_source_winget = { package = "still-source-winget", path = "crates/sources/winget", optional = true }
 still_tui = { package = "still-tui", path = "crates/tui", optional = true }
+tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 clap = { workspace = true }
@@ -38,6 +76,31 @@ insta = { workspace = true }
 
 [features]
 default = []
+source-aqua = ["dep:still_source_aqua"]
+source-apt = ["dep:still_source_apt"]
+source-cargo = ["dep:still_source_cargo"]
+source-dnf = ["dep:still_source_dnf"]
+source-flatpak = ["dep:still_source_flatpak"]
+source-go = ["dep:still_source_go"]
+source-homebrew = ["dep:still_source_homebrew"]
+source-kit = ["dep:still_source_kit"]
+source-npm = ["dep:still_source_npm"]
+source-pacman = ["dep:still_source_pacman"]
+source-pipx = ["dep:still_source_pipx"]
+source-winget = ["dep:still_source_winget"]
+sources = [
+  "source-aqua",
+  "source-apt",
+  "source-cargo",
+  "source-dnf",
+  "source-flatpak",
+  "source-go",
+  "source-homebrew",
+  "source-npm",
+  "source-pacman",
+  "source-pipx",
+  "source-winget",
+]
 tui = ["dep:still_tui"]
 
 [profile.release]

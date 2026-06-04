@@ -8,6 +8,8 @@ pub mod backend;
 pub mod brew;
 /// Shared item request models.
 pub mod item;
+/// Source selection and candidate resolution models.
+pub mod source;
 /// Still TOML config model.
 pub mod toml;
 /// User-facing tool spec parser.

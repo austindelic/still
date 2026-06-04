@@ -65,22 +65,22 @@
         }
       }
     },
-    "platformBackends": {
+    "platformSources": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "macos": {
-          "$ref": "#/$defs/backend"
+          "$ref": "#/$defs/source"
         },
         "linux": {
-          "$ref": "#/$defs/backend"
+          "$ref": "#/$defs/source"
         },
         "windows": {
-          "$ref": "#/$defs/backend"
+          "$ref": "#/$defs/source"
         }
       }
     },
-    "backend": {
+    "source": {
       "type": "string",
       "minLength": 1
     },
@@ -109,11 +109,11 @@
         "version": {
           "$ref": "#/$defs/version"
         },
-        "backend": {
-          "$ref": "#/$defs/backend"
+        "source": {
+          "$ref": "#/$defs/source"
         },
-        "backends": {
-          "$ref": "#/$defs/platformBackends"
+        "sources": {
+          "$ref": "#/$defs/platformSources"
         },
         "components": {
           "$ref": "#/$defs/stringList"
@@ -152,11 +152,11 @@
         "version": {
           "$ref": "#/$defs/version"
         },
-        "backend": {
-          "$ref": "#/$defs/backend"
+        "source": {
+          "$ref": "#/$defs/source"
         },
-        "backends": {
-          "$ref": "#/$defs/platformBackends"
+        "sources": {
+          "$ref": "#/$defs/platformSources"
         },
         "names": {
           "$ref": "#/$defs/platformNames"
@@ -190,11 +190,11 @@
         "version": {
           "$ref": "#/$defs/version"
         },
-        "backend": {
-          "$ref": "#/$defs/backend"
+        "source": {
+          "$ref": "#/$defs/source"
         },
-        "backends": {
-          "$ref": "#/$defs/platformBackends"
+        "sources": {
+          "$ref": "#/$defs/platformSources"
         },
         "names": {
           "$ref": "#/$defs/platformNames"

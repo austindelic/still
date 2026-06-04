@@ -4,8 +4,6 @@
 
 /// Install, uninstall, and other state-changing actions.
 pub mod actions;
-/// CLI parsing, command dispatch, and output formatting.
-pub mod cli;
 /// Config discovery and filesystem locations.
 pub mod config;
 /// Desired-state config mutation helpers.
