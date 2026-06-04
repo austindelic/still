@@ -62,7 +62,8 @@ architecture, dependency policy, or test expectations, update `../../README.md`,
 ## Testing
 
 - Keep small unit tests beside the code being tested.
-- Put public behavior tests in `crates/engine/tests`.
+- Put engine behavior tests in module/unit tests unless an integration test
+  folder is intentionally reintroduced.
 - Prefer deterministic tests that use temp paths, fixtures, fake platforms, and
   fake source metadata over tests that mutate the real machine.
 - Add integration coverage when changing install/link/cache behavior, source
