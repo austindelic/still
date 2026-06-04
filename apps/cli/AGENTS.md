@@ -100,9 +100,8 @@ Run these from `apps/cli`:
 
 - Put Rust unit tests in the same file as the code being tested using
   `#[cfg(test)] mod tests`.
-- Put integration tests in the nearest `tests/*.rs` folder when they test public
-  behavior from outside the crate or span multiple modules.
-- For CLI contract changes, update `tests/cli_help.rs` and command-level tests.
+- Put CLI contract tests beside the CLI modules they exercise unless a future
+  integration test folder is intentionally reintroduced.
 - For engine/source behavior, prefer focused tests that avoid terminal/UI
   concerns and real package managers.
 - Platform planner tests should inject fake platforms instead of relying on the
