@@ -56,6 +56,7 @@ impl Output for StdOutput {
 /// Each write appends a newline to the selected buffer, matching the production
 /// line-oriented output behavior closely enough for snapshot and string asserts.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub struct BufferedOutput {
     /// Captured stdout lines.
     pub stdout: String,
@@ -63,6 +64,7 @@ pub struct BufferedOutput {
     pub stderr: String,
 }
 
+#[cfg(test)]
 impl Output for BufferedOutput {
     fn info(&mut self, msg: &str) {
         push_line(&mut self.stdout, msg);
@@ -81,6 +83,7 @@ impl Output for BufferedOutput {
     }
 }
 
+#[cfg(test)]
 fn push_line(buffer: &mut String, msg: &str) {
     buffer.push_str(msg);
     buffer.push('\n');

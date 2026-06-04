@@ -29,9 +29,10 @@ that as migration debt: new work should move toward the boundaries in this doc.
 
 The workspace ships one binary and uses two library layers:
 
-- `still`: root package and `still` binary. Owns Clap parsing, command routing,
-  output formatting, exit codes, and the feature-gated TUI entrypoint.
-- `engine`: reusable core. Owns config loading and mutation, desired state,
+- `still`: root package and `still` binary. Owns the thin compatibility facade
+  and the feature-gated TUI entrypoint.
+- `engine`: reusable core plus `engine::cli`. Owns Clap parsing, command
+  routing, output formatting, config loading and mutation, desired state,
   resolution, planning, lockfiles, installs, filesystem behavior, registries,
   backends, platform behavior, trust, and typed errors/results.
 - `still-tui`: optional terminal UI library. Owns terminal lifecycle, input
@@ -61,7 +62,8 @@ CLI args or TUI event
 
 Rules:
 
-- CLI parsing starts in `src/cli/args.rs`.
+- CLI parsing starts in `crates/engine/cli/contract.rs`, exposed as
+  `engine::cli::args`.
 - CLI handlers translate parsed input into engine requests; they do not perform
   install, config, lockfile, backend, or platform work directly.
 - TUI events translate UI intent into the same engine requests the CLI uses.
@@ -77,12 +79,16 @@ Rules:
 
 The root `still` package owns:
 
+- launching the TUI when the `tui` feature is enabled and no command is supplied
+- compatibility re-exports for `still::cli::*`
+
+The `engine::cli` module owns:
+
 - command names, aliases, flags, positional arguments, and generated help
 - command dispatch and exit-code mapping
 - stdout/stderr formatting and snapshot-friendly output paths
 - converting Clap input into command-neutral engine requests
 - selecting CLI-only behavior such as no-command help output
-- launching the TUI when the `tui` feature is enabled and no command is supplied
 
 The CLI layer must not own:
 
@@ -109,9 +115,10 @@ The engine owns all reusable behavior:
 - execution through backend and platform adapters
 - typed request, result, progress, warning, and error values
 
-The engine must not depend on Clap, TUI state, terminal APIs, or user-facing
-formatting. It should not print stdout/stderr. If progress is needed, return
-events or write through a typed progress reporter owned by the caller.
+Non-CLI engine modules must not depend on Clap, TUI state, terminal APIs, or
+user-facing formatting. They should not print stdout/stderr. If progress is
+needed, return events or write through a typed progress reporter owned by the
+caller.
 
 ### TUI Layer
 
@@ -132,10 +139,14 @@ internals.
 Current modules should keep these responsibilities:
 
 - `src/main.rs`: thin binary entrypoint that delegates to `still::cli::entry()`.
-- `src/cli/args.rs`: public command spelling, flags, positional arguments, and
-  Clap-specific parsing.
-- `src/cli/commands`: command dispatch and presentation-facing handlers.
-- `src/cli/output.rs`: stdout/stderr abstraction for commands and tests.
+- `src/cli/mod.rs`: compatibility facade over `engine::cli` plus TUI no-command
+  launch behavior.
+- `crates/engine/cli/contract.rs`: public command spelling, flags, positional
+  arguments, and Clap-specific parsing.
+- `crates/engine/cli/commands`: command dispatch and presentation-facing
+  handlers.
+- `crates/engine/cli/output.rs`: stdout/stderr abstraction for commands and
+  tests.
 - `crates/engine/actions`: command-neutral operations such as install, sync,
   trust, task, doctor, env, agents, and services as they are added.
 - `crates/engine/runtime.rs`: synchronous boundary used by frontends to call

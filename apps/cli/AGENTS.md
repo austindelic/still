@@ -2,26 +2,26 @@
 
 ## App Overview
 
-`apps/cli` contains the Rust workspace for the `still` binary. CLI parsing and presentation live in the root package, core behavior lives in `crates/engine`, and the optional TUI lives in `crates/tui`.
+`apps/cli` contains the Rust workspace for the `still` binary. CLI parsing, command dispatch, and presentation live in `crates/engine/cli`, core behavior lives in the rest of `crates/engine`, and the optional TUI lives in `crates/tui`.
 
 Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file focused on implementation guidance for agents.
 
 ## Layout
 
-- `src/main.rs`: Binary entrypoint. Keep it thin; it should delegate to `still::cli::entry()`.
-- `src/lib.rs`: Exposes the root `cli` module.
-- `src/cli`: Clap args, command routing, output formatting, and CLI command handlers.
-- `crates/engine`: Core install, registry, spec, runtime boundary, archive, filesystem, network, hashing, path, and platform logic.
+- `src/main.rs`: Binary entrypoint. Keep it thin; it should declare the root `cli` module and delegate to `cli::entry()`.
+- `src/cli`: Clap args, command routing, output formatting, runtime boundary, and CLI command handlers.
+- `crates/engine`: Core install, registry, spec, archive, filesystem, network, hashing, path, and platform logic.
 - `crates/tui`: Optional TUI library compiled through the root `tui` feature.
 - `examples`: Concept config and schema files.
 - `tests`: App-level CLI contract and integration tests.
 
 ## Architecture Rules
 
-- Start command spelling/input changes in `src/cli/args.rs`.
-- Put CLI presentation, stdout/stderr formatting, and Clap-specific behavior in `src/cli`.
+- Start command spelling/input changes in `crates/engine/cli/contract.rs`, exposed as `engine::cli::args`.
+- Put CLI presentation, stdout/stderr formatting, and Clap-specific behavior in `crates/engine/cli`.
 - Put real install, resolve, cache, filesystem, backend, and platform behavior in `crates/engine`.
-- Keep `crates/engine` free of Clap, TUI state, and user-facing formatting.
+- Keep non-CLI engine modules free of Clap, TUI state, and user-facing formatting.
+- Keep the root `src/cli` facade responsible for feature-gated TUI launch so `engine` does not depend on `still_tui`.
 - Keep `crates/tui` free of CLI parsing and command dispatch.
 - The default `still` build is CLI-only. With `--features tui`, the same binary includes TUI dependencies and opens the TUI when no subcommand is provided.
 - Do not add a separate `still_tui` binary unless the product direction changes again.

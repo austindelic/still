@@ -2,9 +2,9 @@
 
 use std::str::FromStr;
 
+use crate::registries::specs::tool::ToolSpec;
+use crate::specs::item::ItemKind;
 use clap::{Parser, Subcommand};
-use engine::registries::specs::tool::ToolSpec;
-use engine::specs::item::ItemKind;
 
 /// Top-level CLI parser for the `still` binary.
 ///

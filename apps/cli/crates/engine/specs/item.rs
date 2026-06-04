@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use anyhow::Result;
+use crate::error::Result;
 
 use crate::error::EngineError;
 
@@ -64,7 +64,7 @@ impl fmt::Display for BackendId {
 }
 
 impl FromStr for BackendId {
-    type Err = anyhow::Error;
+    type Err = EngineError;
 
     fn from_str(input: &str) -> Result<Self> {
         Self::new(input)
@@ -108,7 +108,7 @@ impl fmt::Display for VersionReq {
 }
 
 impl FromStr for VersionReq {
-    type Err = anyhow::Error;
+    type Err = EngineError;
 
     fn from_str(input: &str) -> Result<Self> {
         Self::new(input)
@@ -161,7 +161,7 @@ impl ItemSpec {
 }
 
 impl FromStr for ItemSpec {
-    type Err = anyhow::Error;
+    type Err = EngineError;
 
     fn from_str(input: &str) -> Result<Self> {
         Self::parse(input)
@@ -207,11 +207,10 @@ fn validate_version_req(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn invalid_item_spec(reason: impl Into<String>) -> anyhow::Error {
+fn invalid_item_spec(reason: impl Into<String>) -> EngineError {
     EngineError::InvalidItemSpec {
         reason: reason.into(),
     }
-    .into()
 }
 
 #[cfg(test)]
@@ -256,11 +255,9 @@ mod tests {
     fn unknown_item_kind_is_typed() {
         let err = "service".parse::<ItemKind>().unwrap_err();
 
-        assert_eq!(
+        assert!(matches!(
             err,
-            EngineError::UnknownItemKind {
-                kind: "service".to_string()
-            }
-        );
+            EngineError::UnknownItemKind { kind } if kind == "service"
+        ));
     }
 }

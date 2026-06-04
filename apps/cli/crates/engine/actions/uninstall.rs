@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 use serde::Deserialize;
 
 use crate::actions::sync::refresh_active_lockfile;
@@ -14,16 +14,8 @@ use crate::lockfile::lockfile_path;
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::item::{BackendId, ItemKind};
 use crate::specs::toml::{PackageEntry, PackageMap, parse_still_toml};
-use crate::system::{Linux, MacOS, System, Windows};
+use crate::system::System;
 use crate::utils::paths::PathOps;
-
-/// Platform-specific uninstall operations.
-pub trait UninstallOps {}
-
-// macOS currently uses the marker trait until backend removal behavior exists.
-impl UninstallOps for MacOS {}
-impl UninstallOps for Linux {}
-impl UninstallOps for Windows {}
 
 /// Request to remove one configured item.
 #[derive(Debug, Clone)]

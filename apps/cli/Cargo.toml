@@ -2,6 +2,7 @@
 name = "still"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [[bin]]
 name = "still"
@@ -16,14 +17,24 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 
-[dependencies]
+[workspace.dependencies]
 anyhow = "1.0.100"
 clap = { version = "4.5.53", features = ["derive"] }
+dirs = "6.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.148"
+thiserror = "2.0.17"
+tokio = { version = "1.49.0", default-features = false }
+insta = "1.44.1"
+
+[dependencies]
+anyhow = { workspace = true }
 engine = { path = "crates/engine" }
 still_tui = { package = "still-tui", path = "crates/tui", optional = true }
 
 [dev-dependencies]
-insta = "1.44.1"
+clap = { workspace = true }
+insta = { workspace = true }
 
 [features]
 default = []

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::error::Result;
 
 use crate::actions::run::resolve_env_with_scope;
 use crate::config::{ConfigScope, find_project_config, global_config_path};
@@ -148,13 +148,22 @@ fn quote_cmd_set_value(value: &str) -> String {
 }
 
 fn still_root(home_dir: &Path) -> PathBuf {
-    if cfg!(target_os = "macos") {
-        PathBuf::from("/opt").join("still")
-    } else if cfg!(target_os = "windows") {
-        home_dir.join("AppData").join("Local").join("still")
-    } else {
-        home_dir.join(".local").join("share").join("still")
-    }
+    still_root_for_host(home_dir)
+}
+
+#[cfg(target_os = "macos")]
+fn still_root_for_host(_home_dir: &Path) -> PathBuf {
+    PathBuf::from("/opt").join("still")
+}
+
+#[cfg(target_os = "linux")]
+fn still_root_for_host(home_dir: &Path) -> PathBuf {
+    home_dir.join(".local").join("share").join("still")
+}
+
+#[cfg(target_os = "windows")]
+fn still_root_for_host(home_dir: &Path) -> PathBuf {
+    home_dir.join("AppData").join("Local").join("still")
 }
 
 #[cfg(test)]
