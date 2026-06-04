@@ -1,15 +1,14 @@
-use clap::CommandFactory;
-use still::cli::args::Cli;
+use std::process::Command;
 
 #[rustfmt::skip]
 #[test]
-fn default_help_is_generated_by_clap() {
-    let help = clap_help();
+fn default_help_matches_binary_output() {
+    let help = still_help();
 
     insta::assert_snapshot!(help, @r###"
 Universal Package Manager + Version Manager
 
-Usage: Still [COMMAND]
+Usage: still [COMMAND]
 
 Commands:
   init       Initialize configuration for a new project
@@ -35,14 +34,14 @@ Options:
 
 #[test]
 fn default_build_does_not_expose_tui_command() {
-    let help = clap_help();
+    let help = still_help();
 
     assert!(!help.contains("  tui"));
 }
 
 #[test]
 fn help_does_not_expose_non_priority_commands() {
-    let help = clap_help();
+    let help = still_help();
 
     assert!(!help.contains("translate"));
     assert!(!help.contains("convert"));
@@ -50,12 +49,17 @@ fn help_does_not_expose_non_priority_commands() {
     assert!(!help.contains("  web"));
 }
 
-fn clap_help() -> String {
-    let mut command = Cli::command();
-    let mut bytes = Vec::new();
-    command
-        .write_help(&mut bytes)
-        .expect("help output should render");
-    bytes.push(b'\n');
-    String::from_utf8(bytes).expect("help output should be utf8")
+fn still_help() -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_still"))
+        .arg("--help")
+        .output()
+        .expect("still --help should run");
+
+    assert!(
+        output.status.success(),
+        "still --help should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).expect("help output should be utf8")
 }
