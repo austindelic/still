@@ -26,8 +26,6 @@ pub mod planning;
 pub mod platform;
 /// Source selection, source registries, and item-kind inference.
 pub mod resolve;
-/// Synchronous runtime facade for frontend callers.
-pub mod runtime;
 /// Typed models for external and Still-owned specs.
 pub mod specs;
 /// Project trust marker verification.

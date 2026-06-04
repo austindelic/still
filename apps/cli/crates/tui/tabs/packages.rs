@@ -1,8 +1,5 @@
 //! Package browser backed by cached Still registry metadata.
 
-use engine::infra::paths::PathOps;
-use engine::platform::System;
-use engine::resolve::registries::specs::brew::{CaskSpec, FormulaSpec};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{
@@ -67,72 +64,7 @@ impl PackageBrowser {
     }
 
     fn load_packages_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let mut rows = Vec::new();
-        rows.extend(Self::load_formulas_from_cache()?);
-        rows.extend(Self::load_casks_from_cache()?);
-        Ok(rows)
-    }
-
-    fn load_formulas_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let formula_path = System::cache_dir().join("still").join("formula.json");
-        if !formula_path.exists() {
-            return Ok(vec![]);
-        }
-
-        let json_content = fs::read_to_string(&formula_path)?;
-        let json_array: serde_json::Value = serde_json::from_str(&json_content)
-            .map_err(|err| format!("failed to parse formula cache: {err}"))?;
-        let array = json_array
-            .as_array()
-            .ok_or("formula cache is not an array")?;
-
-        let mut rows = Vec::new();
-        for formula_value in array {
-            let Ok(formula) = serde_json::from_value::<FormulaSpec>(formula_value.clone()) else {
-                continue;
-            };
-            let installed = !formula.installed.is_empty();
-            rows.push(PackageRow {
-                kind: PackageKind::Package,
-                name: formula.name,
-                version: formula.versions.stable,
-                state: state_label(installed).to_string(),
-            });
-        }
-
-        Ok(rows)
-    }
-
-    fn load_casks_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cask_path = System::cache_dir().join("still").join("cask.json");
-        if !cask_path.exists() {
-            return Ok(vec![]);
-        }
-
-        let json_content = fs::read_to_string(&cask_path)?;
-        let json_array: serde_json::Value = serde_json::from_str(&json_content)
-            .map_err(|err| format!("failed to parse app cache: {err}"))?;
-        let array = json_array.as_array().ok_or("app cache is not an array")?;
-
-        let mut rows = Vec::new();
-        for cask_value in array {
-            let Ok(cask) = serde_json::from_value::<CaskSpec>(cask_value.clone()) else {
-                continue;
-            };
-            let installed = !cask.installed.is_empty();
-            rows.push(PackageRow {
-                kind: PackageKind::App,
-                name: cask.token,
-                version: if cask.version.is_empty() {
-                    "-".to_string()
-                } else {
-                    cask.version
-                },
-                state: state_label(installed).to_string(),
-            });
-        }
-
-        Ok(rows)
+        Ok(Vec::new())
     }
 
     fn filtered_rows(&self, query: &str) -> Vec<&PackageRow> {
@@ -312,10 +244,6 @@ impl PackageBrowser {
     fn item_count(&self, search_query: &str) -> usize {
         self.filtered_rows(search_query).len()
     }
-}
-
-fn state_label(installed: bool) -> &'static str {
-    if installed { "Installed" } else { "Available" }
 }
 
 fn label_value(label: &'static str, value: &str) -> Line<'static> {

@@ -1,6 +1,6 @@
 //! Side-effect-free plans produced before execution.
 
-use crate::actions::install::InstallRequest;
+use crate::actions::install::{InstallRequest, classify_install_items};
 use crate::error::{EngineError, EngineResult};
 use crate::specs::item::{ItemKind, ItemSpec};
 
@@ -19,9 +19,10 @@ impl InstallPlan {
             return Err(EngineError::EmptyInstallRequest);
         }
 
+        let items = classify_install_items(&request.items)?;
+
         Ok(Self {
-            operations: request
-                .items
+            operations: items
                 .into_iter()
                 .map(|item| PlanOperation::Install {
                     kind: item.kind,
@@ -96,7 +97,7 @@ mod tests {
 
     fn item(kind: ItemKind, spec: &str) -> InstallItemRequest {
         InstallItemRequest {
-            kind,
+            kind: Some(kind),
             spec: spec.parse().unwrap(),
             tool: Default::default(),
         }

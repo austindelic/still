@@ -48,6 +48,11 @@ impl NpmSource {
     }
 }
 
+/// Returns the static npm source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    NpmSource::new().descriptor()
+}
+
 impl Source for NpmSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

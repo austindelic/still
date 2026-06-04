@@ -1,7 +1,6 @@
 //! Source selection, item-kind inference, and source registry composition.
 
 pub mod infer;
-pub mod registries;
 pub mod registry;
 pub mod source;
 

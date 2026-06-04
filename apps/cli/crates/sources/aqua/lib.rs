@@ -42,6 +42,11 @@ impl AquaSource {
     }
 }
 
+/// Returns the static Aqua source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    AquaSource::new().descriptor()
+}
+
 impl Source for AquaSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

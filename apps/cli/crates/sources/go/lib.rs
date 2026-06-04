@@ -34,6 +34,11 @@ impl GoSource {
     }
 }
 
+/// Returns the static Go source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    GoSource::new().descriptor()
+}
+
 impl Source for GoSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

@@ -3,8 +3,8 @@
 use crate::components::action_menu::{Action, ActionMenu, ActionMenuState};
 use crate::tabs::packages::{NavigationDirection, PackageBrowser, PackageKind, PackageRow};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use engine::actions::install::{InstallAndRecordRequest, InstallItemRequest, InstallRequest};
-use engine::actions::uninstall::{UninstallRequest, UninstallTarget};
+use engine::api::install::{InstallAndRecordRequest, InstallItemRequest, InstallRequest};
+use engine::api::uninstall::{UninstallRequest, UninstallTarget};
 use engine::specs::item::{ItemKind, ItemSpec};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -277,15 +277,13 @@ impl App {
 fn install_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
     let item = match row.kind {
         PackageKind::Package => InstallItemRequest {
-            kind: ItemKind::Package,
+            kind: Some(ItemKind::Package),
             spec: row.name.parse::<ItemSpec>().map_err(io_error)?,
             tool: Default::default(),
         },
         PackageKind::App => InstallItemRequest {
-            kind: ItemKind::App,
-            spec: format!("{}@latest@homebrew-cask", row.name)
-                .parse::<ItemSpec>()
-                .map_err(io_error)?,
+            kind: Some(ItemKind::App),
+            spec: row.name.parse::<ItemSpec>().map_err(io_error)?,
             tool: Default::default(),
         },
     };
@@ -316,7 +314,7 @@ fn uninstall_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
             kind: Some(ItemKind::App),
             name: row.name.clone(),
             version: "latest".to_string(),
-            backend: Some("homebrew-cask".parse().map_err(io_error)?),
+            backend: None,
             exact: false,
         },
     };

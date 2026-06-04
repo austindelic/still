@@ -1,6 +1,6 @@
 use std::io::Write;
 
-pub trait Output {
+pub trait Ui {
     fn info(&mut self, msg: &str);
     fn error(&mut self, msg: &str);
     fn success(&mut self, msg: &str);
@@ -8,9 +8,9 @@ pub trait Output {
 }
 
 #[derive(Debug, Default)]
-pub struct StdOutput;
+pub struct TerminalUi;
 
-impl Output for StdOutput {
+impl Ui for TerminalUi {
     fn info(&mut self, msg: &str) {
         let mut stdout = anstream::stdout();
         let _ = writeln!(stdout, "{msg}");
@@ -35,13 +35,13 @@ impl Output for StdOutput {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg(test)]
 #[allow(dead_code)]
-pub struct BufferedOutput {
+pub struct BufferedUi {
     pub stdout: String,
     pub stderr: String,
 }
 
 #[cfg(test)]
-impl Output for BufferedOutput {
+impl Ui for BufferedUi {
     fn info(&mut self, msg: &str) {
         push_line(&mut self.stdout, msg);
     }

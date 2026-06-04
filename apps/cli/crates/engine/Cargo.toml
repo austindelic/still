@@ -9,8 +9,6 @@ path = "lib.rs"
 
 [dependencies]
 tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread"] }
-flate2 = "1.1.5"
-tar = "0.4.44"
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml_edit = { version = "0.23", features = ["serde"] }
@@ -21,7 +19,6 @@ reqwest = { version = "0.13.4", default-features = false, features = [
   "rustls",
 ] }
 dirs = { workspace = true }
-urlencoding = "2.1.3"
 sha2 = "0.10.9"
 anyhow = { workspace = true }
 thiserror = { workspace = true }

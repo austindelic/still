@@ -37,7 +37,7 @@ pub fn add_install_items_with_force(
     }
 
     for item in items {
-        match item.kind {
+        match install_item_kind(item)? {
             ItemKind::Tool => add_tool(&mut doc, &item.spec),
             ItemKind::Package => add_package_like(&mut doc, "packages", &item.spec),
             ItemKind::App => add_package_like(&mut doc, "apps", &item.spec),
@@ -49,9 +49,14 @@ pub fn add_install_items_with_force(
 
 fn reject_conflicting_request_items(items: &[InstallItemRequest]) -> EngineResult<()> {
     for (index, item) in items.iter().enumerate() {
+        let kind = install_item_kind(item)?;
         let Some(existing) = items[..index]
             .iter()
-            .find(|existing| existing.kind == item.kind && existing.spec.name == item.spec.name)
+            .find(|existing| {
+                install_item_kind(existing)
+                    .is_ok_and(|existing_kind| existing_kind == kind)
+                    && existing.spec.name == item.spec.name
+            })
         else {
             continue;
         };
@@ -63,7 +68,7 @@ fn reject_conflicting_request_items(items: &[InstallItemRequest]) -> EngineResul
         return Err(EngineError::Conflict {
             message: format!(
                 "{} {} was requested more than once with a different version or backend; pass --force to update it",
-                item.kind, item.spec.name
+                kind, item.spec.name
             ),
         });
     }
@@ -78,10 +83,11 @@ fn reject_conflicting_install_items(
         if existing_item_matches(config, item) != Some(false) {
             continue;
         }
+        let kind = install_item_kind(item)?;
         return Err(EngineError::Conflict {
             message: format!(
                 "{} {} is already configured with a different version or backend; pass --force to update it",
-                item.kind, item.spec.name
+                kind, item.spec.name
             ),
         });
     }
@@ -89,7 +95,7 @@ fn reject_conflicting_install_items(
 }
 
 fn install_items_match(left: &InstallItemRequest, right: &InstallItemRequest) -> bool {
-    left.kind == right.kind
+    install_item_kind(left).ok() == install_item_kind(right).ok()
         && left.spec.name == right.spec.name
         && left.spec.version == right.spec.version
         && left.spec.backend == right.spec.backend
@@ -99,7 +105,7 @@ fn existing_item_matches(
     config: &crate::specs::toml::StillConfig,
     item: &InstallItemRequest,
 ) -> Option<bool> {
-    match item.kind {
+    match install_item_kind(item).ok()? {
         ItemKind::Tool => config
             .tools
             .get(&item.spec.name)
@@ -142,6 +148,14 @@ fn package_entry_matches(map: &crate::specs::toml::PackageMap, spec: &ItemSpec) 
     }
 
     None
+}
+
+fn install_item_kind(item: &InstallItemRequest) -> EngineResult<ItemKind> {
+    match item.kind {
+        Some(kind) => Ok(kind),
+        None => crate::actions::install::classify_install_items(std::slice::from_ref(item))
+            .map(|items| items[0].kind),
+    }
 }
 
 /// Removes one named item from a selected kind, or infers the kind from config.
@@ -745,7 +759,7 @@ mod tests {
 
     fn item(kind: ItemKind, spec: &str) -> InstallItemRequest {
         InstallItemRequest {
-            kind,
+            kind: Some(kind),
             spec: spec.parse::<ItemSpec>().unwrap(),
             tool: Default::default(),
         }

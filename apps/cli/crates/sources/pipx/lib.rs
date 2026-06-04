@@ -43,6 +43,11 @@ impl PipxSource {
     }
 }
 
+/// Returns the static pipx source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    PipxSource::new().descriptor()
+}
+
 impl Source for PipxSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

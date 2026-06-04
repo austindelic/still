@@ -37,6 +37,11 @@ impl DnfSource {
     }
 }
 
+/// Returns the static dnf source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    DnfSource::new().descriptor()
+}
+
 impl Source for DnfSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

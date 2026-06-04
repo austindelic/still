@@ -1,27 +1,10 @@
 //! Feature- and target-aware registry for compiled source crates.
 
+#[cfg(any(feature = "source-kit", test))]
 use crate::platform::PlatformId;
 use crate::resolve::source::{SourceCapability, SourceResolver};
+#[cfg(any(feature = "source-kit", test))]
 use crate::specs::item::ItemKind;
-
-#[allow(dead_code)]
-const TOOL: &[ItemKind] = &[ItemKind::Tool];
-#[allow(dead_code)]
-const PACKAGE: &[ItemKind] = &[ItemKind::Package];
-#[allow(dead_code)]
-const APP: &[ItemKind] = &[ItemKind::App];
-#[allow(dead_code)]
-const TOOL_PACKAGE_APP: &[ItemKind] = &[ItemKind::Tool, ItemKind::Package, ItemKind::App];
-#[allow(dead_code)]
-const PACKAGE_APP: &[ItemKind] = &[ItemKind::Package, ItemKind::App];
-#[allow(dead_code)]
-const ALL_PLATFORMS: &[PlatformId] = &[PlatformId::Macos, PlatformId::Linux, PlatformId::Windows];
-#[allow(dead_code)]
-const MACOS: &[PlatformId] = &[PlatformId::Macos];
-#[allow(dead_code)]
-const LINUX: &[PlatformId] = &[PlatformId::Linux];
-#[allow(dead_code)]
-const WINDOWS: &[PlatformId] = &[PlatformId::Windows];
 
 /// Source capability compiled into this engine build.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,19 +43,18 @@ impl SourceRegistry {
         )
     }
 
-    #[allow(dead_code)]
-    fn push(
-        &mut self,
-        id: &'static str,
-        kinds: &'static [ItemKind],
-        platforms: &'static [PlatformId],
-    ) {
+    fn push_capability(&mut self, capability: SourceCapability) {
         self.sources.push(CompiledSource {
-            capability: SourceCapability {
-                id,
-                kinds,
-                platforms,
-            },
+            capability,
+        });
+    }
+
+    #[cfg(feature = "source-kit")]
+    fn push_descriptor(&mut self, descriptor: still_source_kit::SourceDescriptor) {
+        self.push_capability(SourceCapability {
+            id: descriptor.id,
+            kinds: convert_kinds(descriptor.item_kinds),
+            platforms: convert_platforms(descriptor.target_os),
         });
     }
 }
@@ -81,57 +63,90 @@ impl SourceRegistry {
 fn register_sources(registry: &mut SourceRegistry) {
     #[cfg(feature = "source-aqua")]
     if still_source_aqua::is_host_enabled() {
-        registry.push(still_source_aqua::SOURCE_ID, TOOL, ALL_PLATFORMS);
+        registry.push_descriptor(still_source_aqua::descriptor());
     }
 
     #[cfg(feature = "source-homebrew")]
     if still_source_homebrew::is_host_enabled() {
-        registry.push(still_source_homebrew::SOURCE_ID, TOOL_PACKAGE_APP, MACOS);
+        registry.push_descriptor(still_source_homebrew::descriptor());
     }
 
     #[cfg(feature = "source-cargo")]
     if still_source_cargo::is_host_enabled() {
-        registry.push(still_source_cargo::SOURCE_ID, TOOL, ALL_PLATFORMS);
+        registry.push_descriptor(still_source_cargo::descriptor());
     }
 
     #[cfg(feature = "source-npm")]
     if still_source_npm::is_host_enabled() {
-        registry.push(still_source_npm::SOURCE_ID, TOOL, ALL_PLATFORMS);
+        registry.push_descriptor(still_source_npm::descriptor());
     }
 
     #[cfg(feature = "source-pipx")]
     if still_source_pipx::is_host_enabled() {
-        registry.push(still_source_pipx::SOURCE_ID, TOOL, ALL_PLATFORMS);
+        registry.push_descriptor(still_source_pipx::descriptor());
     }
 
     #[cfg(feature = "source-go")]
     if still_source_go::is_host_enabled() {
-        registry.push(still_source_go::SOURCE_ID, TOOL, ALL_PLATFORMS);
+        registry.push_descriptor(still_source_go::descriptor());
     }
 
     #[cfg(feature = "source-apt")]
     if still_source_apt::is_host_enabled() {
-        registry.push(still_source_apt::SOURCE_ID, PACKAGE, LINUX);
+        registry.push_descriptor(still_source_apt::descriptor());
     }
 
     #[cfg(feature = "source-dnf")]
     if still_source_dnf::is_host_enabled() {
-        registry.push(still_source_dnf::SOURCE_ID, PACKAGE, LINUX);
+        registry.push_descriptor(still_source_dnf::descriptor());
     }
 
     #[cfg(feature = "source-pacman")]
     if still_source_pacman::is_host_enabled() {
-        registry.push(still_source_pacman::SOURCE_ID, PACKAGE, LINUX);
+        registry.push_descriptor(still_source_pacman::descriptor());
     }
 
     #[cfg(feature = "source-winget")]
     if still_source_winget::is_host_enabled() {
-        registry.push(still_source_winget::SOURCE_ID, PACKAGE_APP, WINDOWS);
+        registry.push_descriptor(still_source_winget::descriptor());
     }
 
     #[cfg(feature = "source-flatpak")]
     if still_source_flatpak::is_host_enabled() {
-        registry.push(still_source_flatpak::SOURCE_ID, APP, LINUX);
+        registry.push_descriptor(still_source_flatpak::descriptor());
+    }
+}
+
+#[cfg(feature = "source-kit")]
+fn convert_kinds(kinds: &'static [still_source_kit::ItemKind]) -> &'static [ItemKind] {
+    match kinds {
+        [still_source_kit::ItemKind::Tool] => &[ItemKind::Tool],
+        [still_source_kit::ItemKind::Package] => &[ItemKind::Package],
+        [still_source_kit::ItemKind::App] => &[ItemKind::App],
+        [
+            still_source_kit::ItemKind::Tool,
+            still_source_kit::ItemKind::Package,
+            still_source_kit::ItemKind::App,
+        ] => &[ItemKind::Tool, ItemKind::Package, ItemKind::App],
+        [still_source_kit::ItemKind::Package, still_source_kit::ItemKind::App] => {
+            &[ItemKind::Package, ItemKind::App]
+        }
+        _ => &[],
+    }
+}
+
+#[cfg(feature = "source-kit")]
+fn convert_platforms(platforms: &'static [still_source_kit::TargetOs]) -> &'static [PlatformId] {
+    match platforms {
+        [still_source_kit::TargetOs::Macos] => &[PlatformId::Macos],
+        [still_source_kit::TargetOs::Linux] => &[PlatformId::Linux],
+        [still_source_kit::TargetOs::Windows] => &[PlatformId::Windows],
+        [
+            still_source_kit::TargetOs::Macos,
+            still_source_kit::TargetOs::Linux,
+            still_source_kit::TargetOs::Windows,
+        ] => &[PlatformId::Macos, PlatformId::Linux, PlatformId::Windows],
+        _ => &[],
     }
 }
 

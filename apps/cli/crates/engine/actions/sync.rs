@@ -262,7 +262,7 @@ fn install_requests(items: &[SyncItem]) -> Vec<InstallItemRequest> {
     items
         .iter()
         .map(|item| InstallItemRequest {
-            kind: item.kind,
+            kind: Some(item.kind),
             spec: item.spec.clone(),
             tool: item.tool.clone(),
         })

@@ -26,6 +26,13 @@ pub enum EngineError {
     UnsupportedSourceForPlatform { id: String, platform: String },
     #[error("no source candidates are available for {kind} items on {platform}")]
     NoSourceCandidates { kind: String, platform: String },
+    #[error("source install planning for {kind} {name}@{version} from {source_id} is not implemented yet")]
+    SourceInstallNotImplemented {
+        source_id: String,
+        kind: String,
+        name: String,
+        version: String,
+    },
     #[error("invalid item spec: {reason}")]
     InvalidItemSpec { reason: String },
     #[error("invalid config: {reason}")]

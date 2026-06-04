@@ -38,6 +38,11 @@ impl AptSource {
     }
 }
 
+/// Returns the static apt source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    AptSource::new().descriptor()
+}
+
 impl Source for AptSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

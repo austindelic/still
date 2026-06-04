@@ -34,6 +34,11 @@ impl FlatpakSource {
     }
 }
 
+/// Returns the static Flatpak source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    FlatpakSource::new().descriptor()
+}
+
 impl Source for FlatpakSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

@@ -38,6 +38,11 @@ impl PacmanSource {
     }
 }
 
+/// Returns the static pacman source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    PacmanSource::new().descriptor()
+}
+
 impl Source for PacmanSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

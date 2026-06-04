@@ -311,10 +311,10 @@ fn extend_missing(
         if is_missing(spec)
             && !items
                 .iter()
-                .any(|item| item.kind == kind && item.spec.name == spec.name)
+                .any(|item| item.kind == Some(kind) && item.spec.name == spec.name)
         {
             items.push(InstallItemRequest {
-                kind,
+                kind: Some(kind),
                 spec: spec.clone(),
                 tool: Default::default(),
             });
@@ -1503,7 +1503,7 @@ mod tests {
             result
                 .auto_added
                 .iter()
-                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+                .any(|item| item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-nextest")
         );
         let updated = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         let config = parse_still_toml(&updated).unwrap();
@@ -1644,7 +1644,7 @@ mod tests {
             result
                 .auto_added
                 .iter()
-                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+                .any(|item| item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-nextest")
         );
         let updated = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         let config = parse_still_toml(&updated).unwrap();
@@ -1702,7 +1702,7 @@ mod tests {
             result
                 .missing_dependencies
                 .iter()
-                .any(|item| item.kind == ItemKind::Package && item.spec.name == "jq")
+                .any(|item| item.kind == Some(ItemKind::Package) && item.spec.name == "jq")
         );
     }
 
@@ -1735,7 +1735,7 @@ mod tests {
             result
                 .missing_dependencies
                 .iter()
-                .any(|item| { item.kind == ItemKind::Tool && item.spec.name == "cargo-audit" })
+                .any(|item| { item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-audit" })
         );
         let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         assert!(!content.contains("cargo-audit ="));
@@ -1775,17 +1775,17 @@ mod tests {
 
         assert_eq!(result.missing_dependencies.len(), 3);
         assert!(result.missing_dependencies.iter().any(|item| {
-            item.kind == ItemKind::Tool
+            item.kind == Some(ItemKind::Tool)
                 && item.spec.name == "cargo-nextest"
                 && item.spec.version.as_str() == "0.9.99"
         }));
         assert!(result.missing_dependencies.iter().any(|item| {
-            item.kind == ItemKind::Package
+            item.kind == Some(ItemKind::Package)
                 && item.spec.name == "llvm"
                 && item.spec.backend.as_ref().unwrap().as_str() == "homebrew"
         }));
         assert!(result.missing_dependencies.iter().any(|item| {
-            item.kind == ItemKind::App
+            item.kind == Some(ItemKind::App)
                 && item.spec.name == "zed"
                 && item.spec.version.as_str() == "1.0.0"
         }));
@@ -1855,7 +1855,7 @@ mod tests {
             result
                 .pending_auto_dependencies
                 .iter()
-                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+                .any(|item| item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-nextest")
         );
         let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         let config = parse_still_toml(&content).unwrap();
@@ -1909,7 +1909,7 @@ mod tests {
             result
                 .pending_auto_dependencies
                 .iter()
-                .any(|item| item.kind == ItemKind::Tool && item.spec.name == "cargo-nextest")
+                .any(|item| item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-nextest")
         );
         assert!(!temp.path().join(".agents/skills").exists());
         assert!(!temp.path().join("still.lock.toml").exists());
@@ -2074,7 +2074,7 @@ mod tests {
             result
                 .missing_dependencies
                 .iter()
-                .any(|item| item.kind == ItemKind::Package && item.spec.name == "jq")
+                .any(|item| item.kind == Some(ItemKind::Package) && item.spec.name == "jq")
         );
         assert!(!temp.path().join(".agents/skills").exists());
     }

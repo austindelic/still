@@ -42,6 +42,11 @@ impl CargoSource {
     }
 }
 
+/// Returns the static Cargo source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    CargoSource::new().descriptor()
+}
+
 impl Source for CargoSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {
