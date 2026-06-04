@@ -1,3 +1,5 @@
+mod cli;
+
 fn main() {
-    still::cli::entry();
+    cli::entry();
 }
