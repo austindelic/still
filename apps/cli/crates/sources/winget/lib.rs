@@ -46,6 +46,11 @@ impl WingetSource {
     }
 }
 
+/// Returns the static winget source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    WingetSource::new().descriptor()
+}
+
 impl Source for WingetSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {

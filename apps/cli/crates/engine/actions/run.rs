@@ -8,10 +8,10 @@ use crate::error::{EngineContext, Result};
 
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::error::EngineError;
+use crate::infra::paths::PathOps;
+use crate::platform::System;
 use crate::specs::toml::parse_still_toml;
-use crate::system::System;
 use crate::trust::assert_config_trusted;
-use crate::utils::paths::PathOps;
 
 /// Request to run a child command with configured environment values.
 #[derive(Debug, Clone)]

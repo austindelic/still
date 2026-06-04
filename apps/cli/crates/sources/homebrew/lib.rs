@@ -1,11 +1,16 @@
 //! Homebrew source scaffold backed by raw formula and cask metadata.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use still_source_kit::{
     InstallContext, InstallModel, InstallPlan, ItemKind, MetadataFormat, MetadataInventory,
     RawSourceMetadata, ResolveRequest, ResolvedItem, Source, SourceDescriptor, SourceError,
     SourceResult, TargetOs,
 };
+
+pub mod brew;
+pub use brew::{BottleFileSpec, BottleSpec, CaskSpec, FormulaSpec};
 
 pub const SOURCE_ID: &str = "homebrew";
 
@@ -47,6 +52,92 @@ pub struct CaskMetadata {
     pub depends_on: Vec<String>,
 }
 
+/// Source kind for cached Homebrew package metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachedHomebrewPackageKind {
+    Formula,
+    Cask,
+}
+
+/// Display-ready package metadata loaded from Homebrew formula and cask caches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedHomebrewPackage {
+    pub kind: CachedHomebrewPackageKind,
+    pub name: String,
+    pub version: String,
+    pub installed: bool,
+}
+
+/// Loads cached Homebrew formula and cask metadata from a cache root.
+pub fn load_cached_homebrew_packages(
+    cache_root: &Path,
+) -> SourceResult<Vec<CachedHomebrewPackage>> {
+    let mut packages = Vec::new();
+    packages.extend(load_cached_formulae(&cache_root.join("formula.json"))?);
+    packages.extend(load_cached_casks(&cache_root.join("cask.json"))?);
+    Ok(packages)
+}
+
+fn load_cached_formulae(path: &Path) -> SourceResult<Vec<CachedHomebrewPackage>> {
+    let Some(array) = load_json_array(path)? else {
+        return Ok(Vec::new());
+    };
+    Ok(array
+        .into_iter()
+        .filter_map(|value| serde_json::from_value::<FormulaSpec>(value).ok())
+        .map(|formula| CachedHomebrewPackage {
+            kind: CachedHomebrewPackageKind::Formula,
+            name: formula.name,
+            version: formula.versions.stable,
+            installed: !formula.installed.is_empty(),
+        })
+        .collect())
+}
+
+fn load_cached_casks(path: &Path) -> SourceResult<Vec<CachedHomebrewPackage>> {
+    let Some(array) = load_json_array(path)? else {
+        return Ok(Vec::new());
+    };
+    Ok(array
+        .into_iter()
+        .filter_map(|value| serde_json::from_value::<CaskSpec>(value).ok())
+        .map(|cask| CachedHomebrewPackage {
+            kind: CachedHomebrewPackageKind::Cask,
+            name: cask.token,
+            version: if cask.version.is_empty() {
+                "latest".to_string()
+            } else {
+                cask.version
+            },
+            installed: !cask.installed.is_empty(),
+        })
+        .collect())
+}
+
+fn load_json_array(path: &Path) -> SourceResult<Option<Vec<serde_json::Value>>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path).map_err(|err| SourceError::InvalidMetadata {
+        source_id: SOURCE_ID,
+        reason: format!("failed to read {}: {err}", path.display()),
+    })?;
+    let value = serde_json::from_str::<serde_json::Value>(&content).map_err(|err| {
+        SourceError::InvalidMetadata {
+            source_id: SOURCE_ID,
+            reason: format!("failed to parse {}: {err}", path.display()),
+        }
+    })?;
+    value
+        .as_array()
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| SourceError::InvalidMetadata {
+            source_id: SOURCE_ID,
+            reason: format!("{} is not a JSON array", path.display()),
+        })
+}
+
 /// Source implementation for Homebrew metadata.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HomebrewSource;
@@ -56,6 +147,11 @@ impl HomebrewSource {
     pub const fn new() -> Self {
         Self
     }
+}
+
+/// Returns the static Homebrew source descriptor.
+pub fn descriptor() -> SourceDescriptor {
+    HomebrewSource::new().descriptor()
 }
 
 impl Source for HomebrewSource {

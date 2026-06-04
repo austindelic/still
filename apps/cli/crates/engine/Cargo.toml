@@ -9,24 +9,58 @@ path = "lib.rs"
 
 [dependencies]
 tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread"] }
-flate2 = "1.1.5"
-tar = "0.4.44"
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml_edit = { version = "0.23", features = ["serde"] }
-semver = "1.0.27"
-reqwest = { version = "0.13.4", default-features = false, features = [
-  "json",
-  "gzip",
-  "rustls",
-] }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+semver = { workspace = true }
+reqwest = { workspace = true }
 dirs = { workspace = true }
-urlencoding = "2.1.3"
-sha2 = "0.10.9"
+sha2 = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+still_source_aqua = { package = "still-source-aqua", path = "../sources/aqua", optional = true }
+still_source_apt = { package = "still-source-apt", path = "../sources/apt", optional = true }
+still_source_cargo = { package = "still-source-cargo", path = "../sources/cargo", optional = true }
+still_source_dnf = { package = "still-source-dnf", path = "../sources/dnf", optional = true }
+still_source_flatpak = { package = "still-source-flatpak", path = "../sources/flatpak", optional = true }
+still_source_go = { package = "still-source-go", path = "../sources/go", optional = true }
+still_source_homebrew = { package = "still-source-homebrew", path = "../sources/homebrew", optional = true }
+still_source_kit = { package = "still-source-kit", path = "../source-kit", optional = true }
+still_source_npm = { package = "still-source-npm", path = "../sources/npm", optional = true }
+still_source_pacman = { package = "still-source-pacman", path = "../sources/pacman", optional = true }
+still_source_pipx = { package = "still-source-pipx", path = "../sources/pipx", optional = true }
+still_source_winget = { package = "still-source-winget", path = "../sources/winget", optional = true }
+
+[features]
+default = []
+source-aqua = ["dep:still_source_aqua", "source-kit"]
+source-apt = ["dep:still_source_apt", "source-kit"]
+source-cargo = ["dep:still_source_cargo", "source-kit"]
+source-dnf = ["dep:still_source_dnf", "source-kit"]
+source-flatpak = ["dep:still_source_flatpak", "source-kit"]
+source-go = ["dep:still_source_go", "source-kit"]
+source-homebrew = ["dep:still_source_homebrew", "source-kit"]
+source-kit = ["dep:still_source_kit"]
+source-npm = ["dep:still_source_npm", "source-kit"]
+source-pacman = ["dep:still_source_pacman", "source-kit"]
+source-pipx = ["dep:still_source_pipx", "source-kit"]
+source-winget = ["dep:still_source_winget", "source-kit"]
+sources = [
+  "source-aqua",
+  "source-apt",
+  "source-cargo",
+  "source-dnf",
+  "source-flatpak",
+  "source-go",
+  "source-homebrew",
+  "source-npm",
+  "source-pacman",
+  "source-pipx",
+  "source-winget",
+]
 
 [dev-dependencies]
 insta = { workspace = true }
-tempfile = "3.25"
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

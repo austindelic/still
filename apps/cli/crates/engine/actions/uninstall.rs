@@ -4,18 +4,18 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::error::{EngineContext, Result};
-use serde::Deserialize;
 
 use crate::actions::sync::refresh_active_lockfile;
+use crate::config::edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::config_edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::error::EngineError;
+use crate::infra::paths::PathOps;
+use crate::inventory::{InstallMarker, read_install_marker};
 use crate::lockfile::lockfile_path;
+use crate::platform::System;
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::item::{BackendId, ItemKind};
 use crate::specs::toml::{PackageEntry, PackageMap, parse_still_toml};
-use crate::system::System;
-use crate::utils::paths::PathOps;
 
 /// Request to remove one configured item.
 #[derive(Debug, Clone)]
@@ -218,7 +218,7 @@ async fn managed_artifact_paths_at(
             continue;
         }
         let marker = match read_install_marker(&install_path).await? {
-            Some(marker) if marker.matches(kind, target) => marker,
+            Some(marker) if install_marker_matches(&marker, kind, target) => marker,
             Some(_) | None => continue,
         };
         paths.insert(install_path.clone());
@@ -241,51 +241,19 @@ async fn managed_artifact_paths_at(
     Ok(paths)
 }
 
-async fn read_install_marker(install_path: &Path) -> Result<Option<InstallMarker>> {
-    let marker_path = install_path.join("install.toml");
-    let content = match tokio::fs::read_to_string(&marker_path).await {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err.into()),
-    };
-    let marker = toml_edit::de::from_str(&content).with_context(|| {
-        format!(
-            "failed to parse Still install marker {}",
-            marker_path.display()
-        )
-    })?;
-    Ok(Some(marker))
-}
-
-#[derive(Debug, Deserialize)]
-struct InstallMarker {
-    kind: String,
-    name: String,
-    #[serde(default = "latest_version")]
-    version: String,
-    #[serde(default)]
-    backend: Option<String>,
-    #[serde(default)]
-    outputs: Vec<String>,
-    #[serde(default)]
-    linked_executables: Vec<String>,
-}
-
-fn latest_version() -> String {
-    "latest".to_string()
-}
-
-impl InstallMarker {
-    fn matches(&self, kind: ItemKind, target: &UninstallTarget) -> bool {
-        self.kind == kind.to_string()
-            && self.name == target.name
-            && (!target.exact
-                || (self.version == target.version
-                    && target
-                        .backend
-                        .as_ref()
-                        .is_none_or(|backend| self.backend.as_deref() == Some(backend.as_str()))))
-    }
+fn install_marker_matches(
+    marker: &InstallMarker,
+    kind: ItemKind,
+    target: &UninstallTarget,
+) -> bool {
+    marker.kind == kind.to_string()
+        && marker.name == target.name
+        && (!target.exact
+            || (marker.version == target.version
+                && target
+                    .backend
+                    .as_ref()
+                    .is_none_or(|backend| marker.backend.as_deref() == Some(backend.as_str()))))
 }
 
 fn is_safe_install_output(install_root: &Path, name: &str, path: &Path) -> bool {

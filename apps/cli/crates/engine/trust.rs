@@ -3,13 +3,13 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{EngineContext, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::EngineError;
-use crate::utils::hashing::Hashing;
+use crate::infra::hashing::Hashing;
 
 /// Trust marker file written under the project-local `.still` directory.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TrustMarker {
     pub config: String,
     pub fingerprint: String,
@@ -27,6 +27,15 @@ pub fn trust_marker_path(config_path: &Path) -> PathBuf {
 /// Computes the fingerprint stored in project trust markers.
 pub fn config_fingerprint(content: &[u8]) -> String {
     Hashing::sha256(content)
+}
+
+/// Renders the trust marker TOML written for a config path and fingerprint.
+pub fn trust_marker_content(config_path: &Path, fingerprint: String) -> Result<String> {
+    toml::to_string_pretty(&TrustMarker {
+        config: config_path.display().to_string(),
+        fingerprint,
+    })
+    .map_err(Into::into)
 }
 
 /// Fails unless the current config bytes match the project trust marker.
@@ -60,7 +69,7 @@ pub async fn assert_config_trusted(
 
 async fn read_marker(path: &Path) -> std::io::Result<TrustMarker> {
     let content = tokio::fs::read_to_string(path).await?;
-    let marker = toml_edit::de::from_str(&content)
+    let marker = toml::from_str(&content)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
     Ok(marker)
 }

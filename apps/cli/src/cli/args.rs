@@ -408,6 +408,22 @@ pub struct RunArgs {
     pub command: Vec<String>,
 }
 
+impl RunArgs {
+    pub fn into_command(self) -> Vec<String> {
+        let mut removed_separator = false;
+        self.command
+            .into_iter()
+            .filter(|arg| {
+                if !removed_separator && arg == "--" {
+                    removed_separator = true;
+                    return false;
+                }
+                true
+            })
+            .collect()
+    }
+}
+
 #[derive(clap::Args, Debug, Clone)]
 pub struct TaskArgs {
     #[arg(short, long)]
@@ -589,7 +605,8 @@ mod tests {
             panic!("expected run command");
         };
 
-        assert_eq!(args.command, ["cargo", "test", "--", "--quiet"]);
+        assert_eq!(args.clone().command, ["cargo", "test", "--", "--quiet"]);
+        assert_eq!(args.into_command(), ["cargo", "test", "--quiet"]);
     }
 
     impl Cli {

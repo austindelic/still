@@ -8,8 +8,8 @@ use crate::error::Result;
 use crate::actions::run::resolve_env_with_scope;
 use crate::config::{ConfigScope, find_project_config, global_config_path};
 use crate::error::EngineError;
-use crate::system::System;
-use crate::utils::paths::PathOps;
+use crate::infra::paths::PathOps;
+use crate::platform::System;
 
 /// Request to generate shell activation code.
 #[derive(Debug, Clone)]

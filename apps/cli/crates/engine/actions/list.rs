@@ -4,18 +4,18 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::error::{EngineContext, Result};
-use serde::Deserialize;
 
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
 use crate::error::EngineError;
+use crate::infra::paths::PathOps;
+use crate::inventory::InstallMarker;
+use crate::platform::System;
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
-use crate::specs::backend::{default_backend, normalize_auto_backend};
+use crate::resolve::{default_backend, normalize_auto_backend};
 use crate::specs::item::ItemKind;
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
-use crate::system::System;
-use crate::utils::paths::PathOps;
 
 /// Request to list configured state.
 #[derive(Debug, Clone)]
@@ -53,18 +53,6 @@ pub struct ListItem {
     pub project: bool,
     pub global: bool,
     pub installed: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct InstallMarker {
-    kind: String,
-    name: String,
-    version: String,
-    backend: Option<String>,
-    #[serde(default)]
-    outputs: Vec<String>,
-    #[serde(default)]
-    linked_executables: Vec<String>,
 }
 
 /// Reads selected config and returns configured items.
@@ -440,8 +428,8 @@ async fn read_marker_item(kind: ItemKind, path: PathBuf) -> Result<Option<ListIt
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
     };
-    let marker: InstallMarker = toml_edit::de::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let marker: InstallMarker =
+        toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
     if marker.kind.parse::<ItemKind>()? != kind {
         return Ok(None);
     }
@@ -866,7 +854,7 @@ mod tests {
             [item(
                 "openssl",
                 "3",
-                Some(crate::specs::backend::default_backend(
+                Some(crate::resolve::default_backend(
                     ItemKind::Package,
                     current_platform()
                 ))
@@ -877,7 +865,7 @@ mod tests {
             [item(
                 "firefox",
                 "latest",
-                Some(crate::specs::backend::default_backend(
+                Some(crate::resolve::default_backend(
                     ItemKind::App,
                     current_platform()
                 ))

@@ -235,7 +235,7 @@ fn trust_check(config_path: &Path) -> DoctorCheck {
             };
         }
     };
-    let marker = match toml_edit::de::from_str::<TrustMarker>(&marker_content) {
+    let marker = match toml::from_str::<TrustMarker>(&marker_content) {
         Ok(marker) => marker,
         Err(err) => {
             return DoctorCheck {

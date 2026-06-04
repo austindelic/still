@@ -4,27 +4,29 @@
 
 /// Install, uninstall, and other state-changing actions.
 pub mod actions;
-/// Config discovery and filesystem locations.
+/// Public request and result DTOs shared by CLI and TUI callers.
+pub mod api;
+/// Config discovery, parsing, mutation, and persistence.
 pub mod config;
-/// Desired-state config mutation helpers.
-pub mod config_edit;
+/// Normalized desired state produced from config.
+pub mod desired;
 /// Typed engine errors.
 pub mod error;
+/// Filesystem, network, archive, hashing, and process traits/adapters.
+pub mod infra;
+/// Install orchestration, layout, rollback, and receipt helpers.
+pub mod install;
+/// Installed-item inventory and receipt discovery.
+pub mod inventory;
 /// Lockfile rendering helpers.
 pub mod lockfile;
-/// Side-effect-free planning models.
-pub mod planner;
-/// Platform identifiers and filters.
+/// Side-effect-free planning.
+pub mod planning;
+/// Platform identifiers, filters, and compile-time selected host behavior.
 pub mod platform;
-/// Package registry integrations and re-exports.
-pub mod registries;
-/// Synchronous runtime facade for frontend callers.
-pub mod runtime;
+/// Source selection, source registries, and item-kind inference.
+pub mod resolve;
 /// Typed models for external and Still-owned specs.
 pub mod specs;
-/// Platform abstraction for host-specific behavior.
-pub mod system;
 /// Project trust marker verification.
 pub mod trust;
-/// Filesystem, network, archive, hashing, and path utilities.
-pub mod utils;

@@ -12,6 +12,10 @@ Before non-trivial engine changes, read:
 - `../../SPEC.md` for product behavior, command contract, and config/source syntax.
 - `../../AGENTS.md` for workspace-wide CLI guidance.
 
+When an engine change affects behavior, generated files, crate boundaries,
+architecture, dependency policy, or test expectations, update `../../README.md`,
+`../../SPEC.md`, and/or `../../DESIGN.md` in the same change.
+
 ## Responsibilities
 
 - Parse and model source-aware tool/package/app specs.
@@ -20,7 +24,7 @@ Before non-trivial engine changes, read:
 - Resolve source choices.
 - Plan and run installs, uninstalls, linking, cache writes, archive extraction,
   downloads, lockfile writes, inventory reads, and trust checks.
-- Own filesystem, hashing, networking, path, registry, platform, and source
+- Own filesystem, hashing, networking, path, source registry, platform, and source
   orchestration behavior.
 - Return typed requests, results, diagnostics, progress events, and errors that
   callers can format.
@@ -36,6 +40,10 @@ Before non-trivial engine changes, read:
 - Do not introduce hidden global state when a typed request can carry the needed context.
 - Use source terminology for new code. Older source-adapter naming is migration
   debt.
+- Use `toml` plus `serde` for owned/generated TOML files such as lockfiles,
+  trust markers, install markers, and generated metadata.
+- Use `toml_edit` only for preserving user-authored `still.toml` comments,
+  spacing, and ordering during edits.
 
 ## Platform And Sources
 
@@ -46,6 +54,8 @@ Before non-trivial engine changes, read:
 - Explicit source selection must not silently fall back to another source.
 - Missing source or `auto` should use ordered, compiled-in, OS-compatible source
   candidates.
+- Source crate optional dependencies and source feature wiring belong in
+  `crates/engine`; the root binary forwards feature flags only.
 - Shared installer machinery belongs in `crates/source-kit`; source-specific
   behavior belongs in `crates/sources/*`.
 

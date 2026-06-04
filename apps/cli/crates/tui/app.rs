@@ -1,11 +1,11 @@
 //! Main TUI application state, rendering, and input handling.
 
 use crate::components::action_menu::{Action, ActionMenu, ActionMenuState};
-use crate::tabs::packages::{NavigationDirection, PackageBrowser, PackageKind, PackageRow};
+use crate::session::EngineSession;
+use crate::tabs::packages::{NavigationDirection, PackageBrowser};
+#[cfg(test)]
+use crate::tabs::packages::{PackageKind, PackageRow};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use engine::actions::install::{InstallAndRecordRequest, InstallItemRequest, InstallRequest};
-use engine::actions::uninstall::{UninstallRequest, UninstallTarget};
-use engine::specs::item::{ItemKind, ItemSpec};
 use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
@@ -15,7 +15,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use std::io;
-use std::path::PathBuf;
 
 /// Main application state machine for the terminal UI.
 #[derive(Debug)]
@@ -26,17 +25,25 @@ pub struct App {
     action_menu: ActionMenuState,
     status_message: Option<String>,
     package_browser: PackageBrowser,
+    session: Option<EngineSession>,
 }
 
 impl App {
     /// Creates a package browser backed by Still's cached item metadata.
     pub fn new() -> Self {
-        let (package_browser, status_message) = match PackageBrowser::new() {
+        let (package_browser, mut status_message) = match PackageBrowser::new() {
             Ok(browser) => (browser, None),
             Err(err) => (
                 PackageBrowser::default(),
                 Some(format!("Item cache unavailable: {err}")),
             ),
+        };
+        let session = match EngineSession::new() {
+            Ok(session) => Some(session),
+            Err(err) => {
+                status_message = Some(format!("Engine session unavailable: {err}"));
+                None
+            }
         };
 
         Self {
@@ -46,6 +53,7 @@ impl App {
             action_menu: ActionMenuState::Closed,
             status_message,
             package_browser,
+            session,
         }
     }
 }
@@ -255,16 +263,20 @@ impl App {
         let Some(row) = self.package_browser.selected_row(&self.search_query) else {
             return;
         };
+        let Some(session) = self.session.as_mut() else {
+            self.status_message = Some("Engine session unavailable".to_string());
+            return;
+        };
 
         match Action::all().get(action_idx).copied() {
             Some(Action::Install) => {
-                self.status_message = Some(match install_package_from_tui(&row) {
+                self.status_message = Some(match session.install_package(&row) {
                     Ok(()) => format!("Installed {}", row.name),
                     Err(err) => format!("Install failed: {err}"),
                 });
             }
             Some(Action::Uninstall) => {
-                self.status_message = Some(match uninstall_package_from_tui(&row) {
+                self.status_message = Some(match session.uninstall_package(&row) {
                     Ok(()) => format!("Uninstalled {}", row.name),
                     Err(err) => format!("Uninstall failed: {err}"),
                 });
@@ -272,86 +284,6 @@ impl App {
             None => {}
         }
     }
-}
-
-fn install_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
-    let item = match row.kind {
-        PackageKind::Package => InstallItemRequest {
-            kind: ItemKind::Package,
-            spec: row.name.parse::<ItemSpec>().map_err(io_error)?,
-            tool: Default::default(),
-        },
-        PackageKind::App => InstallItemRequest {
-            kind: ItemKind::App,
-            spec: format!("{}@latest@homebrew-cask", row.name)
-                .parse::<ItemSpec>()
-                .map_err(io_error)?,
-            tool: Default::default(),
-        },
-    };
-    let request = InstallAndRecordRequest {
-        start_dir: std::env::current_dir()?,
-        home_dir: home_dir()?,
-        global: false,
-        force: false,
-        install: InstallRequest { items: vec![item] },
-    };
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime
-        .block_on(engine::actions::install::run_and_record(request))
-        .map(|_| ())
-        .map_err(io_error)
-}
-
-fn uninstall_package_from_tui(row: &PackageRow) -> std::io::Result<()> {
-    let target = match row.kind {
-        PackageKind::Package => UninstallTarget {
-            kind: Some(ItemKind::Package),
-            name: row.name.clone(),
-            version: "latest".to_string(),
-            backend: None,
-            exact: false,
-        },
-        PackageKind::App => UninstallTarget {
-            kind: Some(ItemKind::App),
-            name: row.name.clone(),
-            version: "latest".to_string(),
-            backend: Some("homebrew-cask".parse().map_err(io_error)?),
-            exact: false,
-        },
-    };
-    let request = UninstallRequest {
-        start_dir: std::env::current_dir()?,
-        home_dir: home_dir()?,
-        global: false,
-        target,
-    };
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime
-        .block_on(engine::actions::uninstall::run(request))
-        .map(|_| ())
-        .map_err(io_error)
-}
-
-fn home_dir() -> std::io::Result<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
-        })
-}
-
-fn io_error(error: impl std::fmt::Display) -> std::io::Error {
-    std::io::Error::other(error.to_string())
-}
-
-/// Initializes terminal mode, runs the TUI application, and restores the terminal.
-pub fn launch_tui() -> io::Result<()> {
-    let mut terminal = ratatui::init();
-    let app_result = App::new().run(&mut terminal);
-    ratatui::restore();
-    app_result
 }
 
 #[cfg(test)]
