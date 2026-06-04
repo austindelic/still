@@ -1,30 +1,80 @@
-//! Root CLI facade and feature-gated no-argument behavior.
+pub mod args;
+pub mod commands;
+pub mod output;
+pub mod progress;
+pub mod runtime;
 
-pub use engine::cli::{args, commands, output, run_parsed, run_parsed_with_no_command};
+use clap::Parser;
+use miette::miette;
 
-/// Parses process arguments, dispatches commands, and exits on failure.
+use self::{
+    args::Cli,
+    commands::run_cli,
+    output::{Output, StdOutput},
+    runtime::{CliRuntime, RealRuntime},
+};
+
 pub fn entry() {
-    #[cfg(not(feature = "tui"))]
-    {
-        engine::cli::entry();
+    let code = match try_entry() {
+        Ok(code) => code,
+        Err(report) => {
+            eprintln!("{report:?}");
+            1
+        }
+    };
+
+    if code != 0 {
+        std::process::exit(code);
+    }
+}
+
+fn try_entry() -> miette::Result<i32> {
+    let cli = Cli::parse();
+    let mut output = StdOutput;
+
+    if cli.command.is_none() {
+        return Ok(run_without_command(&mut output));
     }
 
+    let mut runtime =
+        RealRuntime::new().map_err(|err| miette!("failed to initialize CLI runtime: {err}"))?;
+    Ok(run_parsed_with_no_command(
+        cli,
+        &mut runtime,
+        &mut output,
+        run_without_command,
+    ))
+}
+
+fn run_without_command<O: Output>(output: &mut O) -> i32 {
     #[cfg(feature = "tui")]
-    {
-        engine::cli::entry_with_no_command(run_without_command);
+    return launch_tui_or_report(output, still_tui::launch_tui);
+
+    #[cfg(not(feature = "tui"))]
+    commands::print_help(output)
+}
+
+pub fn run_parsed_with_no_command<R, O, F>(
+    cli: Cli,
+    runtime: &mut R,
+    output: &mut O,
+    no_command: F,
+) -> i32
+where
+    R: CliRuntime,
+    O: Output,
+    F: FnOnce(&mut O) -> i32,
+{
+    match cli.command {
+        Some(command) => run_cli(command, runtime, output),
+        None => no_command(output),
     }
 }
 
-#[cfg(feature = "tui")]
-fn run_without_command<O: output::Output>(output: &mut O) -> i32 {
-    launch_tui_or_report(output, still_tui::launch_tui)
-}
-
-/// Launches the TUI and maps terminal startup failures into CLI output.
 #[cfg(feature = "tui")]
 pub fn launch_tui_or_report<O, F>(output: &mut O, launch: F) -> i32
 where
-    O: output::Output,
+    O: Output,
     F: FnOnce() -> std::io::Result<()>,
 {
     match launch() {
@@ -51,7 +101,7 @@ mod tests {
         stderr: String,
     }
 
-    impl output::Output for TestOutput {
+    impl Output for TestOutput {
         fn info(&mut self, msg: &str) {
             self.stdout.push_str(msg);
             self.stdout.push('\n');

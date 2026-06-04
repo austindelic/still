@@ -1,0 +1,17 @@
+[package]
+name = "still-source-aqua"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "still_source_aqua"
+path = "lib.rs"
+
+[features]
+default = []
+portable = []
+
+[dependencies]
+serde = { workspace = true }
+still-source-kit = { path = "../../source-kit" }

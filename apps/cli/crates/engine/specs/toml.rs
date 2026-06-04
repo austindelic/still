@@ -35,7 +35,9 @@ pub enum ToolEntry {
 #[serde(default, deny_unknown_fields)]
 pub struct ExpandedTool {
     pub version: String,
+    #[serde(alias = "source")]
     pub backend: Option<String>,
+    #[serde(alias = "sources")]
     pub backends: BTreeMap<String, String>,
     pub components: Vec<String>,
     pub targets: Vec<String>,
@@ -71,7 +73,9 @@ pub enum PackageEntry {
 #[serde(default, deny_unknown_fields)]
 pub struct ExpandedPackage {
     pub version: Option<String>,
+    #[serde(alias = "source")]
     pub backend: Option<String>,
+    #[serde(alias = "sources")]
     pub backends: BTreeMap<String, String>,
     pub names: BTreeMap<String, String>,
     pub platforms: Option<Vec<String>>,

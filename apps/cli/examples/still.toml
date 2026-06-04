@@ -5,13 +5,13 @@ go = "latest"
 
 [tools.rust]
 version = "stable"
-backend = "rustup"
+source = "rustup"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
 
 [tools.pnpm]
 version = "latest"
-backend = "npm"
+source = "npm"
 
 [env]
 RUST_LOG = "debug"
@@ -24,11 +24,11 @@ files = [
 
 [packages]
 latest = ["pandoc", "ripgrep", "jq", "ffmpeg"]
-postgresql = {version = "16", backend = "auto"}
+postgresql = {version = "16", source = "auto"}
 
 [packages.llvm]
 version = "18"
-backend = "auto"
+source = "auto"
 
 [packages.fd.names]
 macos = "fd"
@@ -45,7 +45,7 @@ latest = ["docker-desktop", "zed", "firefox"]
 
 [apps.visual-studio-code]
 version = "latest"
-backend = "auto"
+source = "auto"
 
 # ------------------------------------------------------------
 # Services
@@ -103,7 +103,7 @@ targets = ["claude", "codex"]
 instructions = "AGENTS.md"
 
 [agents.skills]
-rust-review = { source = "rust-review", auto = true, tools = ["rust@stable@rustup"], packages = ["llvm"] }
+rust-review = { source = "rust-review", auto = true, tools = ["rustup:rust@stable"], packages = ["llvm"] }
 repo-auditor = "repo-auditor"
 external-skill = { url = "https://example.com/skill", version = "1.2.0" }
 pinned-skill = "https://example.com/skill:1.2.0"

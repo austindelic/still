@@ -26,6 +26,80 @@ pub const fn current_platform() -> PlatformId {
     CURRENT_PLATFORM
 }
 
+/// CPU architecture used when resolving source artifacts for a host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Architecture {
+    X86_64,
+    Aarch64,
+    Arm,
+    Unknown,
+}
+
+impl Architecture {
+    /// Detects the compile-time target architecture for the current build.
+    pub const fn detect() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Self::X86_64
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            Self::Aarch64
+        }
+        #[cfg(target_arch = "arm")]
+        {
+            Self::Arm
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm")))]
+        {
+            Self::Unknown
+        }
+    }
+}
+
+impl fmt::Display for Architecture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::X86_64 => f.write_str("x86_64"),
+            Self::Aarch64 => f.write_str("aarch64"),
+            Self::Arm => f.write_str("arm"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+
+/// Host platform data supplied to source and planner resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HostPlatform {
+    id: PlatformId,
+    arch: Architecture,
+}
+
+impl HostPlatform {
+    /// Detects the host represented by this compiled binary.
+    pub const fn detect() -> Self {
+        Self {
+            id: current_platform(),
+            arch: Architecture::detect(),
+        }
+    }
+
+    /// Builds platform data for deterministic tests and dry planning.
+    pub const fn new(id: PlatformId, arch: Architecture) -> Self {
+        Self { id, arch }
+    }
+
+    /// Returns the operating system identifier used by config filters.
+    pub const fn id(&self) -> PlatformId {
+        self.id
+    }
+
+    /// Returns the architecture used by source artifact selectors.
+    pub const fn arch(&self) -> Architecture {
+        self.arch
+    }
+}
+
 impl fmt::Display for PlatformId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -170,5 +244,18 @@ mod tests {
             err,
             EngineError::UnknownPlatform { platform } if platform == "freebsd"
         ));
+    }
+
+    #[test]
+    fn host_platform_can_be_injected_for_tests() {
+        let platform = HostPlatform::new(PlatformId::Windows, Architecture::Aarch64);
+
+        assert_eq!(platform.id(), PlatformId::Windows);
+        assert_eq!(platform.arch(), Architecture::Aarch64);
+    }
+
+    #[test]
+    fn detected_host_uses_compile_time_target_os() {
+        assert_eq!(HostPlatform::detect().id(), current_platform());
     }
 }

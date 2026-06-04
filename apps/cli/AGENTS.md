@@ -2,29 +2,55 @@
 
 ## App Overview
 
-`apps/cli` contains the Rust workspace for the `still` binary. CLI parsing, command dispatch, and presentation live in `crates/engine/cli`, core behavior lives in the rest of `crates/engine`, and the optional TUI lives in `crates/tui`.
+`apps/cli` contains the Rust workspace for the `still` binary, reusable engine,
+source crates, and optional TUI.
 
-Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file focused on implementation guidance for agents.
+Read these first when making non-trivial changes:
+
+- `README.md`: product overview and user-facing direction.
+- `SPEC.md`: product behavior, command contract, config shape, and source syntax.
+- `DESIGN.md`: code architecture, crate boundaries, and implementation rules.
+
+Keep this file focused on workflow guidance for agents. Public product goals
+belong in `README.md` or `SPEC.md`; implementation architecture belongs in
+`DESIGN.md`.
 
 ## Layout
 
-- `src/main.rs`: Binary entrypoint. Keep it thin; it should declare the root `cli` module and delegate to `cli::entry()`.
-- `src/cli`: Clap args, command routing, output formatting, runtime boundary, and CLI command handlers.
-- `crates/engine`: Core install, registry, spec, archive, filesystem, network, hashing, path, and platform logic.
-- `crates/tui`: Optional TUI library compiled through the root `tui` feature.
-- `examples`: Concept config and schema files.
-- `tests`: App-level CLI contract and integration tests.
+- `src/main.rs`: binary entrypoint. Keep it thin; it should declare the root
+  `cli` module and delegate to `cli::entry()`.
+- `src/cli`: Clap args, command routing, output formatting, Tokio runtime
+  boundary, miette diagnostics, indicatif progress, and CLI command handlers.
+- `crates/engine`: core config, desired state, source selection, planning,
+  lockfile, inventory, trust, platform traits, and typed errors/results.
+- `crates/source-kit`: shared source installer machinery such as download,
+  cache, checksums, archive extraction, staging, receipts, and executable
+  discovery.
+- `crates/sources/*`: source-specific metadata parsing, resolution, artifact
+  selection, dependency interpretation, and install rules.
+- `crates/tui`: optional TUI library compiled through the root `tui` feature.
+- `examples`: concept config and schema files.
+- `tests`: app-level CLI contract and integration tests.
 
 ## Architecture Rules
 
-- Start command spelling/input changes in `crates/engine/cli/contract.rs`, exposed as `engine::cli::args`.
-- Put CLI presentation, stdout/stderr formatting, and Clap-specific behavior in `crates/engine/cli`.
-- Put real install, resolve, cache, filesystem, backend, and platform behavior in `crates/engine`.
-- Keep non-CLI engine modules free of Clap, TUI state, and user-facing formatting.
-- Keep the root `src/cli` facade responsible for feature-gated TUI launch so `engine` does not depend on `still_tui`.
+- Start command spelling/input changes in `src/cli/args.rs`.
+- Put CLI presentation, stdout/stderr formatting, Clap behavior, miette
+  diagnostics, indicatif progress, and future anstream/anstyle styling in
+  `src/cli`.
+- Put real install, source selection, resolve, cache, filesystem, lockfile,
+  inventory, trust, and platform behavior in `crates/engine`,
+  `crates/source-kit`, or `crates/sources/*`.
+- Keep engine modules free of Clap, TUI state, progress bar types, and
+  user-facing formatting.
+- Keep the root `src/cli` responsible for feature-gated TUI launch so `engine`
+  does not depend on `still_tui`.
 - Keep `crates/tui` free of CLI parsing and command dispatch.
-- The default `still` build is CLI-only. With `--features tui`, the same binary includes TUI dependencies and opens the TUI when no subcommand is provided.
-- Do not add a separate `still_tui` binary unless the product direction changes again.
+- The default `still` build is CLI-only. With `--features tui`, the same binary
+  includes TUI dependencies and opens the TUI when no subcommand is provided.
+- Do not add a separate `still_tui` binary unless the product direction changes.
+- Use `source` terminology for new design/code. Older source-adapter naming is
+  migration debt unless touching compatibility code.
 
 ## Current CLI Decisions
 
@@ -32,12 +58,13 @@ Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file 
 - No subcommand opens the TUI in `--features tui` builds.
 - CLI subcommands should behave the same with or without the TUI feature.
 - `install` installs immediately and records requested items in config.
-- Config mutation should be explicit. In v0.1, `install` and `uninstall` are the supported mutation flows.
+- Config mutation should be explicit. In v0.1, `install` and `uninstall` are the
+  supported mutation flows.
 - `sync` reconciles local installed state from `still.toml`.
-- `config check` is the schema/Taplo validation path.
+- `config check` is the typed config validation path.
 - `doctor` diagnoses local machine and project health.
 - Project-defined executable behavior should be gated by trust.
-- `auto` is backend selection, not a backend.
+- `auto` is source selection, not a source.
 
 ## Commands
 
@@ -55,28 +82,41 @@ Run these from `apps/cli`:
 
 ## Tests
 
-- Put Rust unit tests in the same file as the code being tested using `#[cfg(test)] mod tests`.
-- Put integration tests in the nearest `tests/*.rs` folder when they test public behavior from outside the crate or span multiple modules.
-- For CLI contract changes, update `tests/cli_help.rs` and any command-level tests.
-- For engine behavior, prefer focused engine tests that avoid terminal/UI concerns.
+- Put Rust unit tests in the same file as the code being tested using
+  `#[cfg(test)] mod tests`.
+- Put integration tests in the nearest `tests/*.rs` folder when they test public
+  behavior from outside the crate or span multiple modules.
+- For CLI contract changes, update `tests/cli_help.rs` and command-level tests.
+- For engine/source behavior, prefer focused tests that avoid terminal/UI
+  concerns and real package managers.
+- Platform planner tests should inject fake platforms instead of relying on the
+  developer's host OS.
 
 ## Comments
 
-- Before adding, rewriting, or auditing comments, read and follow the project skill at `.agents/skills/code-comments/SKILL.md`.
-- Rustdoc powers IDE hover and `cargo doc`; keep public API docs compact, caller-oriented, and synchronized with Clap help where doc text affects generated CLI output.
+- Before adding, rewriting, or auditing comments, read and follow the project
+  skill at `.agents/skills/code-comments/SKILL.md`.
+- Rustdoc powers IDE hover and `cargo doc`; keep public API docs compact,
+  caller-oriented, and synchronized with Clap help where doc text affects
+  generated CLI output.
 
-## Backends
+## Sources
 
-V1 backend/provider families are:
+Initial source families are:
 
-- `core` / `native`
-- `github`
-- `http`
+- `homebrew`
 - `cargo`
-- `go`
 - `npm`
 - `pipx`
-- `asdf`
+- `go`
 - `aqua`
+- `apt`
+- `dnf`
+- `pacman`
+- `winget`
+- `flatpak`
 
-Backend-specific fetching, resolution, and install details should be isolated behind common engine interfaces. Config parsing should produce typed package/tool requests first; backend selection should happen after parsing and before install planning.
+Source-specific fetching, metadata parsing, resolution, artifact selection, and
+install details should be isolated behind common engine/source-kit interfaces.
+Config parsing should produce typed requests first; source selection should
+happen after parsing and before install planning.

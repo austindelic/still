@@ -1,18 +1,25 @@
 # Still CLI
 
-`apps/cli` contains the Rust implementation of the `still` binary, the install engine, and the optional TUI library.
+`apps/cli` contains the Rust implementation of the `still` binary, the reusable
+engine, source crates, and the optional TUI library.
 
-Still is a config-first, multi-OS project environment manager. The CLI should make local state match `still.toml`, then run commands and tasks inside that managed environment.
+Still is a source-based, multi-OS project environment manager. It reads
+`still.toml`, resolves tools/packages/apps from source metadata, installs into
+Still-managed layouts where practical, and runs commands inside that managed
+environment.
 
-See `SPEC.md` for the working CLI feature spec and open product decisions. See
-`DESIGN.md` for the intended Rust code structure and architecture boundaries.
+Use these docs together:
+
+- `SPEC.md`: product behavior, command contract, config shape, and source syntax.
+- `DESIGN.md`: Rust code architecture, crate boundaries, and implementation rules.
+- `AGENTS.md`: workflow guidance for humans and agents working in this workspace.
 
 ## Product Model
 
 `still.toml` describes project state:
 
-- `tools`: language runtimes and toolchains such as Node, Python, Go, and Rust.
-- `packages`: command-line/system packages.
+- `tools`: language runtimes, toolchains, and command-line developer tools.
+- `packages`: system packages, libraries, and command-line packages.
 - `apps`: desktop or platform apps.
 - `env`: environment variables and env files.
 - `services`: long-running dependencies needed while the project is active.
@@ -23,33 +30,103 @@ The core loop is:
 
 ```bash
 still init
-still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
+still install --tool cargo:ripgrep@14.1.1 --package homebrew:openssl --app flatpak:org.mozilla.firefox
 still run cargo test
 still task lint
 ```
+
+Source flags can select a source for several following specs:
+
+```bash
+still install --tool --cargo ripgrep@14.1.1 cargo-nextest
+still install --package --apt openssl curl
+```
+
+## Source Syntax
+
+Still uses sources rather than shelling out to package managers as the primary
+model. A source knows how to read ecosystem metadata and install manually through
+Still's shared installer machinery.
+
+Install specs use:
+
+```text
+source:name@version
+```
+
+Rules:
+
+- `source:name` means `source:name@latest`.
+- `source:name@version` pins a version for that source.
+- `name` means source auto-selection and `latest`.
+- `name@version` means source auto-selection with a pinned version.
+- Empty or omitted versions normalize to `latest`.
+- Explicit sources never fall back to another source.
+- Source flags such as `--cargo` or `--homebrew` select a source; item-kind flags
+  such as `--tool`, `--package`, and `--app` still select the item role.
 
 ## Command Goals
 
 - `init`: create a starter `still.toml`, infer project defaults, and trust the newly created config.
 - `trust`: mark the current project/config as trusted before executing project-defined behavior.
-- `sync`: read `still.toml`, resolve desired state, update the lockfile, install missing items, and report drift.
 - `install`: install requested tools/packages/apps now, add them to config, and refresh the lockfile.
-- `uninstall`: remove a tool, package, or app from desired state and remove related Still-managed artifacts.
+- `sync`: read config, resolve desired state, update the lockfile, install missing items, and report drift.
+- `uninstall`: remove an item from desired state and remove related Still-managed artifacts.
 - `run <COMMAND...>`: run an arbitrary command with Still-managed PATH/env and return the child exit code.
-- `task <NAME>`: run a named task from config; no name should list available tasks.
+- `task <NAME>`: run a named task from config; no name lists available tasks.
 - `services`: inspect, start, stop, and check configured services.
 - `agents`: inspect, sync, and validate configured agent instructions and skills.
-- `config check`: validate `still.toml` through the typed TOML parser and engine config validators.
-- `doctor`: diagnose machine, cache, config, permissions, and platform health.
+- `config check`: validate `still.toml` through typed config validators.
+- `doctor`: diagnose machine, cache, config, permissions, source availability, and platform health.
 - `env`: print resolved environment/debug information.
 - `activate`: print shell-specific activation code or instructions.
 - `list`: list active tools/packages/apps and show which config selected each version.
-- `list --all`: list all known installed and configured items, including inactive project/global entries.
+- `list --all`: list known installed and configured items, including inactive project/global entries.
 - `--global`: force desired-state commands to read or write the global Still config where supported.
+
+## Source Crates
+
+The intended source workspace shape is:
+
+```text
+crates/
+  engine/
+  source-kit/
+  sources/
+    homebrew/
+    cargo/
+    npm/
+    pipx/
+    go/
+    aqua/
+    apt/
+    dnf/
+    pacman/
+    winget/
+    flatpak/
+```
+
+Package names use:
+
+- `still-source-kit`
+- `still-source-homebrew`
+- `still-source-cargo`
+- `still-source-npm`
+- and the same pattern for each source.
+
+`still-source-kit` owns shared installer machinery: download/cache, checksums,
+archive extraction, staging/promotion, receipts, executable discovery, and
+dependency helpers. `still-source-*` crates own source-specific metadata parsing,
+resolution, artifact selection, and install rules.
+
+Sources should be feature-gated in the future so users can build lighter
+binaries. OS-specific source/platform code should be removed at compile time with
+`cfg(target_os)` where possible.
 
 ## Trust Model
 
-Still should read config by default, but it should not execute project-defined behavior until the project is trusted.
+Still should read config by default, but it should not execute project-defined
+behavior until the project is trusted.
 
 Trust should gate:
 
@@ -59,34 +136,9 @@ Trust should gate:
 - env files
 - project-defined commands that can execute arbitrary shell code
 
-A future setting may relax this, but it should be strongly discouraged.
-
-## Config Direction
-
-Use `examples/still.toml` and `examples/still.schema.json` as concept references while the engine parser and validators remain the authoritative config check path.
-
-Important decisions:
-
-- `auto` is backend selection, not a backend.
-- Config mutation should be explicit. In v0.1, `install` and `uninstall` are the supported mutation commands.
-- `install` installs immediately and records requested items in config; `sync` reconciles from config.
-- `config check` validates config; `doctor` diagnoses the environment.
-
-## V1 Backends
-
-V1 backend/provider families:
-
-- `core` / `native`: Still-managed first-party installers and built-in platform behavior.
-- `github`: GitHub releases, tags, and release assets.
-- `http`: Direct URL downloads with checksum verification.
-- `cargo`: Rust crates installed through Cargo.
-- `go`: Go tools/modules installed through the Go toolchain.
-- `npm`: Node packages installed through npm-compatible package metadata.
-- `pipx`: Python CLI tools installed through pipx.
-- `asdf`: Existing asdf plugin ecosystem.
-- `aqua`: Aqua registry/package ecosystem.
-
-Backend-specific fetching, resolution, and install details should live behind common engine interfaces. Config parsing should produce typed requests first; backend selection happens after parsing and before install planning.
+Source package metadata may run ecosystem-defined install behavior in future
+manual installers. That policy belongs in the engine/source layer and must be
+clear in diagnostics.
 
 ## Build And Test
 

@@ -18,6 +18,14 @@ pub enum EngineError {
     UnknownPlatform { platform: String },
     #[error("unknown item kind \"{kind}\"")]
     UnknownItemKind { kind: String },
+    #[error("unknown source \"{id}\"")]
+    UnknownSource { id: String },
+    #[error("source \"{id}\" does not support {kind} items")]
+    UnsupportedSourceForKind { id: String, kind: String },
+    #[error("source \"{id}\" does not support {platform}")]
+    UnsupportedSourceForPlatform { id: String, platform: String },
+    #[error("no source candidates are available for {kind} items on {platform}")]
+    NoSourceCandidates { kind: String, platform: String },
     #[error("invalid item spec: {reason}")]
     InvalidItemSpec { reason: String },
     #[error("invalid config: {reason}")]
