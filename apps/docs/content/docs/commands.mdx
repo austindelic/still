@@ -1,62 +1,105 @@
 ---
 title: Commands
-description: The Still command surface, with implementation status for each command.
+description: The Still command surface and how each command fits the project workflow.
 ---
 
-The CLI binary in this repository is `still_s`. These examples use `still`, the intended installed command name.
+These examples use `still`, the installed command name and the current binary
+name in this repository.
 
-## Current Commands
+## Project Setup
 
-`install` installs a package or tool spec. A version is optional.
-
-```bash
-still install ripgrep
-still install ripgrep@latest
-```
-
-`tui` opens the terminal interface. Running `still` with no subcommand also launches the TUI.
+`init` creates a starter project config and trusts the generated file.
 
 ```bash
-still tui
-```
-
-## Preview Commands
-
-These commands are present in the CLI parser and describe the intended v1 workflow. Some currently print parsed arguments while engine behavior is still being built.
-
-```bash
-still uninstall ripgrep
-still use --tool node
-still run cargo test
-still doctor
 still init
-still sync
-still activate
-still env
-still translate
-still convert
 ```
 
-The goal is for `init` to create a project config, `sync` to bring the machine in line with that config, `activate` to prepare the shell, and `run` to execute commands inside the managed environment.
-
-## Tool Specs
-
-`install` and `uninstall` accept a tool spec:
-
-```text
-name
-name@latest
-name@1.2.3
-```
-
-Names must start with a letter and can contain letters, numbers, underscores, and hyphens. Versions are either `latest` or valid semantic versions.
-
-Examples:
+`trust` records that you have reviewed project-defined executable behavior.
 
 ```bash
-still install bun@1.3.5
-still install bandwhich
-still install jq@latest
+still trust
 ```
 
-If you leave off the version, Still uses `latest`.
+Trust is required before Still loads env files, runs tasks, starts services, or
+syncs external agent behavior from the project.
+
+## Install And Reconcile
+
+`install` installs typed item requests, records successful requests in config,
+and refreshes the lockfile.
+
+```bash
+still install --tool cargo:ripgrep@14.1.1
+still install --package homebrew:openssl
+still install --app flatpak:org.mozilla.firefox
+```
+
+Source flags apply to following specs:
+
+```bash
+still install --tool --cargo ripgrep@14.1.1 cargo-nextest
+still install --package --apt openssl curl
+```
+
+`sync` reconciles installed state from `still.toml`.
+
+```bash
+still sync
+```
+
+`uninstall` removes desired state and related Still-managed artifacts.
+
+```bash
+still uninstall --tool cargo:ripgrep@14.1.1
+```
+
+## Run And Inspect
+
+`run` executes a child command with the Still-managed environment.
+
+```bash
+still run cargo test
+```
+
+`task` runs a named task, or lists tasks when no task name is supplied.
+
+```bash
+still task lint
+still task
+```
+
+`services` inspects, starts, stops, or checks configured services.
+
+```bash
+still services status
+still services check docker
+```
+
+`agents` inspects, validates, or syncs configured agent instructions and skills.
+
+```bash
+still agents list
+still agents check
+still agents sync
+```
+
+`list`, `env`, `doctor`, `config check`, and `activate` help inspect what Still
+sees and how it would prepare the shell.
+
+```bash
+still list --all
+still env
+still doctor
+still config check
+still activate
+```
+
+## Global State
+
+Use `--global` with supported commands to target the global Still config instead
+of the nearest project config.
+
+```bash
+still install --global --tool cargo:cargo-nextest
+still list --global --all
+```

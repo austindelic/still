@@ -1,38 +1,42 @@
-# sv
+# Still Web
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+`apps/web` is the SvelteKit companion site for Still. It is a product-facing
+web surface for the project while the CLI, engine, docs, and source crates take
+shape.
 
-## Creating a project
+## Layout
 
-If you're seeing this, you've probably already done this step. Congrats!
+- `src/routes/+page.svelte`: current landing page.
+- `src/routes/+layout.svelte`: app shell and favicon wiring.
+- `src/routes/layout.css`: global CSS and Tailwind import.
+- `src/lib/assets`: local static assets imported by the app.
+- `static`: public static files served by SvelteKit.
 
-```sh
-# create a new project in the current directory
-npx sv create
+## Commands
 
-# create a new project in my-app
-npx sv create my-app
+Run from the repo root:
+
+```bash
+bun run --filter web dev
+bun run --filter web check
+bun run --filter web lint
+bun run --filter web build
 ```
 
-## Developing
+Run from `apps/web` when working inside the package:
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+```bash
+bun run dev
+bun run check
+bun run lint
+bun run build
 ```
 
-## Building
+## Writing Guidance
 
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+- Keep public copy aligned with the source-based CLI architecture in
+  `apps/cli/SPEC.md`.
+- Be honest about pre-1.0 status; do not imply every source installer is
+  complete.
+- Use current command syntax, for example
+  `still install --tool cargo:ripgrep@14.1.1`.

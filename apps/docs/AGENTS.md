@@ -17,10 +17,10 @@
 
 Run these from the repository root:
 
-- `bun --filter docs run dev`: Start the docs dev server.
-- `bun --filter docs run check`: Run Biome checks.
-- `bun --filter docs run types:check`: Generate Fumadocs/Next types and run TypeScript checks.
-- `bun --filter docs run build`: Build the docs app.
+- `bun run --filter docs dev`: Start the docs dev server.
+- `bun run --filter docs check`: Run Biome checks.
+- `bun run --filter docs types:check`: Generate Fumadocs/Next types and run TypeScript checks.
+- `bun run --filter docs build`: Build the docs app.
 
 Run these from `apps/docs` only when working directly inside the package:
 

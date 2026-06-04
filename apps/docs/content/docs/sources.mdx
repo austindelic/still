@@ -1,0 +1,80 @@
+---
+title: Sources
+description: How Still chooses where tools, packages, and apps come from.
+---
+
+Still uses sources to resolve metadata, choose artifacts, and plan installs.
+The item kind answers what role something plays in the project. The source
+answers where Still should look for it.
+
+```bash
+still install --tool cargo:ripgrep@14.1.1
+still install --package homebrew:openssl
+still install --app flatpak:org.mozilla.firefox
+```
+
+## Source Syntax
+
+Install specs use:
+
+```text
+source:name@version
+```
+
+Rules:
+
+- `source:name` means `source:name@latest`.
+- `source:name@version` pins a version for that source.
+- `name` means source auto-selection and `latest`.
+- `name@version` means source auto-selection with a pinned version.
+- empty or omitted versions normalize to `latest`.
+- explicit sources do not silently fall back to another source.
+
+Source flags select a source for the following specs:
+
+```bash
+still install --tool --cargo ripgrep@14.1.1 cargo-nextest
+still install --package --apt openssl curl
+```
+
+Item-kind flags such as `--tool`, `--package`, and `--app` classify what the
+item is. Source flags such as `--cargo`, `--homebrew`, and `--apt` decide where
+Still resolves it.
+
+## Auto Selection
+
+Use `source = "auto"` when you want Still to select from the ordered candidates
+for the current platform and item kind.
+
+```toml
+[packages.postgresql]
+version = "16"
+source = "auto"
+```
+
+Use an explicit source when the project depends on a particular ecosystem or
+artifact layout.
+
+```toml
+[tools.pnpm]
+version = "latest"
+source = "npm"
+```
+
+## Source Families
+
+The intended source families are:
+
+- `homebrew` for Homebrew formula and app metadata.
+- `cargo` for Rust crates.
+- `npm` for Node package metadata.
+- `pipx` for Python CLI package installs.
+- `go` for Go module and binary installs.
+- `aqua` for Aqua registry packages.
+- `apt`, `dnf`, and `pacman` for Linux package metadata.
+- `winget` for Windows package metadata.
+- `flatpak` for Linux desktop apps.
+
+Not every source installer is complete today. The architecture is in place so
+source crates can be compiled in by feature, filtered by host OS, and connected
+through shared source-kit installer machinery as they mature.

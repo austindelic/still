@@ -3,33 +3,43 @@ title: Start Here
 description: A friendly map of Still and what the docs cover today.
 ---
 
-Still is a package and toolchain manager for projects that need more than a language version file. It is built around a simple idea: the things your project depends on should be named in one place, installed predictably, and easy to inspect.
+Still is a config-first project environment manager. It keeps tools, packages,
+apps, env files, services, tasks, and agent setup attached to a project instead
+of scattering them across setup scripts and local shell history.
 
-Today, the CLI can install tools from Homebrew formula data, launch the terminal UI, and parse Still-style tool specs such as `ripgrep` and `ripgrep@14.1.1`. The wider v1 shape is already visible in the config schema: tools, packages, apps, environment files, services, and tasks.
-
-These docs describe both parts with clear labels. Current behavior is written as current behavior. Preview pages describe the intended v1 workflow and the config shape that already exists in the repository.
+The project is pre-1.0. The docs describe the current command surface and the
+source-based architecture the engine is moving toward. When a source installer
+is still scaffolding, the docs call that out plainly.
 
 ## What Still Is For
 
-Still is for teams and solo projects that want a repeatable development setup without splitting responsibility across Homebrew, a version manager, shell scripts, and a README full of setup notes.
-
 Use Still when you want to:
 
-- install project tools and system packages from a single command line
-- keep runtime versions near the project that needs them
-- describe services and tasks next to the tools they depend on
-- make setup easier to review, cache, and reproduce
+- install project tools, packages, and apps from one command surface.
+- keep runtime versions and native dependencies near the code that needs them.
+- describe tasks, services, env files, and agent instructions in the same place.
+- review setup changes as plain TOML.
+- support macOS, Linux, and Windows without forking the project setup story.
 
-## Current Status
+## The Core Loop
 
-Still is early. The command surface is broader than the implemented behavior, so expect a few commands to print their parsed arguments while the engine catches up. The docs call those areas out as preview instead of pretending they are finished.
+```bash
+still init
+still install --tool cargo:ripgrep@14.1.1 --package homebrew:openssl
+still sync
+still run cargo test
+still task lint
+```
 
-The current binary in this repository is named `still_s`. The examples use `still` for the intended installed command name.
+`still.toml` records desired state. `still.lock.toml` records resolved state.
+The engine owns config, trust, source selection, planning, inventory, and
+lockfiles. The CLI and TUI only parse input and present results.
 
 ## Good First Pages
 
 <Cards>
-  <Card title="Getting Started" href="/docs/getting-started" description="Build the CLI, run the first command, and create a tiny project config." />
-  <Card title="Configuration" href="/docs/configuration" description="Read the shape of `still.toml`: tools, packages, apps, env, tasks, and services." />
-  <Card title="Commands" href="/docs/commands" description="See what each command is meant to do and which parts work today." />
+  <Card title="Getting Started" href="/docs/getting-started" description="Build the CLI, run the first commands, and create a small project config." />
+  <Card title="Configuration" href="/docs/configuration" description="Read the shape of `still.toml`: tools, packages, apps, env, tasks, services, and agents." />
+  <Card title="Commands" href="/docs/commands" description="See what each command does and how the CLI is intended to behave." />
+  <Card title="Sources" href="/docs/sources" description="Understand source syntax, auto-selection, and source crate direction." />
 </Cards>

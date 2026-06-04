@@ -1,13 +1,14 @@
 ---
 title: Tasks And Services
-description: Preview docs for project tasks, long-running services, and their config shape.
+description: Project tasks, long-running services, and their config shape.
 ---
 
-Tasks and services are preview features. The config schema already describes them, and they are part of the intended v1 workflow.
+Tasks and services keep project commands next to the tools and packages they
+need. They are trust-sensitive because they execute project-defined behavior.
 
 ## Tasks
 
-Tasks are named commands that live next to the tools and packages they need.
+Tasks are named commands or task graphs.
 
 ```toml
 [tasks]
@@ -28,11 +29,25 @@ depends = ["lint", "test"]
 run = "echo CI passed"
 ```
 
-Short form works for simple commands. Expanded form adds a description, dependencies, and multi-step runs.
+Short form works for simple commands. Expanded form adds descriptions,
+dependencies, service requirements, and multi-step runs.
+
+Run a task:
+
+```bash
+still task lint
+```
+
+List configured tasks:
+
+```bash
+still task
+```
 
 ## Services
 
-Services are commands that should be available while the project is active: databases, Docker, local daemons, or a dev server.
+Services are commands that should be available while the project is active:
+databases, Docker, local daemons, or a dev server.
 
 ```toml
 [services]
@@ -45,16 +60,14 @@ stop = { task = "docker:stop" }
 check = { task = "docker:check" }
 ```
 
-Services can point at tasks so startup, shutdown, and health checks stay in one file.
+Services can point at tasks so startup, shutdown, and health checks stay in one
+file.
 
-## Hooks
-
-Hooks are also preview. They describe commands to run when entering or leaving a project environment.
-
-```toml
-[hooks]
-on_enter = ["still sync"]
-on_exit = ["echo leaving project"]
+```bash
+still services status
+still services start docker
+still services check docker
 ```
 
-The intent is to keep project setup explicit without turning shell startup into a mystery script.
+`sync` prepares tools, packages, apps, agents, and lockfile state. It does not
+start services automatically in the v0.1 contract.

@@ -35,7 +35,6 @@ architecture, dependency policy, generated files, or test expectations.
   selection, dependency interpretation, and install rules.
 - `crates/tui`: optional TUI library compiled through the root `tui` feature.
 - `examples`: concept config and schema files.
-- `tests`: app-level CLI contract and integration tests.
 
 ## Architecture Rules
 
