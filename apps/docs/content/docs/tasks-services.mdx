@@ -1,0 +1,60 @@
+---
+title: Tasks And Services
+description: Preview docs for project tasks, long-running services, and their config shape.
+---
+
+Tasks and services are preview features. The config schema already describes them, and they are part of the intended v1 workflow.
+
+## Tasks
+
+Tasks are named commands that live next to the tools and packages they need.
+
+```toml
+[tasks]
+test = "cargo test"
+fmt = "cargo fmt"
+dev = "cargo run"
+
+[tasks.lint]
+description = "Run lint checks"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --all-features",
+]
+
+[tasks.ci]
+description = "Run full CI"
+depends = ["lint", "test"]
+run = "echo CI passed"
+```
+
+Short form works for simple commands. Expanded form adds a description, dependencies, and multi-step runs.
+
+## Services
+
+Services are commands that should be available while the project is active: databases, Docker, local daemons, or a dev server.
+
+```toml
+[services]
+docker-compose = "docker compose up"
+dev-server = { task = "dev-server" }
+
+[services.docker]
+start = { task = "docker:start" }
+stop = { task = "docker:stop" }
+check = { task = "docker:check" }
+```
+
+Services can point at tasks so startup, shutdown, and health checks stay in one file.
+
+## Hooks
+
+Hooks are also preview. They describe commands to run when entering or leaving a project environment.
+
+```toml
+[hooks]
+on_enter = ["still sync"]
+on_exit = ["echo leaving project"]
+```
+
+The intent is to keep project setup explicit without turning shell startup into a mystery script.

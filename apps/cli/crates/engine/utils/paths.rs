@@ -1,56 +1,144 @@
+//! Platform-specific Still path conventions.
+
 use dirs::home_dir;
 
-use crate::system::MacOS;
+use crate::system::{Linux, MacOS, Windows};
 use std::path::PathBuf;
 
+/// Path locations required by engine actions on a host platform.
+///
+/// Implementors should return absolute paths for Still-owned storage and config
+/// locations. These methods do not create directories; callers that write to the
+/// returned paths must create parents explicitly.
 pub trait PathOps {
-    fn root_dir(&self) -> PathBuf;
-    fn cache_dir(&self) -> PathBuf;
-    fn bin_dir(&self) -> PathBuf;
-    fn config_dir(&self) -> PathBuf;
-    fn config_file(&self) -> PathBuf;
-    fn apps_dir(&self) -> PathBuf;
-    fn data_dir(&self) -> PathBuf;
-    fn home_dir(&self) -> PathBuf;
+    /// Root directory for Still-managed files.
+    fn root_dir() -> PathBuf;
+    /// Cache directory for downloaded registry and archive data.
+    fn cache_dir() -> PathBuf;
+    /// Directory containing linked executables.
+    fn bin_dir() -> PathBuf;
+    /// User configuration directory.
+    fn config_dir() -> PathBuf;
+    /// User configuration file path.
+    fn config_file() -> PathBuf;
+    /// Directory for Still-managed apps.
+    fn apps_dir() -> PathBuf;
+    /// Current user's home directory.
+    fn home_dir() -> PathBuf;
+    /// Directory for Still-managed tools.
+    fn tool_dir() -> PathBuf;
 }
 
 impl PathOps for MacOS {
-    fn root_dir(&self) -> PathBuf {
+    fn root_dir() -> PathBuf {
         PathBuf::from("/opt").join("still")
     }
 
-    fn cache_dir(&self) -> PathBuf {
+    fn cache_dir() -> PathBuf {
         dirs::cache_dir().unwrap()
     }
 
-    fn bin_dir(&self) -> PathBuf {
-        self.root_dir().join("bin")
+    fn bin_dir() -> PathBuf {
+        Self::root_dir().join("bin")
+    }
+    fn tool_dir() -> PathBuf {
+        Self::root_dir().join("tools")
     }
 
-    fn apps_dir(&self) -> PathBuf {
-        self.root_dir().join("apps")
+    fn apps_dir() -> PathBuf {
+        Self::root_dir().join("apps")
     }
 
-    fn config_dir(&self) -> PathBuf {
-        home_dir().unwrap().join(".config")
+    fn config_dir() -> PathBuf {
+        home_dir().unwrap().join(".config").join("still")
     }
 
-    fn config_file(&self) -> PathBuf {
-        self.config_dir().join("config.toml")
+    fn config_file() -> PathBuf {
+        Self::config_dir().join("config.toml")
     }
 
-    fn home_dir(&self) -> PathBuf {
+    fn home_dir() -> PathBuf {
         dirs::home_dir().expect("error fetching home_dir with dirs::home_dir on macos")
     }
+}
 
-    fn data_dir(&self) -> PathBuf {
-        dirs::data_dir()
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .expect("$HOME not set")
-                    .join(".local")
-                    .join("share")
-            })
+impl PathOps for Linux {
+    fn root_dir() -> PathBuf {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local")
+            .join("share")
             .join("still")
+    }
+
+    fn cache_dir() -> PathBuf {
+        dirs::cache_dir().unwrap_or_else(Self::root_dir)
+    }
+
+    fn bin_dir() -> PathBuf {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local")
+            .join("bin")
+    }
+
+    fn config_dir() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| Self::home_dir().join(".config"))
+            .join("still")
+    }
+
+    fn config_file() -> PathBuf {
+        Self::config_dir().join("config.toml")
+    }
+
+    fn apps_dir() -> PathBuf {
+        Self::root_dir().join("apps")
+    }
+
+    fn home_dir() -> PathBuf {
+        home_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn tool_dir() -> PathBuf {
+        Self::root_dir().join("tools")
+    }
+}
+
+impl PathOps for Windows {
+    fn root_dir() -> PathBuf {
+        dirs::data_local_dir()
+            .unwrap_or_else(Self::home_dir)
+            .join("still")
+    }
+
+    fn cache_dir() -> PathBuf {
+        dirs::cache_dir().unwrap_or_else(|| Self::root_dir().join("cache"))
+    }
+
+    fn bin_dir() -> PathBuf {
+        Self::root_dir().join("bin")
+    }
+
+    fn config_dir() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(Self::home_dir)
+            .join("still")
+    }
+
+    fn config_file() -> PathBuf {
+        Self::config_dir().join("config.toml")
+    }
+
+    fn apps_dir() -> PathBuf {
+        Self::root_dir().join("apps")
+    }
+
+    fn home_dir() -> PathBuf {
+        home_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn tool_dir() -> PathBuf {
+        Self::root_dir().join("tools")
     }
 }

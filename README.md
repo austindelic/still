@@ -1,45 +1,56 @@
 # Still
 
-**Still** is a fast, parallel, Rust-based package and toolchain manager that combines the Homebrew ecosystem with mise-style per-project environments.
+Still is a config-first project environment manager. It is built around one project file, one managed cache, and one CLI for tools, packages, apps, environment variables, tasks, services, and agent skills.
 
-> One CLI. One cache. One lockfile.  
-> System packages + runtime versions, installed **deterministically and in parallel**.
+Still is early. The current repository is shaping the CLI, config model, engine boundaries, and optional TUI.
 
----
+## Goals
 
-## Why Still?
+- Describe a project environment in `still.toml`.
+- Install and link tools/packages/apps into Still-managed storage.
+- Reconcile local state from config with `still sync`.
+- Run commands and tasks inside the managed environment.
+- Keep project-defined executable behavior behind explicit trust.
+- Support deterministic installs through lockfiles and content-addressed cache paths.
+- Keep the default CLI small, with the TUI behind an optional Rust feature.
 
-Homebrew is great — but:
-
-- installs are mostly serial
-- global state is hard to reason about
-- reproducible dev environments are bolted on, not built in
-
-mise is great — but:
-
-- it doesn’t manage system packages
-- you still need brew (or something else)
-
-**Still unifies both.**
-
----
-
-## What it does
-
-- ✅ Installs Homebrew formulae (and later casks)
-- ✅ Manages per-project tool versions (Node, Python, Rust, etc.)
-- ✅ Downloads dependencies **in parallel**
-- ✅ Uses a content-addressed cache (no duplicate work)
-- ✅ Produces deterministic installs via a lockfile
-- ✅ Safe, atomic installs (no half-broken systems)
-
----
-
-## Example
+## Core Workflow
 
 ```bash
 still init
-still install ripgrep jq
-still use node@20 python@3.12
+still trust
 still sync
+still run cargo test
+still task lint
 ```
+
+The intended model is:
+
+- `still.toml` declares desired project state.
+- `still trust` allows project-defined tasks, services, agent skills, and env-file behavior.
+- `still sync` resolves and installs missing state.
+- `still run` executes an arbitrary command inside that environment.
+- `still task` runs named project tasks.
+
+## Repository Layout
+
+- `apps/cli`: Rust CLI and engine workspace.
+- `apps/web`: SvelteKit web app.
+- `apps/docs`: Next/Fumadocs documentation app.
+- `packages/ui`: Shared React UI package.
+- `packages/eslint-config`: Shared ESLint config.
+- `packages/typescript-config`: Shared TypeScript config.
+
+## CLI
+
+The Rust CLI package builds a `still` binary.
+
+```bash
+cd apps/cli
+cargo run -p still --bin still -- --help
+cargo run -p still --features tui --bin still -- --help
+```
+
+The default binary is CLI-only. Building with `--features tui` includes the optional TUI and makes bare `still` open the TUI.
+
+See `apps/cli/README.md` for the CLI product model.
