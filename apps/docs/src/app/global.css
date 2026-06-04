@@ -1,3 +1,80 @@
 @import "tailwindcss";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+
+:root {
+  --color-fd-background: #fbf1c7;
+  --color-fd-foreground: #3c3836;
+  --color-fd-muted: #f2e5bc;
+  --color-fd-muted-foreground: #7c6f64;
+  --color-fd-popover: #f9f5d7;
+  --color-fd-popover-foreground: #3c3836;
+  --color-fd-card: #f2e5bc;
+  --color-fd-card-foreground: #3c3836;
+  --color-fd-border: color-mix(in oklab, #d5c4a1 72%, transparent);
+  --color-fd-primary: #af3a03;
+  --color-fd-primary-foreground: #fbf1c7;
+  --color-fd-secondary: #ebdbb2;
+  --color-fd-secondary-foreground: #504945;
+  --color-fd-accent: color-mix(in oklab, #d79921 28%, transparent);
+  --color-fd-accent-foreground: #3c3836;
+  --color-fd-ring: #b57614;
+  --color-fd-overlay: color-mix(in oklab, #282828 24%, transparent);
+  --color-fd-info: #076678;
+  --color-fd-warning: #b57614;
+  --color-fd-error: #cc241d;
+  --color-fd-success: #79740e;
+  --color-fd-idea: #8f3f71;
+  --color-fd-diff-remove: color-mix(in oklab, #cc241d 14%, transparent);
+  --color-fd-diff-remove-symbol: #9d0006;
+  --color-fd-diff-add: color-mix(in oklab, #98971a 16%, transparent);
+  --color-fd-diff-add-symbol: #79740e;
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+  --color-fd-background: #282828;
+  --color-fd-foreground: #ebdbb2;
+  --color-fd-muted: #32302f;
+  --color-fd-muted-foreground: #a89984;
+  --color-fd-popover: #32302f;
+  --color-fd-popover-foreground: #ebdbb2;
+  --color-fd-card: #3c3836;
+  --color-fd-card-foreground: #fbf1c7;
+  --color-fd-border: color-mix(in oklab, #928374 32%, transparent);
+  --color-fd-primary: #fe8019;
+  --color-fd-primary-foreground: #282828;
+  --color-fd-secondary: #3c3836;
+  --color-fd-secondary-foreground: #ebdbb2;
+  --color-fd-accent: color-mix(in oklab, #d79921 26%, transparent);
+  --color-fd-accent-foreground: #fbf1c7;
+  --color-fd-ring: #fabd2f;
+  --color-fd-overlay: color-mix(in oklab, #1d2021 68%, transparent);
+  --color-fd-info: #83a598;
+  --color-fd-warning: #fabd2f;
+  --color-fd-error: #fb4934;
+  --color-fd-success: #b8bb26;
+  --color-fd-idea: #d3869b;
+  --color-fd-diff-remove: color-mix(in oklab, #fb4934 18%, transparent);
+  --color-fd-diff-remove-symbol: #fb4934;
+  --color-fd-diff-add: color-mix(in oklab, #b8bb26 18%, transparent);
+  --color-fd-diff-add-symbol: #b8bb26;
+}
+
+#nd-sidebar {
+  --color-fd-muted: #f2e5bc;
+  --color-fd-secondary: #ebdbb2;
+  --color-fd-muted-foreground: #7c6f64;
+}
+
+.dark #nd-sidebar {
+  --color-fd-muted: #32302f;
+  --color-fd-secondary: #3c3836;
+  --color-fd-muted-foreground: #a89984;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-fd-primary) 28%, transparent);
+  color: var(--color-fd-foreground);
+}

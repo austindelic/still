@@ -1,0 +1,64 @@
+---
+title: Getting Started
+description: Build Still locally and try the first project workflow.
+---
+
+Still is easiest to understand from a small project. This page uses the repository build because the CLI is under active development.
+
+## Build The CLI
+
+From the CLI workspace:
+
+```bash
+cd apps/cli
+cargo build
+```
+
+Run the help output through the current binary name:
+
+```bash
+cargo run --bin still_s -- --help
+```
+
+When Still is installed as a user-facing command, the examples in these docs use `still`.
+
+## Install A Tool
+
+The `install` command accepts a tool name with an optional version. If no version is provided, Still treats it as `latest`.
+
+```bash
+still install ripgrep
+still install jq@latest
+```
+
+Current behavior installs through the Homebrew formula path in the engine. Still downloads and extracts the matching bottle, then reports the install location and binary path when it can find one.
+
+## Create A Project File
+
+A project config lives in `still.toml`. Start small:
+
+```toml
+[tools]
+node = "22"
+python = "3.12"
+
+[packages]
+latest = ["ripgrep", "fd", "jq"]
+
+[env]
+NODE_ENV = "development"
+files = [".env", ".env.local"]
+```
+
+This says what the project needs without forcing every contributor to read a setup script first. The config format already supports more sections than the engine executes today, so the next pages mark preview behavior where it matters.
+
+## Open The TUI
+
+Run Still with no subcommand, or use `tui`, to open the terminal interface.
+
+```bash
+still
+still tui
+```
+
+The TUI can browse formula data and shows the direction of the interactive workflow. Some actions in the TUI are still wired as placeholders while the engine work continues.

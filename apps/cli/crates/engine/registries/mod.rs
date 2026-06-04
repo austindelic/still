@@ -1,11 +1,7 @@
-pub mod asdf;
-pub mod cargo;
-pub mod homebrew;
-pub mod macports;
-pub mod mas;
-pub mod nix;
-pub mod npm;
-pub mod pkgsrc;
-pub mod scoop;
-pub mod specs;
+//! Registry integration modules.
 
+/// Homebrew registry integration.
+pub mod homebrew;
+
+/// Compatibility re-export for callers that access specs through registries.
+pub use crate::specs;
