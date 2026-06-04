@@ -10,8 +10,8 @@ Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file 
 
 - `src/main.rs`: Binary entrypoint. Keep it thin; it should delegate to `still::cli::entry()`.
 - `src/lib.rs`: Exposes the root `cli` module.
-- `src/cli`: Clap args, command routing, output formatting, runtime boundary, and CLI command handlers.
-- `crates/engine`: Core install, registry, spec, archive, filesystem, network, hashing, path, and platform logic.
+- `src/cli`: Clap args, command routing, output formatting, and CLI command handlers.
+- `crates/engine`: Core install, registry, spec, runtime boundary, archive, filesystem, network, hashing, path, and platform logic.
 - `crates/tui`: Optional TUI library compiled through the root `tui` feature.
 - `examples`: Concept config and schema files.
 - `tests`: App-level CLI contract and integration tests.

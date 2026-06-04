@@ -5,8 +5,8 @@ pub mod install;
 
 use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand, ServicesCommand};
 use crate::cli::output::Output;
-use crate::cli::runtime::CliRuntime;
 use clap::CommandFactory;
+use engine::runtime::ActionRuntime;
 
 /// Dispatches one parsed subcommand to its CLI handler.
 ///
@@ -16,7 +16,7 @@ use clap::CommandFactory;
 /// `0` for success and nonzero for command failure.
 pub fn run_cli<R, O>(cmd: Command, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: ActionRuntime,
     O: Output,
 {
     match cmd {
@@ -467,7 +467,7 @@ fn normalize_child_command(command: Vec<String>) -> Vec<String> {
 /// this function writes generated help and returns the help-render result.
 pub fn run_parsed<R, O>(cli: Cli, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: ActionRuntime,
     O: Output,
 {
     match cli.command {
@@ -570,10 +570,10 @@ mod tests {
         uninstall_targets: Vec<UninstallTarget>,
     }
 
-    impl CliRuntime for FakeRuntime {
+    impl ActionRuntime for FakeRuntime {
         fn install(
             &mut self,
-            _request: crate::cli::runtime::InstallCommandRequest,
+            _request: engine::runtime::ScopedInstallRequest,
         ) -> anyhow::Result<InstallResult> {
             panic!("install should not run in config tests");
         }

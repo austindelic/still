@@ -6,16 +6,14 @@ pub mod args;
 pub mod commands;
 /// Output abstractions used by real commands and tests.
 pub mod output;
-/// Boundary between CLI handlers and engine actions.
-pub mod runtime;
 
 use clap::Parser;
+use engine::runtime::{ActionRuntime, RealRuntime};
 
 use self::{
     args::Cli,
     commands::run_cli,
     output::{Output, StdOutput},
-    runtime::{CliRuntime, RealRuntime},
 };
 
 /// Parses process arguments, dispatches the selected command, and exits on failure.
@@ -44,7 +42,7 @@ pub fn entry() {
 /// means success.
 pub fn run_parsed<R, O>(cli: Cli, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: ActionRuntime,
     O: Output,
 {
     run_parsed_with_no_command(cli, runtime, output, run_without_command)
@@ -64,7 +62,7 @@ pub fn run_parsed_with_no_command<R, O, F>(
     no_command: F,
 ) -> i32
 where
-    R: CliRuntime,
+    R: ActionRuntime,
     O: Output,
     F: FnOnce(&mut O) -> i32,
 {
@@ -117,7 +115,6 @@ mod tests {
     use crate::cli::{
         args::{Cli, Command, DoctorArgs},
         output::BufferedOutput,
-        runtime::CliRuntime,
     };
     use engine::actions::{
         activate::ActivateResult,
@@ -134,14 +131,15 @@ mod tests {
         trust::TrustResult,
         uninstall::{UninstallResult, UninstallTarget},
     };
+    use engine::runtime::{ActionRuntime, ScopedInstallRequest};
 
     #[derive(Debug, Default)]
     struct FakeRuntime;
 
-    impl CliRuntime for FakeRuntime {
+    impl ActionRuntime for FakeRuntime {
         fn install(
             &mut self,
-            _request: crate::cli::runtime::InstallCommandRequest,
+            _request: ScopedInstallRequest,
         ) -> anyhow::Result<engine::actions::install::InstallResult> {
             panic!("install should not run in these routing tests");
         }
