@@ -117,8 +117,8 @@ where
                         let status = match (item.project, item.global, item.installed) {
                             (true, true, true) => " (project, global, installed)",
                             (true, true, false) => " (project, global)",
-                            (true, false, true) => " (configured, installed)",
-                            (true, false, false) => "",
+                            (true, false, true) => " (project, installed)",
+                            (true, false, false) => " (project)",
                             (false, true, true) => " (global, installed)",
                             (false, true, false) => " (global)",
                             (false, false, true) => " (installed)",
@@ -232,6 +232,7 @@ where
             match runtime.services(operation, name, args.global) {
                 Ok(result) => {
                     output.info(&format!("Config: {}", result.path.display()));
+                    let exit_code = services_exit_code(&result.services);
                     for service in result.services {
                         output.info(&format!(
                             "{}: {} - {}",
@@ -245,7 +246,7 @@ where
                             write_child_output(output, &execution.stderr, true);
                         }
                     }
-                    0
+                    exit_code
                 }
                 Err(e) => {
                     output.error(&format!("services failed: {e}"));
@@ -401,6 +402,17 @@ fn service_status_label(status: engine::actions::services::ServiceStatus) -> &'s
         engine::actions::services::ServiceStatus::Skipped => "skipped",
         engine::actions::services::ServiceStatus::Ok => "ok",
         engine::actions::services::ServiceStatus::Failed => "failed",
+    }
+}
+
+fn services_exit_code(services: &[engine::actions::services::ServiceReport]) -> i32 {
+    if services
+        .iter()
+        .any(|service| service.status == engine::actions::services::ServiceStatus::Failed)
+    {
+        1
+    } else {
+        0
     }
 }
 
@@ -1044,13 +1056,13 @@ env failed: failed to read still.toml
         insta::assert_snapshot!(output.stdout, @r###"
 Config: /repo/still.toml
 Tools:
-  jq@latest
+  jq@latest (project)
   node@22 (global)
 Packages:
-  llvm@18@homebrew
-  openssl@latest
+  llvm@18@homebrew (project)
+  openssl@latest (project)
 Apps:
-  firefox@latest
+  firefox@latest (project)
   zed@latest@homebrew-cask (installed)
     output: /opt/still/apps/zed/latest
 "###);
@@ -2117,6 +2129,78 @@ command: echo web
 web
 "###);
         assert_eq!(output.stderr, "");
+    }
+
+    #[test]
+    fn services_action_failure_returns_nonzero() {
+        let mut runtime = FakeRuntime {
+            config_check_result: None,
+            config_check_globals: Vec::new(),
+            init_result: None,
+            init_forces: Vec::new(),
+            env_result: None,
+            env_globals: Vec::new(),
+            list_result: None,
+            list_alls: Vec::new(),
+            agents_result: None,
+            agents_operations: Vec::new(),
+            agents_globals: Vec::new(),
+            run_result: None,
+            run_commands: Vec::new(),
+            run_globals: Vec::new(),
+            task_result: None,
+            task_names: Vec::new(),
+            task_globals: Vec::new(),
+            activate_result: None,
+            activate_shells: Vec::new(),
+            activate_globals: Vec::new(),
+            doctor_result: None,
+            sync_result: None,
+            services_result: Some(Ok(ServicesResult {
+                path: PathBuf::from("/repo/still.toml"),
+                services: vec![ServiceReport {
+                    name: "db".to_string(),
+                    status: ServiceStatus::Failed,
+                    detail: "check".to_string(),
+                    execution: Some(engine::actions::services::ServiceExecution {
+                        command: "false".to_string(),
+                        status: 1,
+                        stdout: String::new(),
+                        stderr: "not ready\n".to_string(),
+                    }),
+                }],
+            })),
+            services_requests: Vec::new(),
+            trust_result: None,
+            uninstall_result: None,
+            uninstall_targets: Vec::new(),
+        };
+        let mut output = BufferedOutput::default();
+
+        let code = run_cli(
+            Command::Services(crate::cli::args::ServicesArgs {
+                global: false,
+                command: Some(ServicesCommand::Check {
+                    name: Some("db".to_string()),
+                }),
+            }),
+            &mut runtime,
+            &mut output,
+        );
+
+        assert_eq!(code, 1);
+        assert_eq!(
+            runtime.services_requests,
+            [(ServicesOperation::Check, Some("db".to_string()), false)]
+        );
+        insta::assert_snapshot!(output.stdout, @r###"
+Config: /repo/still.toml
+db: failed - check
+command: false
+"###);
+        insta::assert_snapshot!(output.stderr, @r###"
+not ready
+"###);
     }
 
     #[test]

@@ -414,6 +414,7 @@ install failed: formula.json not found
         args.tools.clear();
         args.items = vec![
             "rust@stable@rustup".parse().unwrap(),
+            "stringer@latest@go".parse().unwrap(),
             "openssl@latest@apt-get".parse().unwrap(),
             "firefox@latest@homebrew-cask".parse().unwrap(),
             "zed@latest@cask".parse().unwrap(),
@@ -441,6 +442,12 @@ install failed: formula.json not found
                     "rust".to_string(),
                     "stable".to_string(),
                     Some("rustup".to_string())
+                ),
+                (
+                    ItemKind::Tool,
+                    "stringer".to_string(),
+                    "latest".to_string(),
+                    Some("go".to_string())
                 ),
                 (
                     ItemKind::Package,

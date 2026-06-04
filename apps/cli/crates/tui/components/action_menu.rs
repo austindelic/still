@@ -21,8 +21,6 @@ pub enum ActionMenuState {
 pub enum Action {
     Install,
     Uninstall,
-    Info,
-    Cancel,
 }
 
 impl Action {
@@ -32,12 +30,7 @@ impl Action {
     /// selection. `selected_action` indexes from `ActionMenuState::Open` are
     /// interpreted against this order.
     pub fn all() -> &'static [Action] {
-        &[
-            Action::Install,
-            Action::Uninstall,
-            Action::Info,
-            Action::Cancel,
-        ]
+        &[Action::Install, Action::Uninstall]
     }
 
     /// Returns the label rendered for this action.
@@ -48,8 +41,6 @@ impl Action {
         match self {
             Action::Install => "Install",
             Action::Uninstall => "Uninstall",
-            Action::Info => "Info",
-            Action::Cancel => "Cancel",
         }
     }
 }
@@ -84,14 +75,11 @@ impl ActionMenu {
             return;
         }
 
-        // Calculate modal size and position (centered)
         let modal_width = 40;
-        let modal_height = Action::all().len() as u16 + 4; // +4 for borders and title
+        let modal_height = Action::all().len() as u16 + 4;
 
-        // Use popup_area helper to center the popup
         let modal_area = popup_area(area, modal_width, modal_height);
 
-        // Clear the background before rendering the popup
         Clear.render(modal_area, buf);
 
         let selected_idx = if let ActionMenuState::Open { selected_action } = self.state {
@@ -113,7 +101,7 @@ impl ActionMenu {
                 Style::default().fg(Color::White)
             };
 
-            let prefix = if is_selected { "▶ " } else { "  " };
+            let prefix = if is_selected { "> " } else { "  " };
             lines.push(Line::from(vec![
                 Span::styled(prefix, style),
                 Span::styled(action.as_str(), style),
@@ -127,7 +115,7 @@ impl ActionMenu {
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )
-            .style(Style::default().bg(Color::DarkGray)) // Background for the modal itself
+            .style(Style::default().bg(Color::DarkGray))
             .title(self.title.clone());
 
         Paragraph::new(Text::from(lines))

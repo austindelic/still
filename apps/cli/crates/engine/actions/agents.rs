@@ -149,6 +149,20 @@ pub async fn run_with_installer(
         if resolved.scope == ConfigScope::Project {
             assert_config_trusted(&resolved.path, content.as_bytes(), "agent sync").await?;
         }
+        if !pending_auto_dependencies.is_empty() && request.operation == AgentsOperation::Sync {
+            review_required = true;
+            return Ok(AgentsResult {
+                path: resolved.path,
+                agents,
+                gitignore,
+                gitignore_path: None,
+                target_manifests,
+                pending_auto_dependencies,
+                auto_added,
+                missing_dependencies,
+                review_required,
+            });
+        }
         let skills_dir = project_root.join(".agents").join("skills");
         materialize_skills(&skills_dir, &agents.skills).await?;
         dependency_skills = skills_with_manifest_dependencies(&skills_dir, &agents.skills).await?;
@@ -227,6 +241,7 @@ pub async fn run_with_installer(
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(&path, &gitignore).await?;
+        refresh_active_lockfile(&resolved.path, &request.home_dir).await?;
         Some(path)
     } else {
         None
@@ -577,7 +592,9 @@ async fn validate_instructions_file(project_root: &Path, instructions: Option<&s
 
 async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Result<()> {
     match &skill.source {
-        NormalizedSkillSource::Official { .. } => Ok(()),
+        NormalizedSkillSource::Official { name, .. } => {
+            materialize_official_skill(name, &path.join(CONTENT_DIR)).await
+        }
         NormalizedSkillSource::GitHub {
             path: repo,
             version,
@@ -595,6 +612,53 @@ async fn materialize_skill_source(skill: &NormalizedSkill, path: &Path) -> Resul
         NormalizedSkillSource::Url { url, .. } => {
             download_skill_file(url, &path.join(CONTENT_DIR)).await
         }
+    }
+}
+
+async fn materialize_official_skill(name: &str, destination: &Path) -> Result<()> {
+    let Some(content) = official_skill_content(name) else {
+        return Err(EngineError::Conflict {
+            message: format!("official agent skill \"{name}\" is not available"),
+        }
+        .into());
+    };
+    if tokio::fs::metadata(destination).await.is_ok() {
+        tokio::fs::remove_dir_all(destination).await?;
+    }
+    tokio::fs::create_dir_all(destination).await?;
+    tokio::fs::write(destination.join("SKILL.md"), content).await?;
+    Ok(())
+}
+
+fn official_skill_content(name: &str) -> Option<&'static str> {
+    match name {
+        "rust-review" => Some(
+            r#"# rust-review
+
+Review Rust changes for correctness, maintainability, and test coverage.
+
+## Focus
+
+- Check ownership, lifetimes, error handling, and async boundaries.
+- Look for platform-specific behavior hidden behind generic code.
+- Prefer small, actionable findings with file and line references.
+- Call out missing tests when behavior changes.
+"#,
+        ),
+        "repo-auditor" => Some(
+            r#"# repo-auditor
+
+Audit a repository against its documented architecture and product spec.
+
+## Focus
+
+- Compare implementation, docs, examples, and tests for drift.
+- Identify unowned side effects, unsafe filesystem behavior, and stale generated artifacts.
+- Report concrete gaps before summaries.
+- Recommend the narrowest next verification step.
+"#,
+        ),
+        _ => None,
     }
 }
 
@@ -912,11 +976,17 @@ mod tests {
     async fn agents_sync_writes_managed_skill_gitignore() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [agents]
-            skills = ["rust-review"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            rust-review = "{}"
+            "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
         let result = run(AgentsRequest {
@@ -937,12 +1007,12 @@ mod tests {
         );
         assert!(skill_dir.join(".still-managed").is_file());
         let metadata = fs::read_to_string(skill_dir.join("source.toml")).unwrap();
-        assert!(metadata.contains("source_kind = \"official\""));
-        assert!(metadata.contains("source = \"rust-review\""));
+        assert!(metadata.contains("source_kind = \"url\""));
+        assert!(metadata.contains(&format!("source = \"{}\"", source)));
     }
 
     #[tokio::test]
-    async fn agents_sync_records_pinned_official_skill_version() {
+    async fn agents_sync_materializes_official_skill() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
         let config = r#"
@@ -961,11 +1031,37 @@ mod tests {
         .await
         .unwrap();
 
-        let metadata =
-            fs::read_to_string(temp.path().join(".agents/skills/rust-review/source.toml")).unwrap();
+        let skill_dir = temp.path().join(".agents/skills/rust-review");
+        assert!(skill_dir.join(".still-managed").is_file());
+        let content = fs::read_to_string(skill_dir.join("content/SKILL.md")).unwrap();
+        assert!(content.contains("# rust-review"));
+        let metadata = fs::read_to_string(skill_dir.join("source.toml")).unwrap();
         assert!(metadata.contains("source_kind = \"official\""));
         assert!(metadata.contains("source = \"rust-review\""));
         assert!(metadata.contains("version = \"v1.2.3\""));
+    }
+
+    #[tokio::test]
+    async fn agents_sync_rejects_unknown_official_skill() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let config = r#"
+            [agents.skills]
+            unknown-skill = { source = "unknown-skill" }
+            "#;
+        fs::write(&config_path, config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        let err = run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("official agent skill"));
     }
 
     #[test]
@@ -1015,13 +1111,21 @@ mod tests {
     async fn agents_sync_writes_target_manifests() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let rust_review = write_local_skill_source(temp.path(), "rust-review");
+        let repo_auditor = write_local_skill_source(temp.path(), "repo-auditor");
+        let config = format!(
+            r#"
             [agents]
             targets = ["claude", "codex"]
             instructions = "AGENTS.md"
-            skills = ["rust-review", "repo-auditor"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            rust-review = "{}"
+            repo-auditor = "{}"
+            "#,
+            rust_review, repo_auditor
+        );
+        fs::write(&config_path, &config).unwrap();
         fs::write(temp.path().join("AGENTS.md"), "# Project instructions\n").unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
@@ -1048,6 +1152,36 @@ mod tests {
                 .unwrap()
                 .contains("target = \"codex\"")
         );
+    }
+
+    #[tokio::test]
+    async fn agents_sync_writes_agent_skill_lockfile_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("still.toml");
+        let rust_review = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
+            [agents.skills]
+            rust-review = {{ url = "{}", version = "v1.2.3" }}
+            "#,
+            rust_review
+        );
+        fs::write(&config_path, &config).unwrap();
+        write_trust_marker(&config_path, config.as_bytes());
+
+        run(AgentsRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+            operation: AgentsOperation::Sync,
+        })
+        .await
+        .unwrap();
+
+        let lockfile = fs::read_to_string(temp.path().join("still.lock.toml")).unwrap();
+        assert!(lockfile.contains("kind = \"agent-skill\""));
+        assert!(lockfile.contains("name = \"rust-review\""));
+        assert!(lockfile.contains("version = \"v1.2.3\""));
     }
 
     #[tokio::test]
@@ -1148,6 +1282,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("repo");
         let global = temp.path().join(".config/still/config.toml");
+        let global_skill = write_local_skill_source(temp.path(), "global-skill");
         fs::create_dir_all(&project).unwrap();
         fs::create_dir_all(global.parent().unwrap()).unwrap();
         fs::write(
@@ -1160,10 +1295,15 @@ mod tests {
         .unwrap();
         fs::write(
             &global,
-            r#"
+            format!(
+                r#"
             [agents]
-            skills = ["global-skill"]
+
+            [agents.skills]
+            global-skill = "{}"
             "#,
+                global_skill
+            ),
         )
         .unwrap();
 
@@ -1246,11 +1386,17 @@ mod tests {
     async fn agents_sync_refuses_unmarked_custom_skill_directory() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "custom");
+        let config = format!(
+            r#"
             [agents]
-            skills = ["custom"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            custom = "{}"
+            "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
         fs::create_dir_all(temp.path().join(".agents/skills/custom")).unwrap();
         fs::write(
@@ -1276,11 +1422,17 @@ mod tests {
     async fn agents_sync_prunes_only_stale_managed_skill_directories() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [agents]
-            skills = ["rust-review"]
-            "#;
-        fs::write(&config_path, config).unwrap();
+
+            [agents.skills]
+            rust-review = "{}"
+            "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
 
         let stale = temp.path().join(".agents/skills/old-managed");
@@ -1313,9 +1465,11 @@ mod tests {
     async fn agents_sync_auto_adds_missing_inline_skill_dependencies() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [tools]
-            rust = { version = "stable", backend = "rustup" }
+            rust = {{ version = "stable", backend = "rustup" }}
 
             [packages]
             latest = ["openssl"]
@@ -1323,9 +1477,11 @@ mod tests {
             [agents]
 
             [agents.skills]
-            rust-review = { auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }
-        "#;
-        fs::write(&config_path, config).unwrap();
+            rust-review = {{ url = "{}", auto = true, tools = ["rust@stable@rustup", "cargo-nextest"], packages = ["openssl", "llvm"], apps = ["zed"] }}
+        "#,
+            source
+        );
+        fs::write(&config_path, &config).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
         let mut installer = FakeInstaller::default();
 
@@ -1400,17 +1556,21 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("still.toml");
         let lockfile_path = temp.path().join("still.lock.toml");
-        let config = r#"
+        let source = write_local_skill_source(temp.path(), "rust-review");
+        let config = format!(
+            r#"
             [tools]
-            rust = { version = "stable", backend = "rustup" }
+            rust = {{ version = "stable", backend = "rustup" }}
 
             [agents]
 
             [agents.skills]
-            rust-review = { auto = true, tools = ["cargo-nextest"] }
-        "#;
+            rust-review = {{ url = "{}", auto = true, tools = ["cargo-nextest"] }}
+        "#,
+            source
+        );
         let lockfile = "[[items]]\nkind = \"tool\"\nname = \"rust\"\nplatform = \"macos\"\nversion = \"stable\"\n";
-        fs::write(&config_path, config).unwrap();
+        fs::write(&config_path, &config).unwrap();
         fs::write(&lockfile_path, lockfile).unwrap();
         write_trust_marker(&config_path, config.as_bytes());
         let mut installer = FailingInstaller::default();
@@ -1996,6 +2156,13 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    fn write_local_skill_source(root: &Path, name: &str) -> String {
+        let source = root.join(format!("{name}-source"));
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), format!("# {name}\n")).unwrap();
+        format!("file://{}", source.display())
     }
 
     fn os_args(args: &[OsString]) -> Vec<String> {

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::actions::install::{InstallItemRequest, InstallRequest, ToolInstallOptions};
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::error::EngineError;
-use crate::lockfile::{lockfile_path, render_merged_lockfile};
+use crate::lockfile::{lockfile_path, render_merged_lockfile_for_config};
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::specs::backend::{default_backend, normalize_auto_backend};
 use crate::specs::item::{ItemKind, ItemSpec};
@@ -132,7 +132,9 @@ pub async fn refresh_active_lockfile(config_path: &Path, home_dir: &Path) -> Res
 async fn refresh_lockfile_with_items(config_path: &Path, items: &[SyncItem]) -> Result<PathBuf> {
     let path = lockfile_path(config_path);
     let existing = read_optional_lockfile(&path).await?;
-    let rendered = render_merged_lockfile(existing.as_deref(), items);
+    let config = read_still_config(config_path).await?;
+    let rendered =
+        render_merged_lockfile_for_config(existing.as_deref(), items, &config, config_path)?;
     tokio::fs::write(&path, rendered)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -151,7 +153,13 @@ pub async fn plan(request: SyncRequest) -> Result<SyncResult> {
     };
     let lockfile_path = lockfile_path(&resolved.path);
     let existing_lockfile = read_optional_lockfile(&lockfile_path).await?;
-    let rendered_lockfile = render_merged_lockfile(existing_lockfile.as_deref(), &items);
+    let config = read_still_config(&resolved.path).await?;
+    let rendered_lockfile = render_merged_lockfile_for_config(
+        existing_lockfile.as_deref(),
+        &items,
+        &config,
+        &resolved.path,
+    )?;
     let drift = lockfile_drift(existing_lockfile.as_deref(), &rendered_lockfile);
     let missing = missing_items(&items).await?;
     tokio::fs::write(&lockfile_path, rendered_lockfile)
@@ -188,11 +196,15 @@ fn selected_lockfile_path(request: &SyncRequest) -> Result<PathBuf> {
 }
 
 async fn sync_items_for_path(config_path: &Path) -> Result<Vec<SyncItem>> {
+    let config = read_still_config(config_path).await?;
+    sync_items(config)
+}
+
+async fn read_still_config(config_path: &Path) -> Result<StillConfig> {
     let content = tokio::fs::read_to_string(config_path)
         .await
         .with_context(|| format!("failed to read {}", config_path.display()))?;
-    let config = parse_still_toml(&content)?;
-    sync_items(config)
+    parse_still_toml(&content)
 }
 
 async fn sync_items_for_active_project_path(
@@ -300,12 +312,17 @@ async fn missing_items(items: &[SyncItem]) -> Result<Vec<SyncItem>> {
 }
 
 fn installed_path(item: &SyncItem) -> PathBuf {
-    let root = match item.kind {
+    installed_root(item.kind)
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str())
+}
+
+fn installed_root(kind: ItemKind) -> PathBuf {
+    match kind {
         ItemKind::Tool => System::tool_dir(),
-        ItemKind::Package => System::root_dir().join("packages"),
-        ItemKind::App => System::apps_dir(),
-    };
-    root.join(&item.spec.name).join(item.spec.version.as_str())
+        ItemKind::Package => System::root_dir().join("receipts").join("packages"),
+        ItemKind::App => System::root_dir().join("receipts").join("apps"),
+    }
 }
 
 pub(crate) fn sync_items(config: StillConfig) -> Result<Vec<SyncItem>> {
@@ -487,6 +504,19 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[test]
+    fn native_items_are_detected_from_receipt_roots() {
+        assert_eq!(installed_root(ItemKind::Tool), System::tool_dir());
+        assert_eq!(
+            installed_root(ItemKind::Package),
+            System::root_dir().join("receipts/packages")
+        );
+        assert_eq!(
+            installed_root(ItemKind::App),
+            System::root_dir().join("receipts/apps")
+        );
     }
 
     #[tokio::test]
@@ -820,6 +850,33 @@ mod tests {
         let lockfile = fs::read_to_string(result.lockfile_path).unwrap();
         assert!(lockfile.contains("name = \"rust\""));
         assert!(lockfile.contains("version = \"stable\""));
+    }
+
+    #[tokio::test]
+    async fn sync_writes_agent_skills_to_lockfile() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("still.toml"),
+            r#"
+            [agents.skills]
+            rust-review = { url = "https://example.com/rust-review", version = "v1.2.3" }
+            "#,
+        )
+        .unwrap();
+
+        let result = plan(SyncRequest {
+            start_dir: temp.path().to_path_buf(),
+            home_dir: temp.path().to_path_buf(),
+            global: false,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.items, []);
+        let lockfile = fs::read_to_string(result.lockfile_path).unwrap();
+        assert!(lockfile.contains("kind = \"agent-skill\""));
+        assert!(lockfile.contains("name = \"rust-review\""));
+        assert!(lockfile.contains("version = \"v1.2.3\""));
     }
 
     #[tokio::test]

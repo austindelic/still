@@ -350,8 +350,8 @@ impl RollbackRoots {
     fn system() -> Self {
         Self {
             tool_root: System::tool_dir(),
-            package_root: System::root_dir().join("packages"),
-            app_root: System::apps_dir(),
+            package_root: native_receipt_root(ItemKind::Package),
+            app_root: native_receipt_root(ItemKind::App),
             bin_dir: System::bin_dir(),
         }
     }
@@ -469,10 +469,29 @@ fn should_use_tool_command_backend(item: &InstallItemRequest) -> bool {
 }
 
 async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallResult> {
-    let command = tool_install_command(item)?;
+    let install_path = tool_install_path(item);
+    let staging_path = tool_staging_path(item);
+    let result = install_tool_with_command_staged(item, &install_path, &staging_path).await;
+    if result.is_err() {
+        let _ = remove_path_if_exists(&staging_path).await;
+    }
+    result
+}
+
+async fn install_tool_with_command_staged(
+    item: &InstallItemRequest,
+    install_path: &Path,
+    staging_path: &Path,
+) -> Result<InstallResult> {
+    let command = tool_install_command_at(item, staging_path)?;
+    let backup_path = tool_backup_path(item);
+    remove_path_if_exists(staging_path).await?;
+    tokio::fs::create_dir_all(staging_path).await?;
     for step in command.steps() {
-        let output = Command::new(&step.program)
-            .args(&step.args)
+        let mut process = Command::new(&step.program);
+        process.args(&step.args);
+        process.envs(command.env.iter().map(|(key, value)| (key, value)));
+        let output = process
             .output()
             .with_context(|| format!("failed to run tool backend {}", command.backend))?;
         if !output.status.success() {
@@ -487,27 +506,91 @@ async fn install_tool_with_command(item: &InstallItemRequest) -> Result<InstallR
         }
     }
 
-    let install_path = System::tool_dir()
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str());
-    write_install_marker(
-        &install_path,
+    let had_previous = promote_staged_install(staging_path, install_path, &backup_path).await?;
+    let binary_path = match System::find_binary_recursive(install_path, &item.spec.name).await {
+        Ok(binary_path) => binary_path,
+        Err(err) => {
+            rollback_promoted_install(install_path, &backup_path, had_previous).await?;
+            return Err(err);
+        }
+    };
+    let linked_executables = match link_binary(&binary_path).await {
+        Ok(linked) => linked.into_iter().collect::<Vec<_>>(),
+        Err(err) => {
+            rollback_promoted_install(install_path, &backup_path, had_previous).await?;
+            return Err(err);
+        }
+    };
+    if let Err(err) = write_install_marker(
+        install_path,
         item,
         &command.backend,
-        &[install_path.clone()],
-        &[],
+        &[install_path.to_path_buf()],
+        &linked_executables,
     )
-    .await?;
+    .await
+    {
+        for linked in &linked_executables {
+            let _ = remove_path_if_exists(linked).await;
+        }
+        rollback_promoted_install(install_path, &backup_path, had_previous).await?;
+        return Err(err);
+    }
+    let _ = remove_path_if_exists(&backup_path).await;
 
     Ok(InstallResult {
         tool_name: item.spec.name.clone(),
         version: item.spec.version.to_string(),
-        install_path: install_path.clone(),
-        binary_path: None,
-        outputs: vec![install_path],
-        linked_executables: Vec::new(),
+        install_path: install_path.to_path_buf(),
+        binary_path,
+        outputs: vec![install_path.to_path_buf()],
+        linked_executables,
         installed: Vec::new(),
     })
+}
+
+async fn promote_staged_install(
+    staging_path: &Path,
+    install_path: &Path,
+    backup_path: &Path,
+) -> Result<bool> {
+    remove_path_if_exists(backup_path).await?;
+    if let Some(parent) = install_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let had_previous = install_path.exists();
+    if had_previous {
+        tokio::fs::rename(install_path, backup_path)
+            .await
+            .with_context(|| format!("failed to back up {}", install_path.display()))?;
+    }
+
+    if let Err(err) = tokio::fs::rename(staging_path, install_path).await {
+        if had_previous {
+            let _ = tokio::fs::rename(backup_path, install_path).await;
+        }
+        return Err(err)
+            .with_context(|| format!("failed to promote install to {}", install_path.display()));
+    }
+
+    Ok(had_previous)
+}
+
+async fn rollback_promoted_install(
+    install_path: &Path,
+    backup_path: &Path,
+    had_previous: bool,
+) -> Result<()> {
+    remove_path_if_exists(install_path).await?;
+    if had_previous {
+        tokio::fs::rename(backup_path, install_path)
+            .await
+            .with_context(|| format!("failed to restore {}", install_path.display()))?;
+    } else {
+        remove_path_if_exists(backup_path).await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -515,6 +598,7 @@ struct ToolInstallCommand {
     backend: String,
     program: String,
     args: Vec<String>,
+    env: Vec<(String, String)>,
     after: Vec<ToolInstallStep>,
 }
 
@@ -535,7 +619,15 @@ impl ToolInstallCommand {
     }
 }
 
+#[cfg(test)]
 fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand> {
+    tool_install_command_at(item, &tool_install_path(item))
+}
+
+fn tool_install_command_at(
+    item: &InstallItemRequest,
+    install_path: &Path,
+) -> Result<ToolInstallCommand> {
     let backend = install_backend(
         ItemKind::Tool,
         item.spec.backend.as_ref().map(|backend| backend.as_str()),
@@ -546,6 +638,7 @@ fn tool_install_command(item: &InstallItemRequest) -> Result<ToolInstallCommand>
         item.spec.version.as_str(),
         &backend,
         &item.tool,
+        install_path,
     )
 }
 
@@ -554,8 +647,10 @@ fn tool_install_command_for_backend(
     version: &str,
     backend: &str,
     options: &ToolInstallOptions,
+    install_path: &Path,
 ) -> Result<ToolInstallCommand> {
     let normalized = install_backend(ItemKind::Tool, Some(backend), current_platform());
+    let install_path = install_path.display().to_string();
     match normalized.as_str() {
         "rustup" => Ok(ToolInstallCommand {
             backend: "rustup".to_string(),
@@ -565,11 +660,20 @@ fn tool_install_command_for_backend(
                 "install".to_string(),
                 version.to_string(),
             ],
+            env: vec![
+                ("RUSTUP_HOME".to_string(), format!("{install_path}/rustup")),
+                ("CARGO_HOME".to_string(), format!("{install_path}/cargo")),
+            ],
             after: rustup_extra_steps(version, options),
         }),
         "cargo" => {
             reject_tool_extras(&normalized, options)?;
-            let mut args = vec!["install".to_string(), name.to_string()];
+            let mut args = vec![
+                "install".to_string(),
+                "--root".to_string(),
+                install_path.clone(),
+                name.to_string(),
+            ];
             if version != "latest" {
                 args.extend(["--version".to_string(), version.to_string()]);
             }
@@ -577,6 +681,7 @@ fn tool_install_command_for_backend(
                 backend: "cargo".to_string(),
                 program: "cargo".to_string(),
                 args,
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -588,8 +693,11 @@ fn tool_install_command_for_backend(
                 args: vec![
                     "install".to_string(),
                     "--global".to_string(),
+                    "--prefix".to_string(),
+                    install_path.clone(),
                     package_with_version(name, version),
                 ],
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -603,6 +711,10 @@ fn tool_install_command_for_backend(
                     "--global".to_string(),
                     package_with_version(name, version),
                 ],
+                env: vec![
+                    ("PNPM_HOME".to_string(), format!("{install_path}/bin")),
+                    ("NPM_CONFIG_PREFIX".to_string(), install_path.clone()),
+                ],
                 after: Vec::new(),
             })
         }
@@ -614,8 +726,11 @@ fn tool_install_command_for_backend(
                 args: vec![
                     "global".to_string(),
                     "add".to_string(),
+                    "--prefix".to_string(),
+                    install_path.clone(),
                     package_with_version(name, version),
                 ],
+                env: Vec::new(),
                 after: Vec::new(),
             })
         }
@@ -626,7 +741,28 @@ fn tool_install_command_for_backend(
                 program: "pipx".to_string(),
                 args: vec![
                     "install".to_string(),
+                    "--install-dir".to_string(),
+                    format!("{install_path}/venvs"),
+                    "--bin-dir".to_string(),
+                    format!("{install_path}/bin"),
                     python_package_with_version(name, version),
+                ],
+                env: Vec::new(),
+                after: Vec::new(),
+            })
+        }
+        "go" => {
+            reject_tool_extras(&normalized, options)?;
+            Ok(ToolInstallCommand {
+                backend: "go".to_string(),
+                program: "go".to_string(),
+                args: vec![
+                    "install".to_string(),
+                    go_package_with_version(name, version),
+                ],
+                env: vec![
+                    ("GOBIN".to_string(), format!("{install_path}/bin")),
+                    ("GOPATH".to_string(), format!("{install_path}/go")),
                 ],
                 after: Vec::new(),
             })
@@ -637,6 +773,7 @@ fn tool_install_command_for_backend(
                 backend: "mise".to_string(),
                 program: "mise".to_string(),
                 args: vec!["install".to_string(), format!("{name}@{version}")],
+                env: vec![("MISE_DATA_DIR".to_string(), format!("{install_path}/mise"))],
                 after: Vec::new(),
             })
         }
@@ -646,6 +783,7 @@ fn tool_install_command_for_backend(
                 backend: "asdf".to_string(),
                 program: "asdf".to_string(),
                 args: vec!["install".to_string(), name.to_string(), version.to_string()],
+                env: vec![("ASDF_DATA_DIR".to_string(), format!("{install_path}/asdf"))],
                 after: Vec::new(),
             })
         }
@@ -655,6 +793,7 @@ fn tool_install_command_for_backend(
                 backend: "aqua".to_string(),
                 program: "aqua".to_string(),
                 args: vec!["install".to_string(), package_with_version(name, version)],
+                env: vec![("AQUA_ROOT_DIR".to_string(), format!("{install_path}/aqua"))],
                 after: Vec::new(),
             })
         }
@@ -664,6 +803,24 @@ fn tool_install_command_for_backend(
         .into()),
         _ => unsupported_tool_backend(&normalized),
     }
+}
+
+fn tool_install_path(item: &InstallItemRequest) -> PathBuf {
+    System::tool_dir()
+        .join(&item.spec.name)
+        .join(item.spec.version.as_str())
+}
+
+fn tool_staging_path(item: &InstallItemRequest) -> PathBuf {
+    System::tool_dir()
+        .join(&item.spec.name)
+        .join(format!(".{}.staging", item.spec.version.as_str()))
+}
+
+fn tool_backup_path(item: &InstallItemRequest) -> PathBuf {
+    System::tool_dir()
+        .join(&item.spec.name)
+        .join(format!(".{}.previous", item.spec.version.as_str()))
 }
 
 fn rustup_extra_steps(version: &str, options: &ToolInstallOptions) -> Vec<ToolInstallStep> {
@@ -716,6 +873,14 @@ fn python_package_with_version(name: &str, version: &str) -> String {
     }
 }
 
+fn go_package_with_version(name: &str, version: &str) -> String {
+    if version == "latest" {
+        format!("{name}@latest")
+    } else {
+        format!("{name}@{version}")
+    }
+}
+
 fn unsupported_tool_backend(backend: &str) -> Result<ToolInstallCommand> {
     Err(EngineError::UnsupportedPlatform {
         feature: format!("tool backend {backend}"),
@@ -741,10 +906,7 @@ async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
         .into());
     }
 
-    let install_path = System::root_dir()
-        .join("packages")
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str());
+    let install_path = native_receipt_path(item);
     write_install_marker(
         &install_path,
         item,
@@ -933,9 +1095,22 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
 }
 
 fn app_install_path(item: &InstallItemRequest) -> PathBuf {
-    System::apps_dir()
+    native_receipt_path(item)
+}
+
+fn native_receipt_path(item: &InstallItemRequest) -> PathBuf {
+    native_receipt_root(item.kind)
         .join(&item.spec.name)
         .join(item.spec.version.as_str())
+}
+
+fn native_receipt_root(kind: ItemKind) -> PathBuf {
+    let folder = match kind {
+        ItemKind::Tool => "tools",
+        ItemKind::Package => "packages",
+        ItemKind::App => "apps",
+    };
+    System::root_dir().join("receipts").join(folder)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1737,7 +1912,7 @@ mod tests {
     }
 
     #[test]
-    fn app_install_path_uses_still_managed_app_storage() {
+    fn app_install_path_uses_still_managed_receipt_storage() {
         let item = InstallItemRequest {
             kind: ItemKind::App,
             spec: "firefox@latest@flatpak".parse::<ItemSpec>().unwrap(),
@@ -1746,7 +1921,27 @@ mod tests {
 
         assert_eq!(
             app_install_path(&item),
-            System::apps_dir().join("firefox").join("latest")
+            System::root_dir()
+                .join("receipts/apps")
+                .join("firefox")
+                .join("latest")
+        );
+    }
+
+    #[test]
+    fn package_install_path_uses_still_managed_receipt_storage() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@3@homebrew".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        assert_eq!(
+            native_receipt_path(&item),
+            System::root_dir()
+                .join("receipts/packages")
+                .join("openssl")
+                .join("3")
         );
     }
 
@@ -1863,6 +2058,12 @@ mod tests {
 
         assert_eq!(command.program, "rustup");
         assert_eq!(command.args, ["toolchain", "install", "stable"]);
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "RUSTUP_HOME" && value.ends_with("/tools/rust/stable/rustup")
+        }));
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "CARGO_HOME" && value.ends_with("/tools/rust/stable/cargo")
+        }));
     }
 
     #[test]
@@ -1879,6 +2080,7 @@ mod tests {
         let command = tool_install_command(&item).unwrap();
 
         assert_eq!(command.args, ["toolchain", "install", "stable"]);
+        assert!(command.env.iter().any(|(key, _)| key == "RUSTUP_HOME"));
         assert_eq!(
             command.after,
             [
@@ -1946,13 +2148,67 @@ mod tests {
             tool: Default::default(),
         })
         .unwrap();
+        let go = tool_install_command(&InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "stringer@latest@go".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        })
+        .unwrap();
 
         assert_eq!(
             cargo.args,
-            ["install", "cargo-nextest", "--version", "0.9.99"]
+            [
+                "install",
+                "--root",
+                System::tool_dir()
+                    .join("cargo-nextest")
+                    .join("0.9.99")
+                    .to_str()
+                    .unwrap(),
+                "cargo-nextest",
+                "--version",
+                "0.9.99"
+            ]
         );
-        assert_eq!(npm.args, ["install", "--global", "typescript@5.8.0"]);
-        assert_eq!(pipx.args, ["install", "ruff==0.11.0"]);
+        assert_eq!(
+            npm.args,
+            [
+                "install",
+                "--global",
+                "--prefix",
+                System::tool_dir()
+                    .join("typescript")
+                    .join("5.8.0")
+                    .to_str()
+                    .unwrap(),
+                "typescript@5.8.0"
+            ]
+        );
+        assert_eq!(
+            pipx.args,
+            [
+                "install",
+                "--install-dir",
+                System::tool_dir()
+                    .join("ruff")
+                    .join("0.11.0")
+                    .join("venvs")
+                    .to_str()
+                    .unwrap(),
+                "--bin-dir",
+                System::tool_dir()
+                    .join("ruff")
+                    .join("0.11.0")
+                    .join("bin")
+                    .to_str()
+                    .unwrap(),
+                "ruff==0.11.0"
+            ]
+        );
+        assert_eq!(go.args, ["install", "stringer@latest"]);
+        assert!(go.env.iter().any(|(key, value)| {
+            key == "GOBIN" && value.ends_with("/tools/stringer/latest/bin")
+        }));
     }
 
     #[test]
@@ -1979,6 +2235,100 @@ mod tests {
         assert_eq!(mise.args, ["install", "node@22"]);
         assert_eq!(asdf.args, ["install", "node", "22"]);
         assert_eq!(aqua.args, ["install", "ripgrep@14.1.1"]);
+        assert!(mise.env.iter().any(|(key, _)| key == "MISE_DATA_DIR"));
+        assert!(asdf.env.iter().any(|(key, _)| key == "ASDF_DATA_DIR"));
+        assert!(aqua.env.iter().any(|(key, _)| key == "AQUA_ROOT_DIR"));
+    }
+
+    #[test]
+    fn command_backed_tool_install_can_scope_backend_to_staging_path() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Tool,
+            spec: "typescript@5.8.0@npm".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+        let staging_path = tool_staging_path(&item);
+
+        let command = tool_install_command_at(&item, &staging_path).unwrap();
+
+        assert_eq!(
+            command.args,
+            [
+                "install",
+                "--global",
+                "--prefix",
+                staging_path.to_str().unwrap(),
+                "typescript@5.8.0"
+            ]
+        );
+        assert!(staging_path.ends_with("typescript/.5.8.0.staging"));
+    }
+
+    #[tokio::test]
+    async fn promote_staged_install_keeps_backup_until_finalized() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging_path = temp.path().join(".latest.staging");
+        let install_path = temp.path().join("latest");
+        let backup_path = temp.path().join(".latest.previous");
+        tokio::fs::create_dir_all(&staging_path).await.unwrap();
+        tokio::fs::write(staging_path.join("new.txt"), "new")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(&install_path).await.unwrap();
+        tokio::fs::write(install_path.join("old.txt"), "old")
+            .await
+            .unwrap();
+
+        let had_previous = promote_staged_install(&staging_path, &install_path, &backup_path)
+            .await
+            .unwrap();
+
+        assert!(had_previous);
+        assert!(install_path.join("new.txt").is_file());
+        assert!(!install_path.join("old.txt").exists());
+        assert!(!staging_path.exists());
+        assert!(backup_path.join("old.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn rollback_promoted_install_restores_previous_install() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_path = temp.path().join("latest");
+        let backup_path = temp.path().join(".latest.previous");
+        tokio::fs::create_dir_all(&install_path).await.unwrap();
+        tokio::fs::write(install_path.join("new.txt"), "new")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(&backup_path).await.unwrap();
+        tokio::fs::write(backup_path.join("old.txt"), "old")
+            .await
+            .unwrap();
+
+        rollback_promoted_install(&install_path, &backup_path, true)
+            .await
+            .unwrap();
+
+        assert!(install_path.join("old.txt").is_file());
+        assert!(!install_path.join("new.txt").exists());
+        assert!(!backup_path.exists());
+    }
+
+    #[tokio::test]
+    async fn rollback_promoted_install_removes_new_install_without_previous() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_path = temp.path().join("latest");
+        let backup_path = temp.path().join(".latest.previous");
+        tokio::fs::create_dir_all(&install_path).await.unwrap();
+        tokio::fs::write(install_path.join("new.txt"), "new")
+            .await
+            .unwrap();
+
+        rollback_promoted_install(&install_path, &backup_path, false)
+            .await
+            .unwrap();
+
+        assert!(!install_path.exists());
+        assert!(!backup_path.exists());
     }
 
     #[test]

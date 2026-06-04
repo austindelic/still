@@ -6,8 +6,6 @@ mod app;
 mod components;
 /// TUI tab implementations.
 mod tabs;
-/// Top-level drawing helpers.
-mod ui;
 
 /// Launches the TUI terminal event loop.
 pub use app::launch_tui;
