@@ -1,12 +1,12 @@
 //! CLI-facing install command handler.
 
-use crate::cli::args::InstallArgs;
-use crate::cli::output::Output;
-use engine::actions::install::{
+use crate::actions::install::{
     InstallItemRequest, InstallRequest, InstallResult, items_from_specs,
 };
-use engine::runtime::{ActionRuntime, ScopedInstallRequest};
-use engine::specs::item::ItemKind;
+use crate::cli::args::InstallArgs;
+use crate::cli::output::Output;
+use crate::runtime::{ActionRuntime, ScopedInstallRequest};
+use crate::specs::item::ItemKind;
 
 /// Runs the install command through the configured runtime.
 ///
@@ -117,29 +117,29 @@ fn write_one_install<O: Output>(
 
 #[cfg(test)]
 mod tests {
-    use engine::actions::activate::ActivateResult;
-    use engine::actions::agents::{AgentsOperation, AgentsResult};
-    use engine::actions::config::CheckConfigResult;
-    use engine::actions::doctor::DoctorResult;
-    use engine::actions::env::EnvResult;
-    use engine::actions::init::InitResult;
-    use engine::actions::install::{InstallResult, InstalledItemResult};
-    use engine::actions::list::ListResult;
-    use engine::actions::run::RunResult;
-    use engine::actions::services::{ServicesOperation, ServicesResult};
-    use engine::actions::sync::SyncResult;
-    use engine::actions::task::TaskResult;
-    use engine::actions::trust::TrustResult;
-    use engine::actions::uninstall::{UninstallResult, UninstallTarget};
+    use crate::actions::activate::ActivateResult;
+    use crate::actions::agents::{AgentsOperation, AgentsResult};
+    use crate::actions::config::CheckConfigResult;
+    use crate::actions::doctor::DoctorResult;
+    use crate::actions::env::EnvResult;
+    use crate::actions::init::InitResult;
+    use crate::actions::install::{InstallResult, InstalledItemResult};
+    use crate::actions::list::ListResult;
+    use crate::actions::run::RunResult;
+    use crate::actions::services::{ServicesOperation, ServicesResult};
+    use crate::actions::sync::SyncResult;
+    use crate::actions::task::TaskResult;
+    use crate::actions::trust::TrustResult;
+    use crate::actions::uninstall::{UninstallResult, UninstallTarget};
     use std::path::PathBuf;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
-    use engine::runtime::{ActionRuntime, ScopedInstallRequest};
+    use crate::runtime::{ActionRuntime, ScopedInstallRequest};
 
     #[derive(Default)]
     struct FakeRuntime {
-        install_result: Option<engine::error::Result<InstallResult>>,
+        install_result: Option<crate::error::Result<InstallResult>>,
         install_requests: Vec<(ItemKind, String, String, Option<String>)>,
         install_globals: Vec<bool>,
         install_forces: Vec<bool>,
@@ -149,7 +149,7 @@ mod tests {
         fn install(
             &mut self,
             request: ScopedInstallRequest,
-        ) -> engine::error::Result<InstallResult> {
+        ) -> crate::error::Result<InstallResult> {
             self.install_globals.push(request.global);
             self.install_forces.push(request.force);
             self.install_requests
@@ -166,19 +166,19 @@ mod tests {
                 .expect("test runtime install result was not configured")
         }
 
-        fn config_check(&mut self, _global: bool) -> engine::error::Result<CheckConfigResult> {
+        fn config_check(&mut self, _global: bool) -> crate::error::Result<CheckConfigResult> {
             panic!("config_check should not run in install tests");
         }
 
-        fn init(&mut self, _force: bool) -> engine::error::Result<InitResult> {
+        fn init(&mut self, _force: bool) -> crate::error::Result<InitResult> {
             panic!("init should not run in install tests");
         }
 
-        fn env(&mut self, _global: bool) -> engine::error::Result<EnvResult> {
+        fn env(&mut self, _global: bool) -> crate::error::Result<EnvResult> {
             panic!("env should not run in install tests");
         }
 
-        fn list(&mut self, _all: bool, _global: bool) -> engine::error::Result<ListResult> {
+        fn list(&mut self, _all: bool, _global: bool) -> crate::error::Result<ListResult> {
             panic!("list should not run in install tests");
         }
 
@@ -186,7 +186,7 @@ mod tests {
             &mut self,
             _operation: AgentsOperation,
             _global: bool,
-        ) -> engine::error::Result<AgentsResult> {
+        ) -> crate::error::Result<AgentsResult> {
             panic!("agents should not run in install tests");
         }
 
@@ -194,7 +194,7 @@ mod tests {
             &mut self,
             _command: Vec<String>,
             _global: bool,
-        ) -> engine::error::Result<RunResult> {
+        ) -> crate::error::Result<RunResult> {
             panic!("run_command should not run in install tests");
         }
 
@@ -202,7 +202,7 @@ mod tests {
             &mut self,
             _name: Option<String>,
             _global: bool,
-        ) -> engine::error::Result<TaskResult> {
+        ) -> crate::error::Result<TaskResult> {
             panic!("task should not run in install tests");
         }
 
@@ -210,15 +210,15 @@ mod tests {
             &mut self,
             _shell: Option<String>,
             _global: bool,
-        ) -> engine::error::Result<ActivateResult> {
+        ) -> crate::error::Result<ActivateResult> {
             panic!("activate should not run in install tests");
         }
 
-        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
+        fn doctor(&mut self) -> crate::error::Result<DoctorResult> {
             panic!("doctor should not run in install tests");
         }
 
-        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
+        fn sync(&mut self, _global: bool) -> crate::error::Result<SyncResult> {
             panic!("sync should not run in install tests");
         }
 
@@ -227,11 +227,11 @@ mod tests {
             _operation: ServicesOperation,
             _name: Option<String>,
             _global: bool,
-        ) -> engine::error::Result<ServicesResult> {
+        ) -> crate::error::Result<ServicesResult> {
             panic!("services should not run in install tests");
         }
 
-        fn trust(&mut self) -> engine::error::Result<TrustResult> {
+        fn trust(&mut self) -> crate::error::Result<TrustResult> {
             panic!("trust should not run in install tests");
         }
 
@@ -239,7 +239,7 @@ mod tests {
             &mut self,
             _target: UninstallTarget,
             _global: bool,
-        ) -> engine::error::Result<UninstallResult> {
+        ) -> crate::error::Result<UninstallResult> {
             panic!("uninstall should not run in install tests");
         }
     }
@@ -314,7 +314,7 @@ Tools:
     fn install_error_writes_stderr_and_returns_nonzero() {
         let args = install_args("ripgrep");
         let mut runtime = FakeRuntime {
-            install_result: Some(Err(engine::error::EngineError::message(
+            install_result: Some(Err(crate::error::EngineError::message(
                 "formula.json not found",
             ))),
             ..FakeRuntime::default()

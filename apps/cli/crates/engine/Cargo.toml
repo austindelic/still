@@ -8,6 +8,7 @@ rust-version.workspace = true
 path = "lib.rs"
 
 [dependencies]
+clap = { workspace = true }
 tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread"] }
 flate2 = "1.1.5"
 tar = "0.4.44"
@@ -27,5 +28,6 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 tempfile = "3.25"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

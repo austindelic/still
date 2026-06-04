@@ -577,8 +577,10 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "dirs",
  "flate2",
+ "insta",
  "reqwest",
  "semver",
  "serde",
@@ -2228,6 +2230,7 @@ dependencies = [
  "engine",
  "fuzzy-matcher",
  "ratatui",
+ "serde_json",
  "tokio",
 ]
 

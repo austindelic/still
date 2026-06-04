@@ -5,8 +5,8 @@ pub mod install;
 
 use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand, ServicesCommand};
 use crate::cli::output::Output;
+use crate::runtime::ActionRuntime;
 use clap::CommandFactory;
-use engine::runtime::ActionRuntime;
 
 /// Dispatches one parsed subcommand to its CLI handler.
 ///
@@ -102,9 +102,9 @@ where
                 output.info(&format!("Config: {}", result.path.display()));
                 for section in result.sections {
                     output.info(match section.kind {
-                        engine::specs::item::ItemKind::Tool => "Tools:",
-                        engine::specs::item::ItemKind::Package => "Packages:",
-                        engine::specs::item::ItemKind::App => "Apps:",
+                        crate::specs::item::ItemKind::Tool => "Tools:",
+                        crate::specs::item::ItemKind::Package => "Packages:",
+                        crate::specs::item::ItemKind::App => "Apps:",
                     });
                     if section.items.is_empty() {
                         output.info("  (none)");
@@ -217,16 +217,16 @@ where
                 .unwrap_or(ServicesCommand::Status { name: None })
             {
                 ServicesCommand::Status { name } => {
-                    (engine::actions::services::ServicesOperation::Status, name)
+                    (crate::actions::services::ServicesOperation::Status, name)
                 }
                 ServicesCommand::Start { name } => {
-                    (engine::actions::services::ServicesOperation::Start, name)
+                    (crate::actions::services::ServicesOperation::Start, name)
                 }
                 ServicesCommand::Stop { name } => {
-                    (engine::actions::services::ServicesOperation::Stop, name)
+                    (crate::actions::services::ServicesOperation::Stop, name)
                 }
                 ServicesCommand::Check { name } => {
-                    (engine::actions::services::ServicesOperation::Check, name)
+                    (crate::actions::services::ServicesOperation::Check, name)
                 }
             };
             match runtime.services(operation, name, args.global) {
@@ -256,14 +256,14 @@ where
         }
         Command::Agents(args) => {
             let operation = match args.command.unwrap_or(AgentsCommand::List) {
-                AgentsCommand::List => engine::actions::agents::AgentsOperation::List,
-                AgentsCommand::Check => engine::actions::agents::AgentsOperation::Check,
+                AgentsCommand::List => crate::actions::agents::AgentsOperation::List,
+                AgentsCommand::Check => crate::actions::agents::AgentsOperation::Check,
                 AgentsCommand::Sync {
                     accept_auto_deps: false,
-                } => engine::actions::agents::AgentsOperation::Sync,
+                } => crate::actions::agents::AgentsOperation::Sync,
                 AgentsCommand::Sync {
                     accept_auto_deps: true,
-                } => engine::actions::agents::AgentsOperation::SyncAcceptAutoDependencies,
+                } => crate::actions::agents::AgentsOperation::SyncAcceptAutoDependencies,
             };
             match runtime.agents(operation, args.global) {
                 Ok(result) => {
@@ -285,8 +285,8 @@ where
                     }
                     if matches!(
                         operation,
-                        engine::actions::agents::AgentsOperation::Sync
-                            | engine::actions::agents::AgentsOperation::SyncAcceptAutoDependencies
+                        crate::actions::agents::AgentsOperation::Sync
+                            | crate::actions::agents::AgentsOperation::SyncAcceptAutoDependencies
                     ) && !result.auto_added.is_empty()
                     {
                         output.info("Auto-added dependencies:");
@@ -341,9 +341,9 @@ where
             Ok(result) => {
                 for check in result.checks {
                     let status = match check.status {
-                        engine::actions::doctor::DoctorStatus::Ok => "ok",
-                        engine::actions::doctor::DoctorStatus::Warning => "warn",
-                        engine::actions::doctor::DoctorStatus::Error => "error",
+                        crate::actions::doctor::DoctorStatus::Ok => "ok",
+                        crate::actions::doctor::DoctorStatus::Warning => "warn",
+                        crate::actions::doctor::DoctorStatus::Error => "error",
                     };
                     output.info(&format!("[{status}] {}: {}", check.name, check.detail));
                 }
@@ -384,10 +384,10 @@ where
 }
 
 fn uninstall_target(
-    kind: Option<engine::specs::item::ItemKind>,
+    kind: Option<crate::specs::item::ItemKind>,
     spec: &crate::cli::args::UninstallSpec,
-) -> engine::actions::uninstall::UninstallTarget {
-    engine::actions::uninstall::UninstallTarget {
+) -> crate::actions::uninstall::UninstallTarget {
+    crate::actions::uninstall::UninstallTarget {
         kind,
         name: spec.spec.name.clone(),
         version: spec.spec.version.clone(),
@@ -396,19 +396,19 @@ fn uninstall_target(
     }
 }
 
-fn service_status_label(status: engine::actions::services::ServiceStatus) -> &'static str {
+fn service_status_label(status: crate::actions::services::ServiceStatus) -> &'static str {
     match status {
-        engine::actions::services::ServiceStatus::Configured => "configured",
-        engine::actions::services::ServiceStatus::Skipped => "skipped",
-        engine::actions::services::ServiceStatus::Ok => "ok",
-        engine::actions::services::ServiceStatus::Failed => "failed",
+        crate::actions::services::ServiceStatus::Configured => "configured",
+        crate::actions::services::ServiceStatus::Skipped => "skipped",
+        crate::actions::services::ServiceStatus::Ok => "ok",
+        crate::actions::services::ServiceStatus::Failed => "failed",
     }
 }
 
-fn services_exit_code(services: &[engine::actions::services::ServiceReport]) -> i32 {
+fn services_exit_code(services: &[crate::actions::services::ServiceReport]) -> i32 {
     if services
         .iter()
-        .any(|service| service.status == engine::actions::services::ServiceStatus::Failed)
+        .any(|service| service.status == crate::actions::services::ServiceStatus::Failed)
     {
         1
     } else {
@@ -416,7 +416,7 @@ fn services_exit_code(services: &[engine::actions::services::ServiceReport]) -> 
     }
 }
 
-fn install_item_label(item: &engine::actions::install::InstallItemRequest) -> String {
+fn install_item_label(item: &crate::actions::install::InstallItemRequest) -> String {
     let backend = item
         .spec
         .backend
@@ -429,10 +429,10 @@ fn install_item_label(item: &engine::actions::install::InstallItemRequest) -> St
     )
 }
 
-fn sync_drift_label(drift: engine::actions::sync::SyncDrift) -> &'static str {
+fn sync_drift_label(drift: crate::actions::sync::SyncDrift) -> &'static str {
     match drift {
-        engine::actions::sync::SyncDrift::LockfileMissing => "lockfile missing",
-        engine::actions::sync::SyncDrift::LockfileOutdated => "lockfile outdated",
+        crate::actions::sync::SyncDrift::LockfileMissing => "lockfile missing",
+        crate::actions::sync::SyncDrift::LockfileOutdated => "lockfile outdated",
     }
 }
 
@@ -513,7 +513,7 @@ pub fn help_text() -> std::io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use engine::actions::{
+    use crate::actions::{
         activate::{ActivateResult, ShellKind},
         agents::{AgentsOperation, AgentsResult},
         config::CheckConfigResult,
@@ -529,9 +529,9 @@ mod tests {
         trust::TrustResult,
         uninstall::{UninstallResult, UninstallTarget},
     };
-    use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
-    use engine::specs::item::ItemKind;
-    use engine::specs::toml::StillConfig;
+    use crate::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
+    use crate::specs::item::ItemKind;
+    use crate::specs::toml::StillConfig;
     use std::path::PathBuf;
 
     use super::*;
@@ -539,65 +539,65 @@ mod tests {
     use crate::cli::output::BufferedOutput;
 
     struct FakeRuntime {
-        config_check_result: Option<engine::error::Result<CheckConfigResult>>,
+        config_check_result: Option<crate::error::Result<CheckConfigResult>>,
         config_check_globals: Vec<bool>,
-        init_result: Option<engine::error::Result<InitResult>>,
+        init_result: Option<crate::error::Result<InitResult>>,
         init_forces: Vec<bool>,
-        env_result: Option<engine::error::Result<EnvResult>>,
+        env_result: Option<crate::error::Result<EnvResult>>,
         env_globals: Vec<bool>,
-        list_result: Option<engine::error::Result<ListResult>>,
+        list_result: Option<crate::error::Result<ListResult>>,
         list_alls: Vec<bool>,
-        agents_result: Option<engine::error::Result<AgentsResult>>,
+        agents_result: Option<crate::error::Result<AgentsResult>>,
         agents_operations: Vec<AgentsOperation>,
         agents_globals: Vec<bool>,
-        run_result: Option<engine::error::Result<RunResult>>,
+        run_result: Option<crate::error::Result<RunResult>>,
         run_commands: Vec<Vec<String>>,
         run_globals: Vec<bool>,
-        task_result: Option<engine::error::Result<TaskResult>>,
+        task_result: Option<crate::error::Result<TaskResult>>,
         task_names: Vec<Option<String>>,
         task_globals: Vec<bool>,
-        activate_result: Option<engine::error::Result<ActivateResult>>,
+        activate_result: Option<crate::error::Result<ActivateResult>>,
         activate_shells: Vec<Option<String>>,
         activate_globals: Vec<bool>,
-        doctor_result: Option<engine::error::Result<DoctorResult>>,
-        sync_result: Option<engine::error::Result<SyncResult>>,
-        services_result: Option<engine::error::Result<ServicesResult>>,
+        doctor_result: Option<crate::error::Result<DoctorResult>>,
+        sync_result: Option<crate::error::Result<SyncResult>>,
+        services_result: Option<crate::error::Result<ServicesResult>>,
         services_requests: Vec<(ServicesOperation, Option<String>, bool)>,
-        trust_result: Option<engine::error::Result<TrustResult>>,
-        uninstall_result: Option<engine::error::Result<UninstallResult>>,
+        trust_result: Option<crate::error::Result<TrustResult>>,
+        uninstall_result: Option<crate::error::Result<UninstallResult>>,
         uninstall_targets: Vec<UninstallTarget>,
     }
 
     impl ActionRuntime for FakeRuntime {
         fn install(
             &mut self,
-            _request: engine::runtime::ScopedInstallRequest,
-        ) -> engine::error::Result<InstallResult> {
+            _request: crate::runtime::ScopedInstallRequest,
+        ) -> crate::error::Result<InstallResult> {
             panic!("install should not run in config tests");
         }
 
-        fn config_check(&mut self, global: bool) -> engine::error::Result<CheckConfigResult> {
+        fn config_check(&mut self, global: bool) -> crate::error::Result<CheckConfigResult> {
             self.config_check_globals.push(global);
             self.config_check_result
                 .take()
                 .expect("test runtime config_check result was not configured")
         }
 
-        fn init(&mut self, force: bool) -> engine::error::Result<InitResult> {
+        fn init(&mut self, force: bool) -> crate::error::Result<InitResult> {
             self.init_forces.push(force);
             self.init_result
                 .take()
                 .expect("test runtime init result was not configured")
         }
 
-        fn env(&mut self, global: bool) -> engine::error::Result<EnvResult> {
+        fn env(&mut self, global: bool) -> crate::error::Result<EnvResult> {
             self.env_globals.push(global);
             self.env_result
                 .take()
                 .expect("test runtime env result was not configured")
         }
 
-        fn list(&mut self, all: bool, _global: bool) -> engine::error::Result<ListResult> {
+        fn list(&mut self, all: bool, _global: bool) -> crate::error::Result<ListResult> {
             self.list_alls.push(all);
             self.list_result
                 .take()
@@ -608,7 +608,7 @@ mod tests {
             &mut self,
             operation: AgentsOperation,
             global: bool,
-        ) -> engine::error::Result<AgentsResult> {
+        ) -> crate::error::Result<AgentsResult> {
             self.agents_operations.push(operation);
             self.agents_globals.push(global);
             self.agents_result
@@ -620,7 +620,7 @@ mod tests {
             &mut self,
             command: Vec<String>,
             global: bool,
-        ) -> engine::error::Result<RunResult> {
+        ) -> crate::error::Result<RunResult> {
             self.run_commands.push(command);
             self.run_globals.push(global);
             self.run_result
@@ -628,11 +628,7 @@ mod tests {
                 .expect("test runtime run result was not configured")
         }
 
-        fn task(
-            &mut self,
-            name: Option<String>,
-            global: bool,
-        ) -> engine::error::Result<TaskResult> {
+        fn task(&mut self, name: Option<String>, global: bool) -> crate::error::Result<TaskResult> {
             self.task_names.push(name);
             self.task_globals.push(global);
             self.task_result
@@ -644,7 +640,7 @@ mod tests {
             &mut self,
             shell: Option<String>,
             global: bool,
-        ) -> engine::error::Result<ActivateResult> {
+        ) -> crate::error::Result<ActivateResult> {
             self.activate_shells.push(shell);
             self.activate_globals.push(global);
             self.activate_result
@@ -652,13 +648,13 @@ mod tests {
                 .expect("test runtime activate result was not configured")
         }
 
-        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
+        fn doctor(&mut self) -> crate::error::Result<DoctorResult> {
             self.doctor_result
                 .take()
                 .expect("test runtime doctor result was not configured")
         }
 
-        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
+        fn sync(&mut self, _global: bool) -> crate::error::Result<SyncResult> {
             self.sync_result
                 .take()
                 .expect("test runtime sync result was not configured")
@@ -669,14 +665,14 @@ mod tests {
             operation: ServicesOperation,
             name: Option<String>,
             global: bool,
-        ) -> engine::error::Result<ServicesResult> {
+        ) -> crate::error::Result<ServicesResult> {
             self.services_requests.push((operation, name, global));
             self.services_result
                 .take()
                 .expect("test runtime services result was not configured")
         }
 
-        fn trust(&mut self) -> engine::error::Result<TrustResult> {
+        fn trust(&mut self) -> crate::error::Result<TrustResult> {
             self.trust_result
                 .take()
                 .expect("test runtime trust result was not configured")
@@ -686,7 +682,7 @@ mod tests {
             &mut self,
             target: UninstallTarget,
             _global: bool,
-        ) -> engine::error::Result<UninstallResult> {
+        ) -> crate::error::Result<UninstallResult> {
             self.uninstall_targets.push(target);
             self.uninstall_result
                 .take()
@@ -750,7 +746,7 @@ mod tests {
     #[test]
     fn config_check_formats_error() {
         let mut runtime = FakeRuntime {
-            config_check_result: Some(Err(engine::error::EngineError::message(
+            config_check_result: Some(Err(crate::error::EngineError::message(
                 "failed to parse still.toml",
             ))),
             config_check_globals: Vec::new(),
@@ -853,7 +849,7 @@ config check failed: failed to parse still.toml
         let mut runtime = FakeRuntime {
             config_check_result: None,
             config_check_globals: Vec::new(),
-            init_result: Some(Err(engine::error::EngineError::message(
+            init_result: Some(Err(crate::error::EngineError::message(
                 "still.toml already exists",
             ))),
             init_forces: Vec::new(),
@@ -957,7 +953,7 @@ RUST_LOG=debug
             config_check_globals: Vec::new(),
             init_result: None,
             init_forces: Vec::new(),
-            env_result: Some(Err(engine::error::EngineError::message(
+            env_result: Some(Err(crate::error::EngineError::message(
                 "failed to read still.toml",
             ))),
             env_globals: Vec::new(),
@@ -1090,7 +1086,7 @@ Apps:
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
-            list_result: Some(Err(engine::error::EngineError::message(
+            list_result: Some(Err(crate::error::EngineError::message(
                 "failed to read still.toml",
             ))),
             list_alls: Vec::new(),
@@ -1447,7 +1443,7 @@ warn
             agents_result: None,
             agents_operations: Vec::new(),
             agents_globals: Vec::new(),
-            run_result: Some(Err(engine::error::EngineError::message(
+            run_result: Some(Err(crate::error::EngineError::message(
                 "failed to run cargo",
             ))),
             run_commands: Vec::new(),
@@ -1752,9 +1748,7 @@ export PATH="/opt/still/bin:$PATH"
             task_result: None,
             task_names: Vec::new(),
             task_globals: Vec::new(),
-            activate_result: Some(Err(engine::error::EngineError::message(
-                "unsupported shell",
-            ))),
+            activate_result: Some(Err(crate::error::EngineError::message("unsupported shell"))),
             activate_shells: Vec::new(),
             activate_globals: Vec::new(),
             doctor_result: None,
@@ -1866,7 +1860,7 @@ activate failed: unsupported shell
             activate_result: None,
             activate_shells: Vec::new(),
             activate_globals: Vec::new(),
-            doctor_result: Some(Err(engine::error::EngineError::message(
+            doctor_result: Some(Err(crate::error::EngineError::message(
                 "home directory missing",
             ))),
             sync_result: None,
@@ -2111,7 +2105,7 @@ web: configured - echo web
                     name: "web".to_string(),
                     status: ServiceStatus::Ok,
                     detail: "start".to_string(),
-                    execution: Some(engine::actions::services::ServiceExecution {
+                    execution: Some(crate::actions::services::ServiceExecution {
                         command: "echo web".to_string(),
                         status: 0,
                         stdout: "web\n".to_string(),
@@ -2182,7 +2176,7 @@ web
                     name: "db".to_string(),
                     status: ServiceStatus::Failed,
                     detail: "check".to_string(),
-                    execution: Some(engine::actions::services::ServiceExecution {
+                    execution: Some(crate::actions::services::ServiceExecution {
                         command: "false".to_string(),
                         status: 1,
                         stdout: String::new(),
@@ -2512,7 +2506,7 @@ Removed artifact /opt/still/packages/openssl
     }
 
     fn sync_item(kind: ItemKind, spec: &str) -> SyncItem {
-        let parsed: engine::specs::item::ItemSpec = spec.parse().unwrap();
+        let parsed: crate::specs::item::ItemSpec = spec.parse().unwrap();
         SyncItem {
             kind,
             logical_name: parsed.name.clone(),
