@@ -6,16 +6,13 @@ pub mod args;
 pub mod commands;
 /// Output abstractions used by real commands and tests.
 pub mod output;
-/// Boundary between CLI handlers and engine actions.
-pub mod runtime;
-
 use clap::Parser;
+use engine::runtime::RuntimeOps;
 
 use self::{
     args::Cli,
     commands::run_cli,
     output::{Output, StdOutput},
-    runtime::{CliRuntime, RealRuntime},
 };
 
 /// Parses process arguments, dispatches the selected command, and exits on failure.
@@ -27,7 +24,7 @@ use self::{
 /// and output capture.
 pub fn entry() {
     let cli = Cli::parse();
-    let mut runtime = RealRuntime;
+    let mut runtime = engine::runtime::get_runtime();
     let mut output = StdOutput;
     let code = run_parsed(cli, &mut runtime, &mut output);
 
@@ -44,7 +41,7 @@ pub fn entry() {
 /// means success.
 pub fn run_parsed<R, O>(cli: Cli, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: RuntimeOps,
     O: Output,
 {
     run_parsed_with_no_command(cli, runtime, output, run_without_command)
@@ -64,7 +61,7 @@ pub fn run_parsed_with_no_command<R, O, F>(
     no_command: F,
 ) -> i32
 where
-    R: CliRuntime,
+    R: RuntimeOps,
     O: Output,
     F: FnOnce(&mut O) -> i32,
 {
@@ -117,7 +114,6 @@ mod tests {
     use crate::cli::{
         args::{Cli, Command, DoctorArgs},
         output::BufferedOutput,
-        runtime::CliRuntime,
     };
     use engine::actions::{
         activate::ActivateResult,
@@ -134,63 +130,86 @@ mod tests {
         trust::TrustResult,
         uninstall::{UninstallResult, UninstallTarget},
     };
+    use engine::runtime;
 
     #[derive(Debug, Default)]
     struct FakeRuntime;
 
-    impl CliRuntime for FakeRuntime {
+    impl runtime::InstallRuntime for FakeRuntime {
         fn install(
             &mut self,
-            _request: crate::cli::runtime::InstallCommandRequest,
-        ) -> anyhow::Result<engine::actions::install::InstallResult> {
+            _request: runtime::RecordedInstallRequest,
+        ) -> engine::error::Result<engine::actions::install::InstallResult> {
             panic!("install should not run in these routing tests");
         }
+    }
 
-        fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
+    impl runtime::ConfigRuntime for FakeRuntime {
+        fn config_check(&mut self, _global: bool) -> engine::error::Result<CheckConfigResult> {
             panic!("config_check should not run in these routing tests");
         }
+    }
 
-        fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
+    impl runtime::InitRuntime for FakeRuntime {
+        fn init(&mut self, _force: bool) -> engine::error::Result<InitResult> {
             panic!("init should not run in these routing tests");
         }
+    }
 
-        fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
+    impl runtime::EnvRuntime for FakeRuntime {
+        fn env(&mut self, _global: bool) -> engine::error::Result<EnvResult> {
             panic!("env should not run in these routing tests");
         }
+    }
 
-        fn list(&mut self, _all: bool, _global: bool) -> anyhow::Result<ListResult> {
+    impl runtime::ListRuntime for FakeRuntime {
+        fn list(&mut self, _all: bool, _global: bool) -> engine::error::Result<ListResult> {
             panic!("list should not run in these routing tests");
         }
+    }
 
+    impl runtime::AgentsRuntime for FakeRuntime {
         fn agents(
             &mut self,
             _operation: AgentsOperation,
             _global: bool,
-        ) -> anyhow::Result<AgentsResult> {
+        ) -> engine::error::Result<AgentsResult> {
             panic!("agents should not run in these routing tests");
         }
+    }
 
+    impl runtime::RunRuntime for FakeRuntime {
         fn run_command(
             &mut self,
             _command: Vec<String>,
             _global: bool,
-        ) -> anyhow::Result<RunResult> {
+        ) -> engine::error::Result<RunResult> {
             panic!("run_command should not run in these routing tests");
         }
+    }
 
-        fn task(&mut self, _name: Option<String>, _global: bool) -> anyhow::Result<TaskResult> {
+    impl runtime::TaskRuntime for FakeRuntime {
+        fn task(
+            &mut self,
+            _name: Option<String>,
+            _global: bool,
+        ) -> engine::error::Result<TaskResult> {
             panic!("task should not run in these routing tests");
         }
+    }
 
+    impl runtime::ActivateRuntime for FakeRuntime {
         fn activate(
             &mut self,
             _shell: Option<String>,
             _global: bool,
-        ) -> anyhow::Result<ActivateResult> {
+        ) -> engine::error::Result<ActivateResult> {
             panic!("activate should not run in these routing tests");
         }
+    }
 
-        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+    impl runtime::DoctorRuntime for FakeRuntime {
+        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
             Ok(DoctorResult {
                 checks: vec![DoctorCheck {
                     name: "platform".to_string(),
@@ -199,29 +218,37 @@ mod tests {
                 }],
             })
         }
+    }
 
-        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
+    impl runtime::SyncRuntime for FakeRuntime {
+        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
             panic!("sync should not run in these routing tests");
         }
+    }
 
+    impl runtime::ServicesRuntime for FakeRuntime {
         fn services(
             &mut self,
             _operation: ServicesOperation,
             _name: Option<String>,
             _global: bool,
-        ) -> anyhow::Result<ServicesResult> {
+        ) -> engine::error::Result<ServicesResult> {
             panic!("services should not run in these routing tests");
         }
+    }
 
-        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+    impl runtime::TrustRuntime for FakeRuntime {
+        fn trust(&mut self) -> engine::error::Result<TrustResult> {
             panic!("trust should not run in these routing tests");
         }
+    }
 
+    impl runtime::UninstallRuntime for FakeRuntime {
         fn uninstall(
             &mut self,
             _target: UninstallTarget,
             _global: bool,
-        ) -> anyhow::Result<UninstallResult> {
+        ) -> engine::error::Result<UninstallResult> {
             panic!("uninstall should not run in these routing tests");
         }
     }

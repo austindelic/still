@@ -5,8 +5,8 @@ pub mod install;
 
 use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand, ServicesCommand};
 use crate::cli::output::Output;
-use crate::cli::runtime::CliRuntime;
 use clap::CommandFactory;
+use engine::runtime::RuntimeOps;
 
 /// Dispatches one parsed subcommand to its CLI handler.
 ///
@@ -16,7 +16,7 @@ use clap::CommandFactory;
 /// `0` for success and nonzero for command failure.
 pub fn run_cli<R, O>(cmd: Command, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: RuntimeOps,
     O: Output,
 {
     match cmd {
@@ -460,26 +460,6 @@ fn normalize_child_command(command: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// Dispatches a parsed top-level CLI value using command-module help behavior.
-///
-/// `cli` is parsed input that may or may not contain a subcommand. `runtime` and
-/// `output` are passed through to command handlers unchanged. With no subcommand,
-/// this function writes generated help and returns the help-render result.
-pub fn run_parsed<R, O>(cli: Cli, runtime: &mut R, output: &mut O) -> i32
-where
-    R: CliRuntime,
-    O: Output,
-{
-    match cli.command {
-        Some(cmd) => run_cli(cmd, runtime, output),
-        None => run_without_command(output),
-    }
-}
-
-fn run_without_command<O: Output>(output: &mut O) -> i32 {
-    print_help(output)
-}
-
 /// Renders and writes top-level help text to an output sink.
 ///
 /// `output` receives the generated help on stdout when rendering succeeds, or a
@@ -515,7 +495,6 @@ pub fn help_text() -> std::io::Result<String> {
 mod tests {
     use std::path::PathBuf;
 
-    use anyhow::anyhow;
     use engine::actions::{
         activate::{ActivateResult, ShellKind},
         agents::{AgentsOperation, AgentsResult},
@@ -532,6 +511,7 @@ mod tests {
         trust::TrustResult,
         uninstall::{UninstallResult, UninstallTarget},
     };
+    use engine::error::EngineError;
     use engine::specs::agents::{NormalizedAgents, NormalizedSkill, NormalizedSkillSource};
     use engine::specs::item::ItemKind;
     use engine::specs::toml::StillConfig;
@@ -539,148 +519,183 @@ mod tests {
     use super::*;
     use crate::cli::args::{ConfigArgs, ConfigCommand};
     use crate::cli::output::BufferedOutput;
+    use engine::runtime;
 
     struct FakeRuntime {
-        config_check_result: Option<anyhow::Result<CheckConfigResult>>,
+        config_check_result: Option<engine::error::Result<CheckConfigResult>>,
         config_check_globals: Vec<bool>,
-        init_result: Option<anyhow::Result<InitResult>>,
+        init_result: Option<engine::error::Result<InitResult>>,
         init_forces: Vec<bool>,
-        env_result: Option<anyhow::Result<EnvResult>>,
+        env_result: Option<engine::error::Result<EnvResult>>,
         env_globals: Vec<bool>,
-        list_result: Option<anyhow::Result<ListResult>>,
+        list_result: Option<engine::error::Result<ListResult>>,
         list_alls: Vec<bool>,
-        agents_result: Option<anyhow::Result<AgentsResult>>,
+        agents_result: Option<engine::error::Result<AgentsResult>>,
         agents_operations: Vec<AgentsOperation>,
         agents_globals: Vec<bool>,
-        run_result: Option<anyhow::Result<RunResult>>,
+        run_result: Option<engine::error::Result<RunResult>>,
         run_commands: Vec<Vec<String>>,
         run_globals: Vec<bool>,
-        task_result: Option<anyhow::Result<TaskResult>>,
+        task_result: Option<engine::error::Result<TaskResult>>,
         task_names: Vec<Option<String>>,
         task_globals: Vec<bool>,
-        activate_result: Option<anyhow::Result<ActivateResult>>,
+        activate_result: Option<engine::error::Result<ActivateResult>>,
         activate_shells: Vec<Option<String>>,
         activate_globals: Vec<bool>,
-        doctor_result: Option<anyhow::Result<DoctorResult>>,
-        sync_result: Option<anyhow::Result<SyncResult>>,
-        services_result: Option<anyhow::Result<ServicesResult>>,
+        doctor_result: Option<engine::error::Result<DoctorResult>>,
+        sync_result: Option<engine::error::Result<SyncResult>>,
+        services_result: Option<engine::error::Result<ServicesResult>>,
         services_requests: Vec<(ServicesOperation, Option<String>, bool)>,
-        trust_result: Option<anyhow::Result<TrustResult>>,
-        uninstall_result: Option<anyhow::Result<UninstallResult>>,
+        trust_result: Option<engine::error::Result<TrustResult>>,
+        uninstall_result: Option<engine::error::Result<UninstallResult>>,
         uninstall_targets: Vec<UninstallTarget>,
     }
 
-    impl CliRuntime for FakeRuntime {
+    impl runtime::InstallRuntime for FakeRuntime {
         fn install(
             &mut self,
-            _request: crate::cli::runtime::InstallCommandRequest,
-        ) -> anyhow::Result<InstallResult> {
+            _request: runtime::RecordedInstallRequest,
+        ) -> engine::error::Result<InstallResult> {
             panic!("install should not run in config tests");
         }
+    }
 
-        fn config_check(&mut self, global: bool) -> anyhow::Result<CheckConfigResult> {
+    impl runtime::ConfigRuntime for FakeRuntime {
+        fn config_check(&mut self, global: bool) -> engine::error::Result<CheckConfigResult> {
             self.config_check_globals.push(global);
             self.config_check_result
                 .take()
                 .expect("test runtime config_check result was not configured")
         }
+    }
 
-        fn init(&mut self, force: bool) -> anyhow::Result<InitResult> {
+    impl runtime::InitRuntime for FakeRuntime {
+        fn init(&mut self, force: bool) -> engine::error::Result<InitResult> {
             self.init_forces.push(force);
             self.init_result
                 .take()
                 .expect("test runtime init result was not configured")
         }
+    }
 
-        fn env(&mut self, global: bool) -> anyhow::Result<EnvResult> {
+    impl runtime::EnvRuntime for FakeRuntime {
+        fn env(&mut self, global: bool) -> engine::error::Result<EnvResult> {
             self.env_globals.push(global);
             self.env_result
                 .take()
                 .expect("test runtime env result was not configured")
         }
+    }
 
-        fn list(&mut self, all: bool, _global: bool) -> anyhow::Result<ListResult> {
+    impl runtime::ListRuntime for FakeRuntime {
+        fn list(&mut self, all: bool, _global: bool) -> engine::error::Result<ListResult> {
             self.list_alls.push(all);
             self.list_result
                 .take()
                 .expect("test runtime list result was not configured")
         }
+    }
 
+    impl runtime::AgentsRuntime for FakeRuntime {
         fn agents(
             &mut self,
             operation: AgentsOperation,
             global: bool,
-        ) -> anyhow::Result<AgentsResult> {
+        ) -> engine::error::Result<AgentsResult> {
             self.agents_operations.push(operation);
             self.agents_globals.push(global);
             self.agents_result
                 .take()
                 .expect("test runtime agents result was not configured")
         }
+    }
 
-        fn run_command(&mut self, command: Vec<String>, global: bool) -> anyhow::Result<RunResult> {
+    impl runtime::RunRuntime for FakeRuntime {
+        fn run_command(
+            &mut self,
+            command: Vec<String>,
+            global: bool,
+        ) -> engine::error::Result<RunResult> {
             self.run_commands.push(command);
             self.run_globals.push(global);
             self.run_result
                 .take()
                 .expect("test runtime run result was not configured")
         }
+    }
 
-        fn task(&mut self, name: Option<String>, global: bool) -> anyhow::Result<TaskResult> {
+    impl runtime::TaskRuntime for FakeRuntime {
+        fn task(
+            &mut self,
+            name: Option<String>,
+            global: bool,
+        ) -> engine::error::Result<TaskResult> {
             self.task_names.push(name);
             self.task_globals.push(global);
             self.task_result
                 .take()
                 .expect("test runtime task result was not configured")
         }
+    }
 
+    impl runtime::ActivateRuntime for FakeRuntime {
         fn activate(
             &mut self,
             shell: Option<String>,
             global: bool,
-        ) -> anyhow::Result<ActivateResult> {
+        ) -> engine::error::Result<ActivateResult> {
             self.activate_shells.push(shell);
             self.activate_globals.push(global);
             self.activate_result
                 .take()
                 .expect("test runtime activate result was not configured")
         }
+    }
 
-        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
+    impl runtime::DoctorRuntime for FakeRuntime {
+        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
             self.doctor_result
                 .take()
                 .expect("test runtime doctor result was not configured")
         }
+    }
 
-        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
+    impl runtime::SyncRuntime for FakeRuntime {
+        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
             self.sync_result
                 .take()
                 .expect("test runtime sync result was not configured")
         }
+    }
 
+    impl runtime::ServicesRuntime for FakeRuntime {
         fn services(
             &mut self,
             operation: ServicesOperation,
             name: Option<String>,
             global: bool,
-        ) -> anyhow::Result<ServicesResult> {
+        ) -> engine::error::Result<ServicesResult> {
             self.services_requests.push((operation, name, global));
             self.services_result
                 .take()
                 .expect("test runtime services result was not configured")
         }
+    }
 
-        fn trust(&mut self) -> anyhow::Result<TrustResult> {
+    impl runtime::TrustRuntime for FakeRuntime {
+        fn trust(&mut self) -> engine::error::Result<TrustResult> {
             self.trust_result
                 .take()
                 .expect("test runtime trust result was not configured")
         }
+    }
 
+    impl runtime::UninstallRuntime for FakeRuntime {
         fn uninstall(
             &mut self,
             target: UninstallTarget,
             _global: bool,
-        ) -> anyhow::Result<UninstallResult> {
+        ) -> engine::error::Result<UninstallResult> {
             self.uninstall_targets.push(target);
             self.uninstall_result
                 .take()
@@ -744,7 +759,7 @@ mod tests {
     #[test]
     fn config_check_formats_error() {
         let mut runtime = FakeRuntime {
-            config_check_result: Some(Err(anyhow!("failed to parse still.toml"))),
+            config_check_result: Some(Err(EngineError::message("failed to parse still.toml"))),
             config_check_globals: Vec::new(),
             init_result: None,
             init_forces: Vec::new(),
@@ -845,7 +860,7 @@ config check failed: failed to parse still.toml
         let mut runtime = FakeRuntime {
             config_check_result: None,
             config_check_globals: Vec::new(),
-            init_result: Some(Err(anyhow!("still.toml already exists"))),
+            init_result: Some(Err(EngineError::message("still.toml already exists"))),
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
@@ -947,7 +962,7 @@ RUST_LOG=debug
             config_check_globals: Vec::new(),
             init_result: None,
             init_forces: Vec::new(),
-            env_result: Some(Err(anyhow!("failed to read still.toml"))),
+            env_result: Some(Err(EngineError::message("failed to read still.toml"))),
             env_globals: Vec::new(),
             list_result: None,
             list_alls: Vec::new(),
@@ -1078,7 +1093,7 @@ Apps:
             init_forces: Vec::new(),
             env_result: None,
             env_globals: Vec::new(),
-            list_result: Some(Err(anyhow!("failed to read still.toml"))),
+            list_result: Some(Err(EngineError::message("failed to read still.toml"))),
             list_alls: Vec::new(),
             agents_result: None,
             agents_operations: Vec::new(),
@@ -1433,7 +1448,7 @@ warn
             agents_result: None,
             agents_operations: Vec::new(),
             agents_globals: Vec::new(),
-            run_result: Some(Err(anyhow!("failed to run cargo"))),
+            run_result: Some(Err(EngineError::message("failed to run cargo"))),
             run_commands: Vec::new(),
             run_globals: Vec::new(),
             task_result: None,
@@ -1736,7 +1751,7 @@ export PATH="/opt/still/bin:$PATH"
             task_result: None,
             task_names: Vec::new(),
             task_globals: Vec::new(),
-            activate_result: Some(Err(anyhow!("unsupported shell"))),
+            activate_result: Some(Err(EngineError::message("unsupported shell"))),
             activate_shells: Vec::new(),
             activate_globals: Vec::new(),
             doctor_result: None,
@@ -1848,7 +1863,7 @@ activate failed: unsupported shell
             activate_result: None,
             activate_shells: Vec::new(),
             activate_globals: Vec::new(),
-            doctor_result: Some(Err(anyhow!("home directory missing"))),
+            doctor_result: Some(Err(EngineError::message("home directory missing"))),
             sync_result: None,
             services_result: None,
             services_requests: Vec::new(),

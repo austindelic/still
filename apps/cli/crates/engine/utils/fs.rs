@@ -12,8 +12,7 @@ impl FsUtils {
     /// Returns the default Still cache directory using the current `HOME` environment variable.
     ///
     /// The function reads `HOME`, appends `.cache/still`, and returns an error
-    /// when `HOME` is missing. For platform-specific paths, prefer
-    /// `system::SystemOps::cache_dir()`.
+    /// when `HOME` is missing. For platform-specific paths, prefer `System::cache_dir()`.
     pub fn still_cache_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME")
             .map(PathBuf::from)

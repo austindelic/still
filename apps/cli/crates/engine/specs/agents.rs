@@ -276,7 +276,7 @@ pub(crate) fn parse_skill_dependency_specs(
         .map(|value| {
             value
                 .parse()
-                .map_err(|err: anyhow::Error| EngineError::InvalidConfig {
+                .map_err(|err: EngineError| EngineError::InvalidConfig {
                     reason: format!("invalid agent skill {label} dependency \"{value}\": {err}"),
                 })
         })

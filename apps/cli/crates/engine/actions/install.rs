@@ -3,6 +3,7 @@
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
 use crate::config_edit::add_install_items_with_force;
 use crate::error::EngineError;
+use crate::error::{EngineContext, Result};
 use crate::lockfile::lockfile_path;
 use crate::platform::{PlatformId, current_platform};
 use crate::registries::specs::tool::ToolSpec;
@@ -11,16 +12,13 @@ use crate::specs::backend::{
 };
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
-use crate::system::{Linux, MacOS, System, Windows};
+use crate::system::System;
 use crate::utils::archive::ArchiveExtractor;
 use crate::utils::hashing::Hashing;
 use crate::utils::link::SymlinkOps;
 use crate::utils::net::NetUtils;
 use crate::utils::paths::PathOps;
-use anyhow::{Context, Result};
 use serde::Serialize;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -29,7 +27,7 @@ use std::process::Command;
 /// Implementors provide the host-specific pieces of an otherwise shared install:
 /// choosing the right Homebrew bottle file and discovering the executable after
 /// extraction. Keep network, archive, and CLI formatting code out of this trait.
-pub trait InstallOps {
+pub(crate) trait InstallOps {
     /// Selects the best bottle file for the current platform.
     ///
     /// `bottle` is the parsed Homebrew bottle metadata for one formula version.
@@ -47,6 +45,16 @@ pub trait InstallOps {
         install_path: &Path,
         formula_name: &str,
     ) -> Result<Option<PathBuf>>;
+
+    /// Builds the native package manager command for the current platform.
+    fn package_install_command(
+        name: &str,
+        version: &str,
+        backend: &str,
+    ) -> Result<PackageInstallCommand>;
+
+    /// Builds the native app manager command for the current platform.
+    fn app_install_command(name: &str, version: &str, backend: &str) -> Result<AppInstallCommand>;
 }
 
 /// One item requested for install.
@@ -928,10 +936,10 @@ async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PackageInstallCommand {
-    backend: String,
-    program: String,
-    args: Vec<String>,
+pub(crate) struct PackageInstallCommand {
+    pub(crate) backend: String,
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
 }
 
 fn package_install_command(item: &InstallItemRequest) -> Result<PackageInstallCommand> {
@@ -948,112 +956,7 @@ fn package_install_command_for_backend(
     backend: &str,
 ) -> Result<PackageInstallCommand> {
     let normalized = install_backend(ItemKind::Package, Some(backend), current_platform());
-    package_install_command_for_platform(
-        &spec.name,
-        spec.version.as_str(),
-        &normalized,
-        current_platform(),
-    )
-}
-
-fn package_install_command_for_platform(
-    name: &str,
-    version: &str,
-    backend: &str,
-    platform: PlatformId,
-) -> Result<PackageInstallCommand> {
-    match platform {
-        PlatformId::Macos => match backend {
-            "homebrew" | "brew" => Ok(PackageInstallCommand {
-                backend: "homebrew".to_string(),
-                program: "brew".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    backend_versioned_name(name, version, "@"),
-                ],
-            }),
-            _ => unsupported_package_backend(backend),
-        },
-        PlatformId::Linux => match backend {
-            "apt" | "apt-get" => Ok(PackageInstallCommand {
-                backend: "apt".to_string(),
-                program: "apt-get".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    "-y".to_string(),
-                    backend_versioned_name(name, version, "="),
-                ],
-            }),
-            "dnf" => {
-                reject_pinned_package_version(backend, version)?;
-                Ok(PackageInstallCommand {
-                    backend: "dnf".to_string(),
-                    program: "dnf".to_string(),
-                    args: vec!["install".to_string(), "-y".to_string(), name.to_string()],
-                })
-            }
-            "pacman" => {
-                reject_pinned_package_version(backend, version)?;
-                Ok(PackageInstallCommand {
-                    backend: "pacman".to_string(),
-                    program: "pacman".to_string(),
-                    args: vec![
-                        "-S".to_string(),
-                        "--noconfirm".to_string(),
-                        name.to_string(),
-                    ],
-                })
-            }
-            "nix" => {
-                reject_pinned_package_version(backend, version)?;
-                Ok(PackageInstallCommand {
-                    backend: "nix".to_string(),
-                    program: "nix".to_string(),
-                    args: vec![
-                        "profile".to_string(),
-                        "install".to_string(),
-                        format!("nixpkgs#{name}"),
-                    ],
-                })
-            }
-            _ => unsupported_package_backend(backend),
-        },
-        PlatformId::Windows => match backend {
-            "winget" => Ok(PackageInstallCommand {
-                backend: "winget".to_string(),
-                program: "winget".to_string(),
-                args: append_version_args(
-                    vec!["install".to_string(), "--id".to_string(), name.to_string()],
-                    version,
-                    "--version",
-                )
-                .into_iter()
-                .chain([
-                    "--accept-package-agreements".to_string(),
-                    "--accept-source-agreements".to_string(),
-                ])
-                .collect(),
-            }),
-            "chocolatey" | "choco" => Ok(PackageInstallCommand {
-                backend: "chocolatey".to_string(),
-                program: "choco".to_string(),
-                args: append_version_args(
-                    vec!["install".to_string(), "-y".to_string(), name.to_string()],
-                    version,
-                    "--version",
-                ),
-            }),
-            "scoop" => Ok(PackageInstallCommand {
-                backend: "scoop".to_string(),
-                program: "scoop".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    backend_versioned_name(name, version, "@"),
-                ],
-            }),
-            _ => unsupported_package_backend(backend),
-        },
-    }
+    System::package_install_command(&spec.name, spec.version.as_str(), &normalized)
 }
 
 async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
@@ -1114,10 +1017,10 @@ fn native_receipt_root(kind: ItemKind) -> PathBuf {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AppInstallCommand {
-    backend: String,
-    program: String,
-    args: Vec<String>,
+pub(crate) struct AppInstallCommand {
+    pub(crate) backend: String,
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
 }
 
 fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
@@ -1131,107 +1034,10 @@ fn app_install_command(item: &InstallItemRequest) -> Result<AppInstallCommand> {
 
 fn app_install_command_for_backend(spec: &ItemSpec, backend: &str) -> Result<AppInstallCommand> {
     let normalized = install_backend(ItemKind::App, Some(backend), current_platform());
-    app_install_command_for_platform(
-        &spec.name,
-        spec.version.as_str(),
-        &normalized,
-        current_platform(),
-    )
+    System::app_install_command(&spec.name, spec.version.as_str(), &normalized)
 }
 
-fn app_install_command_for_platform(
-    name: &str,
-    version: &str,
-    backend: &str,
-    platform: PlatformId,
-) -> Result<AppInstallCommand> {
-    match platform {
-        PlatformId::Macos => match backend {
-            "homebrew-cask" | "brew-cask" | "cask" => {
-                reject_pinned_app_version("homebrew-cask", version)?;
-                Ok(AppInstallCommand {
-                    backend: "homebrew-cask".to_string(),
-                    program: "brew".to_string(),
-                    args: vec![
-                        "install".to_string(),
-                        "--cask".to_string(),
-                        name.to_string(),
-                    ],
-                })
-            }
-            "mas" => {
-                reject_pinned_app_version(backend, version)?;
-                Ok(AppInstallCommand {
-                    backend: "mas".to_string(),
-                    program: "mas".to_string(),
-                    args: vec!["install".to_string(), name.to_string()],
-                })
-            }
-            _ => unsupported_app_backend(backend),
-        },
-        PlatformId::Linux => match backend {
-            "flatpak" => {
-                reject_pinned_app_version(backend, version)?;
-                Ok(AppInstallCommand {
-                    backend: "flatpak".to_string(),
-                    program: "flatpak".to_string(),
-                    args: vec![
-                        "install".to_string(),
-                        "-y".to_string(),
-                        "flathub".to_string(),
-                        name.to_string(),
-                    ],
-                })
-            }
-            "snap" => {
-                reject_pinned_app_version(backend, version)?;
-                Ok(AppInstallCommand {
-                    backend: "snap".to_string(),
-                    program: "snap".to_string(),
-                    args: vec!["install".to_string(), name.to_string()],
-                })
-            }
-            _ => unsupported_app_backend(backend),
-        },
-        PlatformId::Windows => match backend {
-            "winget" => Ok(AppInstallCommand {
-                backend: "winget".to_string(),
-                program: "winget".to_string(),
-                args: append_version_args(
-                    vec!["install".to_string(), "--id".to_string(), name.to_string()],
-                    version,
-                    "--version",
-                )
-                .into_iter()
-                .chain([
-                    "--accept-package-agreements".to_string(),
-                    "--accept-source-agreements".to_string(),
-                ])
-                .collect(),
-            }),
-            "chocolatey" | "choco" => Ok(AppInstallCommand {
-                backend: "chocolatey".to_string(),
-                program: "choco".to_string(),
-                args: append_version_args(
-                    vec!["install".to_string(), "-y".to_string(), name.to_string()],
-                    version,
-                    "--version",
-                ),
-            }),
-            "scoop" => Ok(AppInstallCommand {
-                backend: "scoop".to_string(),
-                program: "scoop".to_string(),
-                args: vec![
-                    "install".to_string(),
-                    backend_versioned_name(name, version, "@"),
-                ],
-            }),
-            _ => unsupported_app_backend(backend),
-        },
-    }
-}
-
-fn backend_versioned_name(name: &str, version: &str, separator: &str) -> String {
+pub(crate) fn backend_versioned_name(name: &str, version: &str, separator: &str) -> String {
     if version.eq_ignore_ascii_case("latest") {
         name.to_string()
     } else {
@@ -1239,21 +1045,25 @@ fn backend_versioned_name(name: &str, version: &str, separator: &str) -> String 
     }
 }
 
-fn append_version_args(mut args: Vec<String>, version: &str, flag: &str) -> Vec<String> {
+#[cfg(target_os = "windows")]
+pub(crate) fn append_version_args(mut args: Vec<String>, version: &str, flag: &str) -> Vec<String> {
     if !version.eq_ignore_ascii_case("latest") {
         args.extend([flag.to_string(), version.to_string()]);
     }
     args
 }
 
-fn reject_pinned_package_version(backend: &str, version: &str) -> Result<()> {
+#[cfg(target_os = "linux")]
+pub(crate) fn reject_pinned_package_version(backend: &str, version: &str) -> Result<()> {
     reject_pinned_version(ItemKind::Package, backend, version)
 }
 
-fn reject_pinned_app_version(backend: &str, version: &str) -> Result<()> {
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn reject_pinned_app_version(backend: &str, version: &str) -> Result<()> {
     reject_pinned_version(ItemKind::App, backend, version)
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn reject_pinned_version(kind: ItemKind, backend: &str, version: &str) -> Result<()> {
     if version.eq_ignore_ascii_case("latest") {
         return Ok(());
@@ -1265,7 +1075,7 @@ fn reject_pinned_version(kind: ItemKind, backend: &str, version: &str) -> Result
     .into())
 }
 
-fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
+pub(crate) fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
     Err(EngineError::UnsupportedPlatform {
         feature: format!("app backend {backend}"),
         platform: std::env::consts::OS.to_string(),
@@ -1273,7 +1083,7 @@ fn unsupported_app_backend(backend: &str) -> Result<AppInstallCommand> {
     .into())
 }
 
-fn unsupported_package_backend(backend: &str) -> Result<PackageInstallCommand> {
+pub(crate) fn unsupported_package_backend(backend: &str) -> Result<PackageInstallCommand> {
     Err(EngineError::UnsupportedPlatform {
         feature: format!("package backend {backend}"),
         platform: std::env::consts::OS.to_string(),
@@ -1342,7 +1152,10 @@ fn formula_json_path() -> PathBuf {
 
 fn ensure_formula_json_exists(path: &Path) -> Result<()> {
     if !path.exists() {
-        anyhow::bail!("formula.json not found at: {}", path.display());
+        return Err(EngineError::message(format!(
+            "formula.json not found at: {}",
+            path.display()
+        )));
     }
     Ok(())
 }
@@ -1353,11 +1166,11 @@ async fn load_formula_json_array(path: &Path) -> Result<Vec<serde_json::Value>> 
         .with_context(|| format!("Failed to read formula.json at {}", path.display()))?;
 
     let json: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse JSON array: {e}"))?;
+        .map_err(|e| EngineError::message(format!("Failed to parse JSON array: {e}")))?;
 
     let array = json
         .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Expected JSON array"))?;
+        .ok_or_else(|| EngineError::message("Expected JSON array"))?;
 
     Ok(array.clone())
 }
@@ -1379,16 +1192,15 @@ fn find_matching_formula(
         }
     }
 
-    anyhow::bail!("No matching formula")
+    Err(EngineError::message("No matching formula"))
 }
 
 fn build_bottle_info(formula: &crate::specs::brew::FormulaSpec) -> Result<BottleInfo> {
     let bottle = formula.bottle.clone().ok_or_else(|| {
-        anyhow::anyhow!(
+        EngineError::message(format!(
             "No bottle available for {}@{}",
-            formula.name,
-            formula.versions.stable
-        )
+            formula.name, formula.versions.stable
+        ))
     })?;
 
     Ok(BottleInfo {
@@ -1416,7 +1228,7 @@ async fn reinstall_to_path(bottle_data: &[u8], install_path: &Path) -> Result<()
 
     ArchiveExtractor::extract_tar_gz(bottle_data, install_path)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to extract bottle: {e}"))?;
+        .map_err(|e| EngineError::Archive(format!("Failed to extract bottle: {e}")))?;
 
     Ok(())
 }
@@ -1428,10 +1240,12 @@ async fn link_binary(binary_path: &Option<PathBuf>) -> Result<Option<PathBuf>> {
 
     let system_bin_dir = System::bin_dir();
     tokio::fs::create_dir_all(&system_bin_dir).await?;
-    let symlink_path =
-        system_bin_dir.join(binary.file_name().ok_or_else(|| {
-            anyhow::anyhow!("Binary path has no file name: {}", binary.display())
-        })?);
+    let symlink_path = system_bin_dir.join(binary.file_name().ok_or_else(|| {
+        EngineError::message(format!(
+            "Binary path has no file name: {}",
+            binary.display()
+        ))
+    })?);
 
     if symlink_path.exists() || symlink_path.is_symlink() {
         let _ = tokio::fs::remove_file(&symlink_path).await;
@@ -1454,7 +1268,7 @@ async fn fetch_and_verify_bottle(
         .context("Failed to download bottle")?;
 
     Hashing::verify_sha256(&bottle_data, &bottle_file.sha256)
-        .map_err(|e| anyhow::anyhow!("Checksum verification failed: {e}"))?;
+        .map_err(|e| EngineError::message(format!("Checksum verification failed: {e}")))?;
 
     Ok(bottle_data)
 }
@@ -1474,7 +1288,10 @@ async fn get_ghcr_token(formula_name: &str) -> Result<String> {
         .context("Failed to request GHCR token")?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to get GHCR token: HTTP {}", response.status());
+        return Err(EngineError::message(format!(
+            "Failed to get GHCR token: HTTP {}",
+            response.status()
+        )));
     }
 
     let token_data: serde_json::Value = response
@@ -1486,7 +1303,7 @@ async fn get_ghcr_token(formula_name: &str) -> Result<String> {
         .get("token")
         .and_then(|t| t.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| anyhow::anyhow!("Token not found in response"))
+        .ok_or_else(|| EngineError::message("Token not found in response"))
 }
 
 /// Download a bottle file with authentication
@@ -1500,7 +1317,10 @@ async fn download_bottle(url: &str, token: &str) -> Result<Vec<u8>> {
         .context("Failed to download bottle")?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to download bottle: HTTP {}", response.status());
+        return Err(EngineError::message(format!(
+            "Failed to download bottle: HTTP {}",
+            response.status()
+        )));
     }
 
     let bytes = response
@@ -1525,152 +1345,9 @@ pub struct BottleInfo {
     pub bottle: BottleSpec,
 }
 
-/* --------------------------- macOS impl unchanged --------------------------- */
-
-impl InstallOps for MacOS {
-    fn select_bottle_file(bottle: &BottleSpec) -> Result<BottleFileSpec> {
-        {
-            #[cfg(target_arch = "aarch64")]
-            {
-                if let Some(file) = bottle.stable.files.get("arm64_sequoia") {
-                    return Ok(file.clone());
-                }
-                if let Some(file) = bottle.stable.files.get("arm64_sonoma") {
-                    return Ok(file.clone());
-                }
-                if let Some(file) = bottle.stable.files.get("arm64_tahoe") {
-                    return Ok(file.clone());
-                }
-                if let Some(file) = bottle.stable.files.get("arm64_ventura") {
-                    return Ok(file.clone());
-                }
-            }
-            #[cfg(target_arch = "x86_64")]
-            {
-                if let Some(file) = bottle.stable.files.get("sonoma") {
-                    return Ok(file.clone());
-                }
-                if let Some(file) = bottle.stable.files.get("tahoe") {
-                    return Ok(file.clone());
-                }
-                if let Some(file) = bottle.stable.files.get("sequoia") {
-                    return Ok(file.clone());
-                }
-            }
-            if let Some(file) = bottle.stable.files.get("all") {
-                return Ok(file.clone());
-            }
-        }
-
-        bottle
-            .stable
-            .files
-            .values()
-            .next()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("No bottle files available for this system"))
-    }
-
-    async fn find_binary_recursive(
-        install_path: &Path,
-        formula_name: &str,
-    ) -> Result<Option<PathBuf>> {
-        // First, try the direct bin directory
-        let bin_dir = install_path.join("bin");
-        if bin_dir.exists() {
-            let potential_binary = bin_dir.join(formula_name);
-            if potential_binary.exists() {
-                return Ok(Some(potential_binary));
-            }
-            let mut entries = tokio::fs::read_dir(&bin_dir).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.is_file() {
-                    let metadata = tokio::fs::metadata(&path).await?;
-                    if is_executable(&metadata) {
-                        return Ok(Some(path));
-                    }
-                }
-            }
-        }
-
-        // Recursively search for bin directories
-        let mut dirs_to_check = vec![install_path.to_path_buf()];
-        while let Some(dir) = dirs_to_check.pop() {
-            let mut entries = tokio::fs::read_dir(&dir).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.is_dir() {
-                    if path.file_name().and_then(|n| n.to_str()) == Some("bin") {
-                        let mut bin_entries = tokio::fs::read_dir(&path).await?;
-                        while let Some(bin_entry) = bin_entries.next_entry().await? {
-                            let bin_path = bin_entry.path();
-                            if bin_path.is_file() {
-                                let metadata = tokio::fs::metadata(&bin_path).await?;
-                                if is_executable(&metadata) {
-                                    return Ok(Some(bin_path));
-                                }
-                            }
-                        }
-                    } else {
-                        dirs_to_check.push(path);
-                    }
-                }
-            }
-        }
-
-        Ok(None)
-    }
-}
-
-#[cfg(unix)]
-fn is_executable(metadata: &std::fs::Metadata) -> bool {
-    metadata.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(windows)]
-fn is_executable(_metadata: &std::fs::Metadata) -> bool {
-    true
-}
-
-impl InstallOps for Linux {
-    fn select_bottle_file(_bottle: &BottleSpec) -> Result<BottleFileSpec> {
-        Err(EngineError::UnsupportedPlatform {
-            feature: "homebrew bottle installs".to_string(),
-            platform: "linux".to_string(),
-        }
-        .into())
-    }
-
-    async fn find_binary_recursive(
-        _install_path: &Path,
-        _formula_name: &str,
-    ) -> Result<Option<PathBuf>> {
-        Ok(None)
-    }
-}
-
-impl InstallOps for Windows {
-    fn select_bottle_file(_bottle: &BottleSpec) -> Result<BottleFileSpec> {
-        Err(EngineError::UnsupportedPlatform {
-            feature: "homebrew bottle installs".to_string(),
-            platform: "windows".to_string(),
-        }
-        .into())
-    }
-
-    async fn find_binary_recursive(
-        _install_path: &Path,
-        _formula_name: &str,
-    ) -> Result<Option<PathBuf>> {
-        Ok(None)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::specs::item::{ItemKind, ItemSpec};
-    use anyhow::anyhow;
 
     use super::*;
 
@@ -1849,37 +1526,48 @@ mod tests {
         assert!(err.to_string().contains("app backend unknown-backend"));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn app_install_command_plans_windows_scoop() {
-        let command =
-            app_install_command_for_platform("firefox", "latest", "scoop", PlatformId::Windows)
-                .unwrap();
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox@latest@scoop".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let command = app_install_command(&item).unwrap();
 
         assert_eq!(command.backend, "scoop");
         assert_eq!(command.program, "scoop");
         assert_eq!(command.args, ["install", "firefox"]);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn app_install_command_plans_macos_mas() {
-        let command =
-            app_install_command_for_platform("497799835", "latest", "mas", PlatformId::Macos)
-                .unwrap();
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "497799835@latest@mas".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let command = app_install_command(&item).unwrap();
 
         assert_eq!(command.backend, "mas");
         assert_eq!(command.program, "mas");
         assert_eq!(command.args, ["install", "497799835"]);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn app_install_command_rejects_pinned_cask_versions() {
-        let err = app_install_command_for_platform(
-            "firefox",
-            "121.0",
-            "homebrew-cask",
-            PlatformId::Macos,
-        )
-        .unwrap_err();
+        let item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox@121.0@homebrew-cask".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let err = app_install_command(&item).unwrap_err();
 
         assert!(
             err.to_string()
@@ -1887,11 +1575,15 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn app_install_command_passes_pinned_versions_to_windows_backends() {
-        let winget =
-            app_install_command_for_platform("Firefox", "121.0", "winget", PlatformId::Windows)
-                .unwrap();
+        let winget_item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "Firefox@121.0@winget".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+        let winget = app_install_command(&winget_item).unwrap();
         assert_eq!(
             winget.args,
             [
@@ -1905,9 +1597,12 @@ mod tests {
             ]
         );
 
-        let scoop =
-            app_install_command_for_platform("firefox", "121.0", "scoop", PlatformId::Windows)
-                .unwrap();
+        let scoop_item = InstallItemRequest {
+            kind: ItemKind::App,
+            spec: "firefox@121.0@scoop".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+        let scoop = app_install_command(&scoop_item).unwrap();
         assert_eq!(scoop.args, ["install", "firefox@121.0"]);
     }
 
@@ -1996,33 +1691,62 @@ mod tests {
         assert!(err.to_string().contains("package backend unknown-backend"));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn package_install_command_plans_windows_scoop() {
-        let command =
-            package_install_command_for_platform("openssl", "latest", "scoop", PlatformId::Windows)
-                .unwrap();
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@latest@scoop".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let command = package_install_command(&item).unwrap();
 
         assert_eq!(command.backend, "scoop");
         assert_eq!(command.program, "scoop");
         assert_eq!(command.args, ["install", "openssl"]);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    fn package_install_command_passes_pinned_versions_to_supported_backends() {
-        let brew =
-            package_install_command_for_platform("ripgrep", "1", "homebrew", PlatformId::Macos)
-                .unwrap();
-        assert_eq!(brew.args, ["install", "ripgrep@1"]);
+    fn package_install_command_passes_pinned_versions_to_homebrew() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "ripgrep@1@homebrew".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
 
-        let apt =
-            package_install_command_for_platform("openssl", "3", "apt", PlatformId::Linux).unwrap();
-        assert_eq!(apt.args, ["install", "-y", "openssl=3"]);
+        let command = package_install_command(&item).unwrap();
 
-        let winget =
-            package_install_command_for_platform("OpenSSL", "3", "winget", PlatformId::Windows)
-                .unwrap();
+        assert_eq!(command.args, ["install", "ripgrep@1"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn package_install_command_passes_pinned_versions_to_apt() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@3@apt".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let command = package_install_command(&item).unwrap();
+
+        assert_eq!(command.args, ["install", "-y", "openssl=3"]);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn package_install_command_passes_pinned_versions_to_winget() {
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "OpenSSL@3@winget".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let command = package_install_command(&item).unwrap();
         assert_eq!(
-            winget.args,
+            command.args,
             [
                 "install",
                 "--id",
@@ -2035,10 +1759,16 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn package_install_command_rejects_pinned_versions_for_unsupported_backends() {
-        let err = package_install_command_for_platform("openssl", "3", "dnf", PlatformId::Linux)
-            .unwrap_err();
+        let item = InstallItemRequest {
+            kind: ItemKind::Package,
+            spec: "openssl@3@dnf".parse::<ItemSpec>().unwrap(),
+            tool: Default::default(),
+        };
+
+        let err = package_install_command(&item).unwrap_err();
 
         assert!(
             err.to_string()
@@ -2506,7 +2236,7 @@ mod tests {
         async fn install(&mut self, item: &InstallItemRequest) -> Result<InstallResult> {
             if self.fail_on_call == Some(self.calls) {
                 self.calls += 1;
-                return Err(anyhow!("planned failure"));
+                return Err(EngineError::message("planned failure"));
             }
             self.calls += 1;
             let install_root = self.roots.install_root(item.kind);

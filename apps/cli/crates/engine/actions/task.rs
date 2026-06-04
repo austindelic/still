@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 
 use crate::actions::run::resolve_env_with_scope;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};

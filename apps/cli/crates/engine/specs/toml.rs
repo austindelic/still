@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 use serde::Deserialize;
 
 use crate::error::EngineError;

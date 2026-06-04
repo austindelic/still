@@ -2,13 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::error::Result;
 
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
 use crate::lockfile::{lockfile_path, render_merged_lockfile_for_config, validate_lockfile};
-use crate::platform::{PlatformId, current_platform};
+use crate::platform::current_platform;
 use crate::specs::toml::parse_still_toml;
 use crate::trust::{TrustMarker, config_fingerprint, trust_marker_path};
 
@@ -354,31 +354,38 @@ struct DoctorPaths {
 }
 
 fn platform_paths(home_dir: &Path) -> DoctorPaths {
-    match current_platform() {
-        PlatformId::Macos => DoctorPaths {
-            root: PathBuf::from("/opt").join("still"),
-            cache: home_dir.join("Library").join("Caches").join("still"),
-            bin: PathBuf::from("/opt").join("still").join("bin"),
-            config_dir: home_dir.join(".config").join("still"),
-        },
-        PlatformId::Linux => {
-            let root = home_dir.join(".local").join("share").join("still");
-            DoctorPaths {
-                root,
-                cache: home_dir.join(".cache").join("still"),
-                bin: home_dir.join(".local").join("bin"),
-                config_dir: home_dir.join(".config").join("still"),
-            }
-        }
-        PlatformId::Windows => {
-            let root = home_dir.join("AppData").join("Local").join("still");
-            DoctorPaths {
-                root: root.clone(),
-                cache: root.join("cache"),
-                bin: root.join("bin"),
-                config_dir: home_dir.join("AppData").join("Roaming").join("still"),
-            }
-        }
+    platform_paths_for_host(home_dir)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_paths_for_host(home_dir: &Path) -> DoctorPaths {
+    DoctorPaths {
+        root: PathBuf::from("/opt").join("still"),
+        cache: home_dir.join("Library").join("Caches").join("still"),
+        bin: PathBuf::from("/opt").join("still").join("bin"),
+        config_dir: home_dir.join(".config").join("still"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn platform_paths_for_host(home_dir: &Path) -> DoctorPaths {
+    let root = home_dir.join(".local").join("share").join("still");
+    DoctorPaths {
+        root,
+        cache: home_dir.join(".cache").join("still"),
+        bin: home_dir.join(".local").join("bin"),
+        config_dir: home_dir.join(".config").join("still"),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_paths_for_host(home_dir: &Path) -> DoctorPaths {
+    let root = home_dir.join("AppData").join("Local").join("still");
+    DoctorPaths {
+        root: root.clone(),
+        cache: root.join("cache"),
+        bin: root.join("bin"),
+        config_dir: home_dir.join("AppData").join("Roaming").join("still"),
     }
 }
 

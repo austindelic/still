@@ -1,8 +1,6 @@
 //! Formula and cask browser tab.
 
-use engine::registries::specs::brew::{CaskSpec, FormulaSpec};
-use engine::system::System;
-use engine::utils::paths::PathOps;
+use engine::registries::homebrew::{CachedHomebrewPackageKind, load_cached_homebrew_packages};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{
@@ -12,7 +10,6 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, Widget},
 };
-use std::fs;
 
 /// State for the Formula/Packages tab.
 #[derive(Debug)]
@@ -155,120 +152,27 @@ impl FormulaTab {
     }
 
     fn load_packages_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let mut rows = Vec::new();
-        rows.extend(Self::load_formulas_from_cache()?);
-        rows.extend(Self::load_casks_from_cache()?);
-        Ok(rows)
-    }
-
-    fn load_formulas_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cache_dir = System::cache_dir().join("still");
-        let formula_path = cache_dir.join("formula.json");
-
-        if !formula_path.exists() {
-            return Ok(vec![]);
-        }
-
-        let json_content = fs::read_to_string(&formula_path)?;
-
-        // Parse as a JSON array first, then parse each formula individually
-        // This allows us to skip malformed formulas instead of failing entirely
-        let json_array: serde_json::Value = serde_json::from_str(&json_content)
-            .map_err(|e| format!("Failed to parse JSON array: {}", e))?;
-
-        let array = json_array.as_array().ok_or("Expected JSON array")?;
-
-        let mut rows: Vec<PackageRow> = Vec::new();
-        let mut skipped = 0;
-
-        for (idx, formula_value) in array.iter().enumerate() {
-            match serde_json::from_value::<FormulaSpec>(formula_value.clone()) {
-                Ok(formula) => {
-                    let installed = !formula.installed.is_empty();
-                    let status = if installed { "Installed" } else { "Available" };
-                    rows.push(PackageRow {
-                        kind: PackageKind::Formula,
-                        name: formula.name,
-                        version: formula.versions.stable,
-                        status: status.to_string(),
-                        installed,
-                    });
+        Ok(load_cached_homebrew_packages()?
+            .into_iter()
+            .map(|package| {
+                let kind = match package.kind {
+                    CachedHomebrewPackageKind::Formula => PackageKind::Formula,
+                    CachedHomebrewPackageKind::Cask => PackageKind::Cask,
+                };
+                let status = if package.installed {
+                    "Installed"
+                } else {
+                    "Available"
+                };
+                PackageRow {
+                    kind,
+                    name: package.name,
+                    version: package.version,
+                    status: status.to_string(),
+                    installed: package.installed,
                 }
-                Err(e) => {
-                    // Skip malformed formulas but log a warning for the first few
-                    if skipped < 3 {
-                        eprintln!("Warning: Skipping formula at index {}: {}", idx, e);
-                    }
-                    skipped += 1;
-                }
-            }
-        }
-
-        if skipped > 0 {
-            eprintln!(
-                "Loaded {} formulas (skipped {} malformed entries)",
-                rows.len(),
-                skipped
-            );
-        }
-
-        Ok(rows)
-    }
-
-    fn load_casks_from_cache() -> Result<Vec<PackageRow>, Box<dyn std::error::Error>> {
-        let cache_dir = System::cache_dir().join("still");
-        let cask_path = cache_dir.join("cask.json");
-
-        if !cask_path.exists() {
-            return Ok(vec![]);
-        }
-
-        let json_content = fs::read_to_string(&cask_path)?;
-
-        let json_array: serde_json::Value = serde_json::from_str(&json_content)
-            .map_err(|e| format!("Failed to parse JSON array: {}", e))?;
-
-        let array = json_array.as_array().ok_or("Expected JSON array")?;
-
-        let mut rows: Vec<PackageRow> = Vec::new();
-        let mut skipped = 0;
-
-        for (idx, cask_value) in array.iter().enumerate() {
-            match serde_json::from_value::<CaskSpec>(cask_value.clone()) {
-                Ok(cask) => {
-                    let installed = !cask.installed.is_empty();
-                    let status = if installed { "Installed" } else { "Available" };
-                    let version = if cask.version.is_empty() {
-                        "-"
-                    } else {
-                        cask.version.as_str()
-                    };
-                    rows.push(PackageRow {
-                        kind: PackageKind::Cask,
-                        name: cask.token,
-                        version: version.to_string(),
-                        status: status.to_string(),
-                        installed,
-                    });
-                }
-                Err(e) => {
-                    if skipped < 3 {
-                        eprintln!("Warning: Skipping cask at index {}: {}", idx, e);
-                    }
-                    skipped += 1;
-                }
-            }
-        }
-
-        if skipped > 0 {
-            eprintln!(
-                "Loaded {} casks (skipped {} malformed entries)",
-                rows.len(),
-                skipped
-            );
-        }
-
-        Ok(rows)
+            })
+            .collect())
     }
 
     fn matches_filters(&self, row: &PackageRow) -> bool {

@@ -18,6 +18,8 @@ pub mod planner;
 pub mod platform;
 /// Package registry integrations and re-exports.
 pub mod registries;
+/// Compile-selected host runtime adapter.
+pub mod runtime;
 /// Typed models for external and Still-owned specs.
 pub mod specs;
 /// Platform abstraction for host-specific behavior.

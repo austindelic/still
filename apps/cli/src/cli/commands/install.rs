@@ -2,9 +2,9 @@
 
 use crate::cli::args::InstallArgs;
 use crate::cli::output::Output;
-use crate::cli::runtime::{CliRuntime, InstallCommandRequest};
 use engine::actions::install::{InstallItemRequest, InstallRequest, InstallResult};
 use engine::registries::specs::tool::ToolSpec;
+use engine::runtime::{InstallRuntime, RecordedInstallRequest};
 use engine::specs::backend::infer_item_kind_from_backend;
 use engine::specs::item::{ItemKind, ItemSpec};
 
@@ -17,7 +17,7 @@ use engine::specs::item::{ItemKind, ItemSpec};
 /// when the runtime reports an install error.
 pub fn run<R, O>(args: InstallArgs, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: InstallRuntime,
     O: Output,
 {
     let global = args.global;
@@ -30,7 +30,7 @@ where
         }
     };
     let request_items = items.clone();
-    let install_request = InstallCommandRequest {
+    let install_request = RecordedInstallRequest {
         global,
         force,
         install: InstallRequest { items },
@@ -160,35 +160,25 @@ fn infer_item_kind(spec: &ToolSpec) -> anyhow::Result<ItemKind> {
 mod tests {
     use std::path::PathBuf;
 
-    use anyhow::anyhow;
-    use engine::actions::activate::ActivateResult;
-    use engine::actions::agents::{AgentsOperation, AgentsResult};
-    use engine::actions::config::CheckConfigResult;
-    use engine::actions::doctor::DoctorResult;
-    use engine::actions::env::EnvResult;
-    use engine::actions::init::InitResult;
     use engine::actions::install::{InstallResult, InstalledItemResult};
-    use engine::actions::list::ListResult;
-    use engine::actions::run::RunResult;
-    use engine::actions::services::{ServicesOperation, ServicesResult};
-    use engine::actions::sync::SyncResult;
-    use engine::actions::task::TaskResult;
-    use engine::actions::trust::TrustResult;
-    use engine::actions::uninstall::{UninstallResult, UninstallTarget};
+    use engine::error::EngineError;
 
     use super::*;
     use crate::cli::output::BufferedOutput;
 
     #[derive(Default)]
     struct FakeRuntime {
-        install_result: Option<anyhow::Result<InstallResult>>,
+        install_result: Option<engine::error::Result<InstallResult>>,
         install_requests: Vec<(ItemKind, String, String, Option<String>)>,
         install_globals: Vec<bool>,
         install_forces: Vec<bool>,
     }
 
-    impl CliRuntime for FakeRuntime {
-        fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult> {
+    impl InstallRuntime for FakeRuntime {
+        fn install(
+            &mut self,
+            request: RecordedInstallRequest,
+        ) -> engine::error::Result<InstallResult> {
             self.install_globals.push(request.global);
             self.install_forces.push(request.force);
             self.install_requests
@@ -203,79 +193,6 @@ mod tests {
             self.install_result
                 .take()
                 .expect("test runtime install result was not configured")
-        }
-
-        fn config_check(&mut self, _global: bool) -> anyhow::Result<CheckConfigResult> {
-            panic!("config_check should not run in install tests");
-        }
-
-        fn init(&mut self, _force: bool) -> anyhow::Result<InitResult> {
-            panic!("init should not run in install tests");
-        }
-
-        fn env(&mut self, _global: bool) -> anyhow::Result<EnvResult> {
-            panic!("env should not run in install tests");
-        }
-
-        fn list(&mut self, _all: bool, _global: bool) -> anyhow::Result<ListResult> {
-            panic!("list should not run in install tests");
-        }
-
-        fn agents(
-            &mut self,
-            _operation: AgentsOperation,
-            _global: bool,
-        ) -> anyhow::Result<AgentsResult> {
-            panic!("agents should not run in install tests");
-        }
-
-        fn run_command(
-            &mut self,
-            _command: Vec<String>,
-            _global: bool,
-        ) -> anyhow::Result<RunResult> {
-            panic!("run_command should not run in install tests");
-        }
-
-        fn task(&mut self, _name: Option<String>, _global: bool) -> anyhow::Result<TaskResult> {
-            panic!("task should not run in install tests");
-        }
-
-        fn activate(
-            &mut self,
-            _shell: Option<String>,
-            _global: bool,
-        ) -> anyhow::Result<ActivateResult> {
-            panic!("activate should not run in install tests");
-        }
-
-        fn doctor(&mut self) -> anyhow::Result<DoctorResult> {
-            panic!("doctor should not run in install tests");
-        }
-
-        fn sync(&mut self, _global: bool) -> anyhow::Result<SyncResult> {
-            panic!("sync should not run in install tests");
-        }
-
-        fn services(
-            &mut self,
-            _operation: ServicesOperation,
-            _name: Option<String>,
-            _global: bool,
-        ) -> anyhow::Result<ServicesResult> {
-            panic!("services should not run in install tests");
-        }
-
-        fn trust(&mut self) -> anyhow::Result<TrustResult> {
-            panic!("trust should not run in install tests");
-        }
-
-        fn uninstall(
-            &mut self,
-            _target: UninstallTarget,
-            _global: bool,
-        ) -> anyhow::Result<UninstallResult> {
-            panic!("uninstall should not run in install tests");
         }
     }
 
@@ -349,7 +266,7 @@ Tools:
     fn install_error_writes_stderr_and_returns_nonzero() {
         let args = install_args("ripgrep");
         let mut runtime = FakeRuntime {
-            install_result: Some(Err(anyhow!("formula.json not found"))),
+            install_result: Some(Err(EngineError::message("formula.json not found"))),
             ..FakeRuntime::default()
         };
         let mut output = BufferedOutput::default();

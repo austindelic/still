@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use crate::error::{EngineContext, Result};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest, ToolInstallOptions};
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
@@ -500,7 +500,7 @@ mod tests {
         async fn install(&mut self, items: Vec<InstallItemRequest>) -> Result<()> {
             self.installed.extend(items);
             if self.fail {
-                return Err(anyhow::anyhow!("install failed"));
+                return Err(EngineError::message("install failed"));
             }
             Ok(())
         }
@@ -579,11 +579,7 @@ mod tests {
     #[tokio::test]
     async fn sync_skips_items_for_other_platforms() {
         let temp = tempfile::tempdir().unwrap();
-        let other_platform = if cfg!(target_os = "windows") {
-            "linux"
-        } else {
-            "windows"
-        };
+        let other_platform = inactive_platform();
         fs::write(
             temp.path().join("still.toml"),
             format!(
@@ -1229,5 +1225,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.drift, [SyncDrift::LockfileOutdated]);
+    }
+
+    fn inactive_platform() -> &'static str {
+        match current_platform() {
+            PlatformId::Windows => "linux",
+            _ => "windows",
+        }
     }
 }

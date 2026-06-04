@@ -12,14 +12,18 @@ pub enum PlatformId {
     Windows,
 }
 
-pub fn current_platform() -> PlatformId {
-    if cfg!(target_os = "macos") {
-        PlatformId::Macos
-    } else if cfg!(target_os = "windows") {
-        PlatformId::Windows
-    } else {
-        PlatformId::Linux
-    }
+#[cfg(target_os = "macos")]
+pub const CURRENT_PLATFORM: PlatformId = PlatformId::Macos;
+#[cfg(target_os = "linux")]
+pub const CURRENT_PLATFORM: PlatformId = PlatformId::Linux;
+#[cfg(target_os = "windows")]
+pub const CURRENT_PLATFORM: PlatformId = PlatformId::Windows;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+compile_error!("still supports macOS, Linux, and Windows targets");
+
+pub const fn current_platform() -> PlatformId {
+    CURRENT_PLATFORM
 }
 
 impl fmt::Display for PlatformId {
@@ -162,11 +166,9 @@ mod tests {
     fn unknown_platform_is_an_error() {
         let err = PlatformFilter::from_config(&["freebsd".to_string()], None, None).unwrap_err();
 
-        assert_eq!(
+        assert!(matches!(
             err,
-            EngineError::UnknownPlatform {
-                platform: "freebsd".to_string()
-            }
-        );
+            EngineError::UnknownPlatform { platform } if platform == "freebsd"
+        ));
     }
 }
