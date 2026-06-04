@@ -23,9 +23,10 @@ platform adapters.
   only selected sources.
 - Deterministic tests should avoid the developer's real package managers.
 
-Current code is transitional. Some install behavior still lives in legacy
-CLI-in-engine modules, command-backed installers, and broad action files. Treat
-those as migration debt: new work should move toward the boundaries in this doc.
+Current code is transitional, but the root CLI and TUI runtime boundaries are
+frontend-owned. Treat broad engine action files and compatibility `backend`
+terminology as migration debt: new work should move toward the boundaries in
+this doc.
 
 ## Crate Shape
 
@@ -115,6 +116,22 @@ Rules:
 - stdout/stderr formatting
 - future `anstream`/`anstyle` color and style output
 - feature-gated no-command TUI launch behavior
+
+The CLI module layout is:
+
+- `args.rs`: Clap parser and command-shaped input types.
+- `context.rs`: `CliContext`, loaded once per process invocation.
+- `session.rs`: `EngineSession`, the Tokio-backed adapter that calls engine
+  actions.
+- `route.rs`: `route_command(...)`, converting parsed commands into typed
+  engine requests.
+- `present.rs`: formatting typed results and errors.
+- `ui.rs`: terminal facade for stdout/stderr and future styling.
+
+The session wrapper exists to keep Tokio setup and context loading out of
+routing code. It must stay a frontend adapter; do not move it into `engine`.
+`mod.rs` files, when present, should stay as small module glue/re-export files.
+Do not put feature behavior in a `mod.rs` dumping ground.
 
 The CLI layer must not own:
 
@@ -219,6 +236,31 @@ The `still-tui` crate owns:
 The TUI should call engine APIs for real behavior. It should not parse CLI args,
 dispatch CLI subcommands, duplicate install/sync/task logic, or know source
 internals.
+
+TUI terminal setup belongs in `launch.rs`, app state/render/event coordination
+belongs in `app.rs`, and long-lived engine action calls belong in `session.rs`.
+The TUI should create one engine session for the app lifetime rather than a new
+Tokio runtime per action.
+
+## TOML IO
+
+Use the right TOML crate for the ownership model:
+
+- `toml` with `serde` is for owned/generated TOML: lockfiles, trust markers,
+  install markers, generated agent metadata, and starter config output.
+- `toml_edit::DocumentMut` is for editing existing user-authored `still.toml`
+  while preserving comments, spacing, and item order.
+- Raw string TOML fixtures are fine in tests. Production code should not
+  hand-escape TOML values or render TOML tables with `push_str` loops.
+
+## Dependency Policy
+
+Direct external crate versions live in `[workspace.dependencies]` when they are
+shared or likely to be reused. Keep them at the latest crates.io version
+compatible with the workspace `rust-version`.
+
+Known exception: `ratatui` is pinned to `0.29.0` because latest `0.30.0`
+declares Rust 1.86 while the workspace currently declares Rust 1.85.
 
 ## Target Engine Modules
 

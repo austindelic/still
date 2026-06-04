@@ -69,7 +69,9 @@ pub struct CachedHomebrewPackage {
 }
 
 /// Loads cached Homebrew formula and cask metadata from a cache root.
-pub fn load_cached_homebrew_packages(cache_root: &Path) -> SourceResult<Vec<CachedHomebrewPackage>> {
+pub fn load_cached_homebrew_packages(
+    cache_root: &Path,
+) -> SourceResult<Vec<CachedHomebrewPackage>> {
     let mut packages = Vec::new();
     packages.extend(load_cached_formulae(&cache_root.join("formula.json"))?);
     packages.extend(load_cached_casks(&cache_root.join("cask.json"))?);

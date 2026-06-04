@@ -197,8 +197,7 @@ pub struct ExpandedSkillSource {
 /// # Errors
 /// Fails when the document is invalid TOML or does not match the config model.
 pub fn parse_still_toml(input: &str) -> Result<StillConfig> {
-    let config: StillConfig =
-        toml_edit::de::from_str(input).context("failed to parse still.toml")?;
+    let config: StillConfig = toml::from_str(input).context("failed to parse still.toml")?;
     validate_config(&config)?;
     Ok(config)
 }

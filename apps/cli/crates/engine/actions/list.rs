@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::error::{EngineContext, Result};
-use serde::Deserialize;
 
 use crate::config::{
     ConfigScope, ConfigSelection, find_project_config, global_config_path, resolve_config_path,
 };
 use crate::error::EngineError;
 use crate::infra::paths::PathOps;
+use crate::inventory::InstallMarker;
 use crate::platform::System;
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
 use crate::resolve::{default_backend, normalize_auto_backend};
@@ -53,18 +53,6 @@ pub struct ListItem {
     pub project: bool,
     pub global: bool,
     pub installed: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct InstallMarker {
-    kind: String,
-    name: String,
-    version: String,
-    backend: Option<String>,
-    #[serde(default)]
-    outputs: Vec<String>,
-    #[serde(default)]
-    linked_executables: Vec<String>,
 }
 
 /// Reads selected config and returns configured items.
@@ -440,8 +428,8 @@ async fn read_marker_item(kind: ItemKind, path: PathBuf) -> Result<Option<ListIt
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
     };
-    let marker: InstallMarker = toml_edit::de::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let marker: InstallMarker =
+        toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
     if marker.kind.parse::<ItemKind>()? != kind {
         return Ok(None);
     }

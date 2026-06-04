@@ -11,15 +11,12 @@ path = "lib.rs"
 tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml_edit = { version = "0.23", features = ["serde"] }
-semver = "1.0.27"
-reqwest = { version = "0.13.4", default-features = false, features = [
-  "json",
-  "gzip",
-  "rustls",
-] }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+semver = { workspace = true }
+reqwest = { workspace = true }
 dirs = { workspace = true }
-sha2 = "0.10.9"
+sha2 = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 still_source_aqua = { package = "still-source-aqua", path = "../sources/aqua", optional = true }
@@ -65,5 +62,5 @@ sources = [
 
 [dev-dependencies]
 insta = { workspace = true }
-tempfile = "3.25"
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

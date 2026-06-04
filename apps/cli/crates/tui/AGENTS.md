@@ -9,12 +9,16 @@
 - Own terminal UI state, rendering, input handling, tabs, menus, and terminal lifecycle.
 - Expose TUI entry APIs such as `launch_tui()`.
 - Use engine/root APIs for actual package, task, service, and config behavior.
+- Keep terminal setup/restore in `launch.rs`, long-lived engine calls in
+  `session.rs`, and app state/render/event coordination in `app.rs`.
 
 ## Boundaries
 
 - Do not parse CLI args here.
 - Do not dispatch CLI subcommands here.
 - Do not duplicate install/sync/task logic that belongs in the root CLI or engine.
+- Do not create a new Tokio runtime per button/action. Use the TUI engine
+  session for the app lifetime.
 - Keep terminal-specific errors and lifecycle handling local to the TUI layer.
 
 ## Testing

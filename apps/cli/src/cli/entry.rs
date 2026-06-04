@@ -1,10 +1,13 @@
-use clap::{CommandFactory, Parser};
+#[cfg(not(feature = "tui"))]
+use clap::CommandFactory;
+use clap::Parser;
 use miette::miette;
 
 use crate::cli::{
     args::Cli,
-    dispatch::dispatch,
-    runtime::RealRuntime,
+    context::CliContext,
+    route::route_command,
+    session::EngineSession,
     ui::{TerminalUi, Ui},
 };
 
@@ -30,9 +33,10 @@ fn try_entry() -> miette::Result<i32> {
         return Ok(no_command(&mut ui));
     };
 
-    let mut runtime =
-        RealRuntime::new().map_err(|err| miette!("failed to initialize CLI runtime: {err}"))?;
-    Ok(dispatch(command, &mut runtime, &mut ui))
+    let context = CliContext::load().map_err(|err| miette!("failed to load CLI context: {err}"))?;
+    let mut session = EngineSession::new(context)
+        .map_err(|err| miette!("failed to initialize engine session: {err}"))?;
+    Ok(route_command(command, &mut session, &mut ui))
 }
 
 fn no_command<U: Ui>(ui: &mut U) -> i32 {

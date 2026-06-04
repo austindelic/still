@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::error::{EngineContext, Result};
 
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::trust::{config_fingerprint, trust_marker_path};
+use crate::trust::{config_fingerprint, trust_marker_content, trust_marker_path};
 
 /// Request to mark the current project config trusted.
 #[derive(Debug, Clone)]
@@ -45,11 +45,7 @@ pub async fn run(request: TrustRequest) -> Result<TrustResult> {
     }
     tokio::fs::write(
         &trust_path,
-        format!(
-            "config = \"{}\"\nfingerprint = \"{}\"\n",
-            resolved.path.display(),
-            fingerprint
-        ),
+        trust_marker_content(&resolved.path, fingerprint.clone())?,
     )
     .await
     .with_context(|| format!("failed to write {}", trust_path.display()))?;

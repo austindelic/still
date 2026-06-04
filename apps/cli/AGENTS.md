@@ -15,12 +15,17 @@ Keep this file focused on workflow guidance for agents. Public product goals
 belong in `README.md` or `SPEC.md`; implementation architecture belongs in
 `DESIGN.md`.
 
+Every non-trivial code change must update `README.md`, `SPEC.md`, and/or
+`DESIGN.md` when it changes product behavior, command syntax, crate boundaries,
+architecture, dependency policy, generated files, or test expectations.
+
 ## Layout
 
 - `src/main.rs`: binary entrypoint. Keep it thin; it should declare the root
   `cli` module and delegate to `cli::entry()`.
-- `src/cli`: Clap args, command routing, output formatting, Tokio runtime
-  boundary, miette diagnostics, indicatif progress, and CLI command handlers.
+- `src/cli`: Clap args, CLI context/session, command routing, output
+  formatting, Tokio runtime boundary, miette diagnostics, indicatif progress,
+  and CLI command handlers.
 - `crates/engine`: core config, desired state, source selection, planning,
   lockfile, inventory, trust, platform traits, and typed errors/results.
 - `crates/source-kit`: shared source installer machinery such as download,
@@ -35,6 +40,11 @@ belong in `README.md` or `SPEC.md`; implementation architecture belongs in
 ## Architecture Rules
 
 - Start command spelling/input changes in `src/cli/args.rs`.
+- Keep CLI runtime code in the requested shape: `context.rs` has `CliContext`,
+  `session.rs` has `EngineSession`, `route.rs` has `route_command(...)`,
+  `present.rs` formats typed results, and `ui.rs` is the terminal facade.
+- Use `mod.rs` only for small module glue and re-exports. Do not let it become
+  a dumping ground for behavior.
 - Put CLI presentation, stdout/stderr formatting, Clap behavior, miette
   diagnostics, indicatif progress, and future anstream/anstyle styling in
   `src/cli`.
@@ -51,6 +61,12 @@ belong in `README.md` or `SPEC.md`; implementation architecture belongs in
 - Do not add a separate `still_tui` binary unless the product direction changes.
 - Use `source` terminology for new design/code. Older source-adapter naming is
   migration debt unless touching compatibility code.
+- Use `toml` plus `serde` for owned/generated TOML files such as lockfiles,
+  trust markers, install markers, and generated metadata. Use `toml_edit` only
+  when editing existing user-authored TOML and preserving comments/order.
+- Keep direct external dependency versions in `[workspace.dependencies]` when
+  possible. Use the latest crates.io versions compatible with the workspace
+  Rust version, and document any MSRV exception.
 
 ## Current CLI Decisions
 

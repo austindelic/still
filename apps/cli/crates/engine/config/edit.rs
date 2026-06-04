@@ -50,14 +50,10 @@ pub fn add_install_items_with_force(
 fn reject_conflicting_request_items(items: &[InstallItemRequest]) -> EngineResult<()> {
     for (index, item) in items.iter().enumerate() {
         let kind = install_item_kind(item)?;
-        let Some(existing) = items[..index]
-            .iter()
-            .find(|existing| {
-                install_item_kind(existing)
-                    .is_ok_and(|existing_kind| existing_kind == kind)
-                    && existing.spec.name == item.spec.name
-            })
-        else {
+        let Some(existing) = items[..index].iter().find(|existing| {
+            install_item_kind(existing).is_ok_and(|existing_kind| existing_kind == kind)
+                && existing.spec.name == item.spec.name
+        }) else {
             continue;
         };
 

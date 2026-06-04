@@ -411,8 +411,8 @@ async fn read_skill_manifest(content_dir: &Path) -> Result<SkillManifestDependen
         }
         Err(err) => return Err(err.into()),
     };
-    let manifest: SkillManifest = toml_edit::de::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let manifest: SkillManifest =
+        toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(manifest.dependencies)
 }
 
@@ -558,7 +558,7 @@ fn target_manifest(target: &str, agents: &NormalizedAgents) -> Result<String> {
         .into_iter()
         .map(|name| format!(".agents/skills/{name}"))
         .collect();
-    toml_edit::ser::to_string(&AgentTargetManifest {
+    toml::to_string_pretty(&AgentTargetManifest {
         managed_by: "still",
         target,
         instructions: agents.instructions.as_deref(),
@@ -775,7 +775,7 @@ async fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<()> {
 }
 
 fn managed_marker(skill: &NormalizedSkill) -> Result<String> {
-    toml_edit::ser::to_string(&ManagedSkillMarker {
+    toml::to_string_pretty(&ManagedSkillMarker {
         managed_by: "still",
         name: &skill.name,
     })
@@ -783,7 +783,7 @@ fn managed_marker(skill: &NormalizedSkill) -> Result<String> {
 }
 
 fn source_metadata(skill: &NormalizedSkill) -> Result<String> {
-    toml_edit::ser::to_string(&ManagedSkillMetadata::from(skill)).map_err(Into::into)
+    toml::to_string_pretty(&ManagedSkillMetadata::from(skill)).map_err(Into::into)
 }
 
 #[derive(Debug, Serialize)]
@@ -1732,10 +1732,9 @@ mod tests {
         assert_eq!(result.auto_added, []);
         assert_eq!(result.missing_dependencies.len(), 3);
         assert!(
-            result
-                .missing_dependencies
-                .iter()
-                .any(|item| { item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-audit" })
+            result.missing_dependencies.iter().any(|item| {
+                item.kind == Some(ItemKind::Tool) && item.spec.name == "cargo-audit"
+            })
         );
         let content = fs::read_to_string(temp.path().join("still.toml")).unwrap();
         assert!(!content.contains("cargo-audit ="));

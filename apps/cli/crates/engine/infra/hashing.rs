@@ -1,5 +1,7 @@
 //! Hashing and checksum verification helpers.
 
+use std::fmt::Write as _;
+
 use sha2::{Digest, Sha256};
 
 /// SHA-256 hashing utilities.
@@ -16,7 +18,12 @@ impl Hashing {
     pub fn sha256(data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        let digest = hasher.finalize();
+        let mut output = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
+        }
+        output
     }
 
     /// Verifies that `data` matches an expected lowercase hex SHA-256 hash.

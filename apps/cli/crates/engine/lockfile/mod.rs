@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{EngineError, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::sync::SyncItem;
 use crate::infra::hashing::Hashing;
@@ -65,7 +65,7 @@ fn render_merged_lockfile_entries(
 
 /// Validates a lockfile against Still's typed lockfile schema.
 pub fn validate_lockfile(input: &str) -> Result<()> {
-    let lockfile = toml_edit::de::from_str::<Lockfile>(input)?;
+    let lockfile = toml::from_str::<Lockfile>(input)?;
     for (index, item) in lockfile.items.iter().enumerate() {
         validate_lockfile_item(index + 1, item)?;
     }
@@ -79,24 +79,12 @@ fn render_lockfile_entries(items: &[LockfileItem]) -> String {
         return output;
     }
 
-    for item in items {
-        output.push_str("[[items]]\n");
-        output.push_str(&format!("kind = \"{}\"\n", toml_string(&item.kind)));
-        output.push_str(&format!("name = \"{}\"\n", toml_string(&item.name)));
-        output.push_str(&format!("platform = \"{}\"\n", toml_string(&item.platform)));
-        output.push_str(&format!("version = \"{}\"\n", toml_string(&item.version)));
-        if let Some(backend) = &item.backend {
-            output.push_str(&format!("backend = \"{}\"\n", toml_string(backend)));
-        }
-        output.push_str(&format!("source = \"{}\"\n", toml_string(&item.source)));
-        output.push_str(&format!("checksum = \"{}\"\n", toml_string(&item.checksum)));
-        output.push_str(&format!("outputs = {}\n", toml_string_array(&item.outputs)));
-        output.push_str(&format!(
-            "linked_executables = {}\n",
-            toml_string_array(&item.linked_executables)
-        ));
-        output.push('\n');
-    }
+    output.push_str(
+        &toml::to_string_pretty(&Lockfile {
+            items: items.to_vec(),
+        })
+        .expect("lockfile serialization should not fail for string-only values"),
+    );
     output
 }
 
@@ -174,18 +162,19 @@ fn agent_skill_version(skill: &NormalizedSkill) -> String {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 struct Lockfile {
     #[serde(default)]
     items: Vec<LockfileItem>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct LockfileItem {
     kind: String,
     name: String,
     platform: String,
     version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     backend: Option<String>,
     source: String,
     checksum: String,
@@ -196,7 +185,7 @@ struct LockfileItem {
 }
 
 fn parse_lockfile_items(input: &str) -> Vec<LockfileItem> {
-    toml_edit::de::from_str::<Lockfile>(input)
+    toml::from_str::<Lockfile>(input)
         .map(|lockfile| lockfile.items)
         .unwrap_or_default()
 }
@@ -264,22 +253,6 @@ fn validate_lockfile_item(index: usize, item: &LockfileItem) -> Result<()> {
 
 fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn toml_string(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|character| character.escape_default())
-        .collect()
-}
-
-fn toml_string_array(values: &[String]) -> String {
-    let values = values
-        .iter()
-        .map(|value| format!("\"{}\"", toml_string(value)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{values}]")
 }
 
 fn expected_output_path(item: &SyncItem) -> PathBuf {

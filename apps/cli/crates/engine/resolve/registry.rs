@@ -1,6 +1,6 @@
 //! Feature- and target-aware registry for compiled source crates.
 
-#[cfg(any(feature = "source-kit", test))]
+#[cfg(feature = "source-kit")]
 use crate::platform::PlatformId;
 use crate::resolve::source::{SourceCapability, SourceResolver};
 #[cfg(any(feature = "source-kit", test))]
@@ -43,10 +43,9 @@ impl SourceRegistry {
         )
     }
 
+    #[cfg(feature = "source-kit")]
     fn push_capability(&mut self, capability: SourceCapability) {
-        self.sources.push(CompiledSource {
-            capability,
-        });
+        self.sources.push(CompiledSource { capability });
     }
 
     #[cfg(feature = "source-kit")]
@@ -128,9 +127,10 @@ fn convert_kinds(kinds: &'static [still_source_kit::ItemKind]) -> &'static [Item
             still_source_kit::ItemKind::Package,
             still_source_kit::ItemKind::App,
         ] => &[ItemKind::Tool, ItemKind::Package, ItemKind::App],
-        [still_source_kit::ItemKind::Package, still_source_kit::ItemKind::App] => {
-            &[ItemKind::Package, ItemKind::App]
-        }
+        [
+            still_source_kit::ItemKind::Package,
+            still_source_kit::ItemKind::App,
+        ] => &[ItemKind::Package, ItemKind::App],
         _ => &[],
     }
 }

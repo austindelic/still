@@ -26,7 +26,9 @@ pub enum EngineError {
     UnsupportedSourceForPlatform { id: String, platform: String },
     #[error("no source candidates are available for {kind} items on {platform}")]
     NoSourceCandidates { kind: String, platform: String },
-    #[error("source install planning for {kind} {name}@{version} from {source_id} is not implemented yet")]
+    #[error(
+        "source install planning for {kind} {name}@{version} from {source_id} is not implemented yet"
+    )]
     SourceInstallNotImplemented {
         source_id: String,
         kind: String,
@@ -66,6 +68,10 @@ pub enum EngineError {
     TomlDe(#[from] toml_edit::de::Error),
     #[error("{0}")]
     TomlSer(#[from] toml_edit::ser::Error),
+    #[error("{0}")]
+    TomlDeserialize(#[from] toml::de::Error),
+    #[error("{0}")]
+    TomlSerialize(#[from] toml::ser::Error),
     #[error("{0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("{0}")]

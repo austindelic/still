@@ -1,30 +1,14 @@
 //! Engine action for creating starter project config.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{EngineContext, Result};
+use serde::Serialize;
 
 use crate::config::PROJECT_CONFIG_FILE;
 use crate::error::EngineError;
-use crate::trust::{config_fingerprint, trust_marker_path};
-
-const STARTER_TEMPLATE_AFTER_TOOLS: &str = r#"
-[packages]
-latest = []
-
-[apps]
-latest = []
-
-[env]
-files = []
-
-[tasks]
-
-[services]
-
-[agents]
-targets = []
-"#;
+use crate::trust::{config_fingerprint, trust_marker_content, trust_marker_path};
 
 /// Request to initialize a project config.
 #[derive(Debug, Clone)]
@@ -51,7 +35,7 @@ pub async fn run(request: InitRequest) -> Result<InitResult> {
         return Err(EngineError::ConfigAlreadyExists { path }.into());
     }
 
-    let content = starter_config(&request.start_dir).await;
+    let content = starter_config(&request.start_dir).await?;
     tokio::fs::write(&path, &content)
         .await
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -61,11 +45,7 @@ pub async fn run(request: InitRequest) -> Result<InitResult> {
     }
     tokio::fs::write(
         &trust_path,
-        format!(
-            "config = \"{}\"\nfingerprint = \"{}\"\n",
-            path.display(),
-            config_fingerprint(content.as_bytes())
-        ),
+        trust_marker_content(&path, config_fingerprint(content.as_bytes()))?,
     )
     .await
     .with_context(|| format!("failed to write {}", trust_path.display()))?;
@@ -73,27 +53,57 @@ pub async fn run(request: InitRequest) -> Result<InitResult> {
     Ok(InitResult { path })
 }
 
-async fn starter_config(project_dir: &Path) -> String {
-    let mut tools = Vec::new();
+async fn starter_config(project_dir: &Path) -> Result<String> {
+    let mut tools = BTreeMap::new();
     if file_exists(project_dir.join("Cargo.toml")).await {
-        tools.push(("rust", "stable"));
+        tools.insert("rust".to_string(), "stable".to_string());
     }
     if file_exists(project_dir.join("package.json")).await {
-        tools.push(("node", "latest"));
+        tools.insert("node".to_string(), "latest".to_string());
     }
     if file_exists(project_dir.join("go.mod")).await {
-        tools.push(("go", "latest"));
+        tools.insert("go".to_string(), "latest".to_string());
     }
     if file_exists(project_dir.join("pyproject.toml")).await {
-        tools.push(("python", "latest"));
+        tools.insert("python".to_string(), "latest".to_string());
     }
 
-    let mut output = String::from("[tools]\n");
-    for (name, version) in tools {
-        output.push_str(&format!("{name} = \"{version}\"\n"));
-    }
-    output.push_str(STARTER_TEMPLATE_AFTER_TOOLS);
-    output
+    let config = StarterConfig {
+        tools,
+        packages: LatestSection::default(),
+        apps: LatestSection::default(),
+        env: EnvStarter::default(),
+        tasks: BTreeMap::new(),
+        services: BTreeMap::new(),
+        agents: AgentsStarter::default(),
+    };
+    toml::to_string_pretty(&config).map_err(Into::into)
+}
+
+#[derive(Debug, Default, Serialize)]
+struct StarterConfig {
+    tools: BTreeMap<String, String>,
+    packages: LatestSection,
+    apps: LatestSection,
+    env: EnvStarter,
+    tasks: BTreeMap<String, String>,
+    services: BTreeMap<String, String>,
+    agents: AgentsStarter,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct LatestSection {
+    latest: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct EnvStarter {
+    files: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AgentsStarter {
+    targets: Vec<String>,
 }
 
 async fn file_exists(path: PathBuf) -> bool {

@@ -1,7 +1,6 @@
-//! Install orchestration, layout, rollback, and receipt helpers.
+//! Install orchestration, layout, and receipt helpers.
 
 pub mod layout;
-pub mod rollback;
 
 pub use crate::actions::install::{
     InstallAndRecordRequest, InstallItemRequest, InstallRequest, InstallResult,

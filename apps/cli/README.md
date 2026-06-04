@@ -159,3 +159,16 @@ cargo run -p still --bin still -- --help
 cargo run -p still --features tui --bin still -- --help
 cargo run -p still --features tui --bin still
 ```
+
+## Implementation Notes
+
+The root CLI keeps parsing, routing, presentation, and the Tokio-backed
+`EngineSession` in `apps/cli/src/cli`. Engine behavior remains in
+`crates/engine`; generated TOML files are serialized through typed `serde`
+models, while user-edited `still.toml` mutations use `toml_edit` to preserve
+comments and ordering.
+
+Direct external crate versions are centralized in `[workspace.dependencies]`
+where practical and kept current with the workspace Rust version. `ratatui` is
+currently pinned to `0.29.0` because `0.30.0` requires Rust 1.86 and this
+workspace declares Rust 1.85.

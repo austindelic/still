@@ -12,6 +12,10 @@ Before non-trivial engine changes, read:
 - `../../SPEC.md` for product behavior, command contract, and config/source syntax.
 - `../../AGENTS.md` for workspace-wide CLI guidance.
 
+When an engine change affects behavior, generated files, crate boundaries,
+architecture, dependency policy, or test expectations, update `../../README.md`,
+`../../SPEC.md`, and/or `../../DESIGN.md` in the same change.
+
 ## Responsibilities
 
 - Parse and model source-aware tool/package/app specs.
@@ -36,6 +40,10 @@ Before non-trivial engine changes, read:
 - Do not introduce hidden global state when a typed request can carry the needed context.
 - Use source terminology for new code. Older source-adapter naming is migration
   debt.
+- Use `toml` plus `serde` for owned/generated TOML files such as lockfiles,
+  trust markers, install markers, and generated metadata.
+- Use `toml_edit` only for preserving user-authored `still.toml` comments,
+  spacing, and ordering during edits.
 
 ## Platform And Sources
 

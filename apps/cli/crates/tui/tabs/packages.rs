@@ -9,7 +9,6 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, Widget},
 };
-use std::fs;
 
 /// State for the TUI package browser.
 #[derive(Debug, Default)]
@@ -20,6 +19,7 @@ pub struct PackageBrowser {
 }
 
 /// Item kind rendered by the package browser.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageKind {
     Package,

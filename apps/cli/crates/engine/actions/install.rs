@@ -341,7 +341,8 @@ async fn run_with_installer_and_rollback_roots(
 }
 
 fn selected_source_for_item(item: &ClassifiedInstallItemRequest) -> Result<String> {
-    let intent = SourceIntent::from_optional(item.spec.backend.as_ref().map(|source| source.as_str()))?;
+    let intent =
+        SourceIntent::from_optional(item.spec.backend.as_ref().map(|source| source.as_str()))?;
     let selection =
         SourceRegistry::bundled()
             .resolver()
@@ -459,8 +460,8 @@ mod tests {
 
     #[test]
     fn engine_rejects_ambiguous_unclassified_items() {
-        let err = classify_install_items(&[install_item(None, "ripgrep@latest@homebrew")])
-            .unwrap_err();
+        let err =
+            classify_install_items(&[install_item(None, "ripgrep@latest@homebrew")]).unwrap_err();
 
         assert!(err.to_string().contains("cannot infer whether"));
     }

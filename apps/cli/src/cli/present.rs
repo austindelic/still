@@ -8,7 +8,7 @@ use engine::{
         install::{InstallItemRequest, InstallResult},
         list::{ListResult, ListSection},
         run::RunResult,
-        services::{ServiceReport, ServiceStatus, ServicesOperation, ServicesResult},
+        services::{ServiceReport, ServiceStatus, ServicesResult},
         sync::{SyncDrift, SyncResult},
         task::TaskResult,
         trust::TrustResult,
@@ -155,11 +155,7 @@ pub fn services_result<U: Ui>(result: ServicesResult, ui: &mut U) -> i32 {
     exit_code
 }
 
-pub fn agents_result<U: Ui>(
-    result: AgentsResult,
-    operation: AgentsOperation,
-    ui: &mut U,
-) -> i32 {
+pub fn agents_result<U: Ui>(result: AgentsResult, operation: AgentsOperation, ui: &mut U) -> i32 {
     ui.info(&format!("Config: {}", result.path.display()));
     if result.agents.targets.is_empty() {
         ui.info("Targets: (none)");

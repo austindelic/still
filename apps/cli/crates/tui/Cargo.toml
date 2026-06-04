@@ -10,8 +10,8 @@ path = "lib.rs"
 
 [dependencies]
 engine = { path = "../engine" }
-crossterm = "0.29.0"
-fuzzy-matcher = "0.3.7"
-ratatui = "0.30.0"
+crossterm = { workspace = true }
+fuzzy-matcher = { workspace = true }
+ratatui = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }

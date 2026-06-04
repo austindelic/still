@@ -65,6 +65,9 @@ write to config explicitly and predictably.
 - `sync` reconciles installed state from config.
 - Config-changing install and uninstall flows refresh the lockfile next to the selected config.
 - Config writes should preserve unrelated sections and existing user formatting as much as practical.
+- `still.toml` is user-authored TOML and should preserve comments/order during
+  edits. Generated files such as lockfiles, trust markers, install markers, and
+  agent metadata are Still-owned typed TOML.
 - Duplicate entries should not be added.
 - Creating a local project config is explicit through `still init`; install-style add commands do not silently create `still.toml`.
 
