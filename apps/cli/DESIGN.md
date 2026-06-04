@@ -136,9 +136,10 @@ Current modules should keep these responsibilities:
   Clap-specific parsing.
 - `src/cli/commands`: command dispatch and presentation-facing handlers.
 - `src/cli/output.rs`: stdout/stderr abstraction for commands and tests.
-- `src/cli/runtime.rs`: boundary used by CLI handlers to call engine behavior.
 - `crates/engine/actions`: command-neutral operations such as install, sync,
   trust, task, doctor, env, agents, and services as they are added.
+- `crates/engine/runtime.rs`: synchronous boundary used by frontends to call
+  engine behavior.
 - `crates/engine/specs`: typed models for Still config and external metadata.
 - `crates/engine/registries`: metadata source adapters such as Homebrew, GitHub,
   package registries, and future Still public registries.

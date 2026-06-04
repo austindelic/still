@@ -28,7 +28,7 @@ pub struct Cli {
 ///
 /// Keep this enum focused on the input contract: command names, aliases, and
 /// argument structs. Command behavior belongs in `cli::commands`, and engine
-/// side effects belong behind `CliRuntime`.
+/// side effects belong behind `ActionRuntime`.
 #[derive(Subcommand)]
 pub enum Command {
     #[command(about = "Initialize configuration for a new project")]

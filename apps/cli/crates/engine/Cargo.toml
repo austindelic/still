@@ -7,7 +7,7 @@ edition.workspace = true
 path = "lib.rs"
 
 [dependencies]
-tokio = { version = "1.49.0", features = ["fs", "macros", "rt"] }
+tokio = { version = "1.49.0", features = ["fs", "macros", "rt", "rt-multi-thread"] }
 flate2 = "1.1.5"
 tar = "0.4.44"
 serde = { version = "1.0.228", features = ["derive"] }

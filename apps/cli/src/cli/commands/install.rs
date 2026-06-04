@@ -2,11 +2,11 @@
 
 use crate::cli::args::InstallArgs;
 use crate::cli::output::Output;
-use crate::cli::runtime::{CliRuntime, InstallCommandRequest};
-use engine::actions::install::{InstallItemRequest, InstallRequest, InstallResult};
-use engine::registries::specs::tool::ToolSpec;
-use engine::specs::backend::infer_item_kind_from_backend;
-use engine::specs::item::{ItemKind, ItemSpec};
+use engine::actions::install::{
+    InstallItemRequest, InstallRequest, InstallResult, items_from_specs,
+};
+use engine::runtime::{ActionRuntime, ScopedInstallRequest};
+use engine::specs::item::ItemKind;
 
 /// Runs the install command through the configured runtime.
 ///
@@ -17,12 +17,12 @@ use engine::specs::item::{ItemKind, ItemSpec};
 /// when the runtime reports an install error.
 pub fn run<R, O>(args: InstallArgs, runtime: &mut R, output: &mut O) -> i32
 where
-    R: CliRuntime,
+    R: ActionRuntime,
     O: Output,
 {
     let global = args.global;
     let force = args.force;
-    let items = match install_items(args) {
+    let items = match items_from_specs(args.tools, args.packages, args.apps, args.items) {
         Ok(items) => items,
         Err(e) => {
             output.error(&format!("install failed: {e}"));
@@ -30,7 +30,7 @@ where
         }
     };
     let request_items = items.clone();
-    let install_request = InstallCommandRequest {
+    let install_request = ScopedInstallRequest {
         global,
         force,
         install: InstallRequest { items },
@@ -115,47 +115,6 @@ fn write_one_install<O: Output>(
     ));
 }
 
-fn install_items(args: InstallArgs) -> anyhow::Result<Vec<InstallItemRequest>> {
-    let mut items = Vec::new();
-    push_items(&mut items, ItemKind::Tool, args.tools);
-    push_items(&mut items, ItemKind::Package, args.packages);
-    push_items(&mut items, ItemKind::App, args.apps);
-    for spec in args.items {
-        let kind = infer_item_kind(&spec)?;
-        push_items(&mut items, kind, vec![spec]);
-    }
-    Ok(items)
-}
-
-fn push_items(items: &mut Vec<InstallItemRequest>, kind: ItemKind, specs: Vec<ToolSpec>) {
-    items.extend(specs.into_iter().map(|spec| InstallItemRequest {
-        kind,
-        spec: ItemSpec {
-            name: spec.name,
-            version: spec.version.parse().expect("validated ToolSpec version"),
-            backend: spec.backend,
-        },
-        tool: Default::default(),
-    }));
-}
-
-fn infer_item_kind(spec: &ToolSpec) -> anyhow::Result<ItemKind> {
-    let Some(backend) = &spec.backend else {
-        anyhow::bail!(
-            "cannot infer whether {} is a tool, package, or app; use --tool, --package, or --app",
-            spec.name
-        );
-    };
-    infer_item_kind_from_backend(backend.as_str()).ok_or_else(|| {
-        anyhow::anyhow!(
-            "cannot infer whether {}@{}@{} is a tool, package, or app; use --tool, --package, or --app",
-            spec.name,
-            spec.version,
-            backend
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -178,6 +137,7 @@ mod tests {
 
     use super::*;
     use crate::cli::output::BufferedOutput;
+    use engine::runtime::{ActionRuntime, ScopedInstallRequest};
 
     #[derive(Default)]
     struct FakeRuntime {
@@ -187,8 +147,8 @@ mod tests {
         install_forces: Vec<bool>,
     }
 
-    impl CliRuntime for FakeRuntime {
-        fn install(&mut self, request: InstallCommandRequest) -> anyhow::Result<InstallResult> {
+    impl ActionRuntime for FakeRuntime {
+        fn install(&mut self, request: ScopedInstallRequest) -> anyhow::Result<InstallResult> {
             self.install_globals.push(request.global);
             self.install_forces.push(request.force);
             self.install_requests
