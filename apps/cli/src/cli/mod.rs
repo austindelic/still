@@ -1,99 +1,30 @@
-//! CLI entrypoint, command routing, and feature-gated no-argument behavior.
+//! Root CLI facade and feature-gated no-argument behavior.
 
-/// Command-line argument definitions.
-pub mod args;
-/// CLI command dispatch and command handlers.
-pub mod commands;
-/// Output abstractions used by real commands and tests.
-pub mod output;
-/// CLI-owned runtime adapter for host engine operations.
-pub mod runtime;
-use clap::Parser;
+pub use engine::cli::{args, commands, output, run_parsed, run_parsed_with_no_command};
 
-use self::{
-    args::Cli,
-    commands::run_cli,
-    output::{Output, StdOutput},
-    runtime::RuntimeOps,
-};
-
-/// Parses process arguments, dispatches the selected command, and exits on failure.
-///
-/// This is the production binary entrypoint. It owns the real runtime and output
-/// sink, reads argv through Clap, and converts any nonzero command result into
-/// the process exit code. Tests should call `run_parsed` or
-/// `run_parsed_with_no_command` so they can inject parsed input, runtime state,
-/// and output capture.
+/// Parses process arguments, dispatches commands, and exits on failure.
 pub fn entry() {
-    let cli = Cli::parse();
-    let mut runtime = runtime::get_runtime();
-    let mut output = StdOutput;
-    let code = run_parsed(cli, &mut runtime, &mut output);
-
-    if code != 0 {
-        std::process::exit(code);
+    #[cfg(not(feature = "tui"))]
+    {
+        engine::cli::entry();
     }
-}
 
-/// Runs parsed CLI input with the build's default no-command behavior.
-///
-/// `cli` is the already parsed user input. `runtime` is the mutable boundary
-/// used by commands that need engine behavior. `output` receives all user-facing
-/// stdout/stderr text. The return value is a process-style exit code where `0`
-/// means success.
-pub fn run_parsed<R, O>(cli: Cli, runtime: &mut R, output: &mut O) -> i32
-where
-    R: RuntimeOps,
-    O: Output,
-{
-    run_parsed_with_no_command(cli, runtime, output, run_without_command)
-}
-
-/// Runs parsed CLI input with an injected no-command handler.
-///
-/// `cli`, `runtime`, and `output` have the same roles as `run_parsed`.
-/// `no_command` is called only when the user supplied no subcommand, allowing
-/// tests and feature-gated builds to choose between help output and TUI launch
-/// without changing command dispatch. The return value is the selected handler's
-/// process-style exit code.
-pub fn run_parsed_with_no_command<R, O, F>(
-    cli: Cli,
-    runtime: &mut R,
-    output: &mut O,
-    no_command: F,
-) -> i32
-where
-    R: RuntimeOps,
-    O: Output,
-    F: FnOnce(&mut O) -> i32,
-{
-    match cli.command {
-        Some(command) => run_cli(command, runtime, output),
-        None => no_command(output),
+    #[cfg(feature = "tui")]
+    {
+        engine::cli::entry_with_no_command(run_without_command);
     }
-}
-
-#[cfg(not(feature = "tui"))]
-fn run_without_command<O: Output>(output: &mut O) -> i32 {
-    commands::print_help(output)
 }
 
 #[cfg(feature = "tui")]
-fn run_without_command<O: Output>(output: &mut O) -> i32 {
+fn run_without_command<O: output::Output>(output: &mut O) -> i32 {
     launch_tui_or_report(output, still_tui::launch_tui)
 }
 
 /// Launches the TUI and maps terminal startup failures into CLI output.
-///
-/// `output` is used only for failure reporting so terminal errors still appear
-/// in the same stderr path as normal commands. `launch` owns the actual TUI
-/// startup function, which makes the lifecycle testable without entering raw
-/// terminal mode. Returns `0` when the TUI exits normally and `1` when launch
-/// fails.
 #[cfg(feature = "tui")]
 pub fn launch_tui_or_report<O, F>(output: &mut O, launch: F) -> i32
 where
-    O: Output,
+    O: output::Output,
     F: FnOnce() -> std::io::Result<()>,
 {
     match launch() {
@@ -110,214 +41,47 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tui"))]
 mod tests {
     use super::*;
-    use crate::cli::{
-        args::{Cli, Command, DoctorArgs},
-        output::BufferedOutput,
-    };
-    use engine::actions::{
-        activate::ActivateResult,
-        agents::{AgentsOperation, AgentsResult},
-        config::CheckConfigResult,
-        doctor::{DoctorCheck, DoctorResult, DoctorStatus},
-        env::EnvResult,
-        init::InitResult,
-        list::ListResult,
-        run::RunResult,
-        services::{ServicesOperation, ServicesResult},
-        sync::SyncResult,
-        task::TaskResult,
-        trust::TrustResult,
-        uninstall::{UninstallResult, UninstallTarget},
-    };
 
-    #[derive(Debug, Default)]
-    struct FakeRuntime;
+    #[derive(Default)]
+    struct TestOutput {
+        stdout: String,
+        stderr: String,
+    }
 
-    impl runtime::InstallRuntime for FakeRuntime {
-        fn install(
-            &mut self,
-            _request: runtime::RecordedInstallRequest,
-        ) -> engine::error::Result<engine::actions::install::InstallResult> {
-            panic!("install should not run in these routing tests");
+    impl output::Output for TestOutput {
+        fn info(&mut self, msg: &str) {
+            self.stdout.push_str(msg);
+            self.stdout.push('\n');
         }
-    }
 
-    impl runtime::ConfigRuntime for FakeRuntime {
-        fn config_check(&mut self, _global: bool) -> engine::error::Result<CheckConfigResult> {
-            panic!("config_check should not run in these routing tests");
+        fn error(&mut self, msg: &str) {
+            self.stderr.push_str(msg);
+            self.stderr.push('\n');
         }
-    }
 
-    impl runtime::InitRuntime for FakeRuntime {
-        fn init(&mut self, _force: bool) -> engine::error::Result<InitResult> {
-            panic!("init should not run in these routing tests");
+        fn success(&mut self, msg: &str) {
+            self.info(&format!("✓ {msg}"));
         }
-    }
 
-    impl runtime::EnvRuntime for FakeRuntime {
-        fn env(&mut self, _global: bool) -> engine::error::Result<EnvResult> {
-            panic!("env should not run in these routing tests");
+        fn warning(&mut self, msg: &str) {
+            self.error(&format!("⚠ {msg}"));
         }
-    }
-
-    impl runtime::ListRuntime for FakeRuntime {
-        fn list(&mut self, _all: bool, _global: bool) -> engine::error::Result<ListResult> {
-            panic!("list should not run in these routing tests");
-        }
-    }
-
-    impl runtime::AgentsRuntime for FakeRuntime {
-        fn agents(
-            &mut self,
-            _operation: AgentsOperation,
-            _global: bool,
-        ) -> engine::error::Result<AgentsResult> {
-            panic!("agents should not run in these routing tests");
-        }
-    }
-
-    impl runtime::RunRuntime for FakeRuntime {
-        fn run_command(
-            &mut self,
-            _command: Vec<String>,
-            _global: bool,
-        ) -> engine::error::Result<RunResult> {
-            panic!("run_command should not run in these routing tests");
-        }
-    }
-
-    impl runtime::TaskRuntime for FakeRuntime {
-        fn task(
-            &mut self,
-            _name: Option<String>,
-            _global: bool,
-        ) -> engine::error::Result<TaskResult> {
-            panic!("task should not run in these routing tests");
-        }
-    }
-
-    impl runtime::ActivateRuntime for FakeRuntime {
-        fn activate(
-            &mut self,
-            _shell: Option<String>,
-            _global: bool,
-        ) -> engine::error::Result<ActivateResult> {
-            panic!("activate should not run in these routing tests");
-        }
-    }
-
-    impl runtime::DoctorRuntime for FakeRuntime {
-        fn doctor(&mut self) -> engine::error::Result<DoctorResult> {
-            Ok(DoctorResult {
-                checks: vec![DoctorCheck {
-                    name: "platform".to_string(),
-                    status: DoctorStatus::Ok,
-                    detail: "detected test".to_string(),
-                }],
-            })
-        }
-    }
-
-    impl runtime::SyncRuntime for FakeRuntime {
-        fn sync(&mut self, _global: bool) -> engine::error::Result<SyncResult> {
-            panic!("sync should not run in these routing tests");
-        }
-    }
-
-    impl runtime::ServicesRuntime for FakeRuntime {
-        fn services(
-            &mut self,
-            _operation: ServicesOperation,
-            _name: Option<String>,
-            _global: bool,
-        ) -> engine::error::Result<ServicesResult> {
-            panic!("services should not run in these routing tests");
-        }
-    }
-
-    impl runtime::TrustRuntime for FakeRuntime {
-        fn trust(&mut self) -> engine::error::Result<TrustResult> {
-            panic!("trust should not run in these routing tests");
-        }
-    }
-
-    impl runtime::UninstallRuntime for FakeRuntime {
-        fn uninstall(
-            &mut self,
-            _target: UninstallTarget,
-            _global: bool,
-        ) -> engine::error::Result<UninstallResult> {
-            panic!("uninstall should not run in these routing tests");
-        }
-    }
-
-    #[cfg(not(feature = "tui"))]
-    #[test]
-    fn no_command_prints_help_without_tui_feature() {
-        let cli = Cli { command: None };
-        let mut runtime = FakeRuntime;
-        let mut output = BufferedOutput::default();
-
-        let code = run_parsed(cli, &mut runtime, &mut output);
-
-        assert_eq!(code, 0);
-        assert!(output.stdout.contains("Usage: Still [COMMAND]"));
-        assert_eq!(output.stderr, "");
-    }
-
-    #[cfg(feature = "tui")]
-    #[test]
-    fn no_command_uses_tui_feature_path() {
-        let cli = Cli { command: None };
-        let mut runtime = FakeRuntime;
-        let mut output = BufferedOutput::default();
-
-        let code = run_parsed_with_no_command(cli, &mut runtime, &mut output, |output| {
-            output.info("opened tui");
-            0
-        });
-
-        assert_eq!(code, 0);
-        assert_eq!(output.stdout, "opened tui\n");
-        assert_eq!(output.stderr, "");
     }
 
     #[test]
-    fn command_delegates_to_cli_runner() {
-        let cli = Cli {
-            command: Some(Command::Doctor(DoctorArgs {})),
-        };
-        let mut runtime = FakeRuntime;
-        let mut output = BufferedOutput::default();
-
-        let code = run_parsed(cli, &mut runtime, &mut output);
-
-        assert_eq!(code, 0);
-        assert_eq!(output.stdout, "[ok] platform: detected test\n");
-        assert_eq!(output.stderr, "");
-    }
-
-    #[cfg(feature = "tui")]
-    #[test]
-    fn tui_launch_error_is_reported() {
-        let mut output = BufferedOutput::default();
+    fn launch_tui_failure_reports_terminal_guidance() {
+        let mut output = TestOutput::default();
 
         let code = launch_tui_or_report(&mut output, || {
-            Err(std::io::Error::other("terminal failed"))
+            Err(std::io::Error::other("terminal unavailable"))
         });
 
         assert_eq!(code, 1);
-        insta::assert_snapshot!(output.stderr, @r###"
-Failed to launch TUI: terminal failed
-
-This may be due to:
-  - Terminal not supporting TUI mode
-  - Terminal size too small
-  - Missing required terminal capabilities
-"###);
+        assert!(output.stderr.contains("Failed to launch TUI"));
+        assert!(output.stderr.contains("Terminal not supporting TUI mode"));
         assert_eq!(output.stdout, "");
     }
 }

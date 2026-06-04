@@ -2,11 +2,12 @@
 
 ## Crate Purpose
 
-`crates/engine` owns Still's core behavior. It should be reusable by the CLI, optional TUI, and future frontends without pulling in presentation concerns.
+`crates/engine` owns Still's core behavior and the `engine::cli` adapter surface. Non-CLI engine modules should remain reusable by the optional TUI and future frontends without pulling in presentation concerns.
 
 ## Responsibilities
 
 - Parse and model tool/package specs.
+- Own the CLI contract, command dispatch, and CLI output formatting under `cli/`.
 - Resolve backend/provider choices.
 - Plan and run installs, uninstalls, linking, cache writes, archive extraction, and downloads.
 - Own filesystem, hashing, networking, path, registry, and platform behavior.
@@ -14,10 +15,10 @@
 
 ## Boundaries
 
-- Do not depend on Clap.
-- Do not print user-facing stdout/stderr from engine actions.
+- Limit Clap usage to `cli/`.
+- Do not print user-facing stdout/stderr from engine actions; CLI formatting belongs in `cli/`.
 - Do not depend on TUI state or terminal APIs.
-- Do not encode CLI command names or help text.
+- Do not encode CLI command names or help text outside `cli/`.
 - Do not introduce hidden global state when a typed request can carry the needed context.
 
 ## Testing

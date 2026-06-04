@@ -2,7 +2,7 @@
 
 ## App Overview
 
-`apps/cli` contains the Rust workspace for the `still` binary. CLI parsing and presentation live in the root package, core behavior lives in `crates/engine`, and the optional TUI lives in `crates/tui`.
+`apps/cli` contains the Rust workspace for the `still` binary. CLI parsing, command dispatch, and presentation live in `crates/engine/cli`, core behavior lives in the rest of `crates/engine`, and the optional TUI lives in `crates/tui`.
 
 Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file focused on implementation guidance for agents.
 
@@ -17,10 +17,11 @@ Public product goals for the CLI belong in `apps/cli/README.md`. Keep this file 
 
 ## Architecture Rules
 
-- Start command spelling/input changes in `src/cli/args.rs`.
-- Put CLI presentation, stdout/stderr formatting, and Clap-specific behavior in `src/cli`.
+- Start command spelling/input changes in `crates/engine/cli/contract.rs`, exposed as `engine::cli::args`.
+- Put CLI presentation, stdout/stderr formatting, and Clap-specific behavior in `crates/engine/cli`.
 - Put real install, resolve, cache, filesystem, backend, and platform behavior in `crates/engine`.
-- Keep `crates/engine` free of Clap, TUI state, and user-facing formatting.
+- Keep non-CLI engine modules free of Clap, TUI state, and user-facing formatting.
+- Keep the root `src/cli` facade responsible for feature-gated TUI launch so `engine` does not depend on `still_tui`.
 - Keep `crates/tui` free of CLI parsing and command dispatch.
 - The default `still` build is CLI-only. With `--features tui`, the same binary includes TUI dependencies and opens the TUI when no subcommand is provided.
 - Do not add a separate `still_tui` binary unless the product direction changes again.

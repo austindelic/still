@@ -8,7 +8,8 @@ use crate::lockfile::lockfile_path;
 use crate::platform::{PlatformId, current_platform};
 use crate::registries::specs::tool::ToolSpec;
 use crate::specs::backend::{
-    default_backend, normalize_auto_backend as normalize_backend_selection,
+    default_backend, infer_item_kind_from_backend,
+    normalize_auto_backend as normalize_backend_selection,
 };
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
@@ -84,6 +85,59 @@ pub struct ToolInstallOptions {
 pub struct InstallRequest {
     /// Parsed and classified items requested by the caller.
     pub items: Vec<InstallItemRequest>,
+}
+
+/// Builds install item requests from grouped and unclassified specs.
+///
+/// Explicit groups keep their caller-selected kind. Unclassified items are
+/// accepted only when their backend implies one item kind unambiguously.
+/// # Errors
+/// Fails when an unclassified spec has no backend or a backend shared by
+/// multiple item kinds.
+pub fn items_from_specs(
+    tools: Vec<ToolSpec>,
+    packages: Vec<ToolSpec>,
+    apps: Vec<ToolSpec>,
+    unclassified: Vec<ToolSpec>,
+) -> Result<Vec<InstallItemRequest>> {
+    let mut items = Vec::new();
+    push_spec_items(&mut items, ItemKind::Tool, tools);
+    push_spec_items(&mut items, ItemKind::Package, packages);
+    push_spec_items(&mut items, ItemKind::App, apps);
+    for spec in unclassified {
+        let kind = infer_spec_item_kind(&spec)?;
+        push_spec_items(&mut items, kind, vec![spec]);
+    }
+    Ok(items)
+}
+
+fn push_spec_items(items: &mut Vec<InstallItemRequest>, kind: ItemKind, specs: Vec<ToolSpec>) {
+    items.extend(specs.into_iter().map(|spec| InstallItemRequest {
+        kind,
+        spec: ItemSpec {
+            name: spec.name,
+            version: spec.version.parse().expect("validated ToolSpec version"),
+            backend: spec.backend,
+        },
+        tool: Default::default(),
+    }));
+}
+
+fn infer_spec_item_kind(spec: &ToolSpec) -> Result<ItemKind> {
+    let Some(backend) = &spec.backend else {
+        return Err(EngineError::message(format!(
+            "cannot infer whether {} is a tool, package, or app; use --tool, --package, or --app",
+            spec.name
+        )));
+    };
+    infer_item_kind_from_backend(backend.as_str()).ok_or_else(|| {
+        EngineError::message(format!(
+            "cannot infer whether {}@{}@{} is a tool, package, or app; use --tool, --package, or --app",
+            spec.name,
+            spec.version,
+            backend
+        ))
+    })
 }
 
 /// Request to install items and record the successful desired state.
@@ -1350,6 +1404,84 @@ mod tests {
     use crate::specs::item::{ItemKind, ItemSpec};
 
     use super::*;
+
+    #[test]
+    fn items_from_specs_preserves_groups_and_infers_unclassified_items() {
+        let items = items_from_specs(
+            vec!["rust@stable@rustup".parse().unwrap()],
+            vec!["openssl@latest@apt-get".parse().unwrap()],
+            vec!["firefox@latest@homebrew-cask".parse().unwrap()],
+            vec![
+                "stringer@latest@go".parse().unwrap(),
+                "zed@latest@cask".parse().unwrap(),
+            ],
+        )
+        .unwrap();
+
+        let actual = items
+            .into_iter()
+            .map(|item| {
+                (
+                    item.kind,
+                    item.spec.name,
+                    item.spec.version.to_string(),
+                    item.spec.backend.map(|backend| backend.to_string()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            [
+                (
+                    ItemKind::Tool,
+                    "rust".to_string(),
+                    "stable".to_string(),
+                    Some("rustup".to_string())
+                ),
+                (
+                    ItemKind::Package,
+                    "openssl".to_string(),
+                    "latest".to_string(),
+                    Some("apt-get".to_string())
+                ),
+                (
+                    ItemKind::App,
+                    "firefox".to_string(),
+                    "latest".to_string(),
+                    Some("homebrew-cask".to_string())
+                ),
+                (
+                    ItemKind::Tool,
+                    "stringer".to_string(),
+                    "latest".to_string(),
+                    Some("go".to_string())
+                ),
+                (
+                    ItemKind::App,
+                    "zed".to_string(),
+                    "latest".to_string(),
+                    Some("cask".to_string())
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn items_from_specs_rejects_ambiguous_unclassified_items() {
+        let err = items_from_specs(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec!["ripgrep@latest@brew".parse().unwrap()],
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "cannot infer whether ripgrep@latest@brew is a tool, package, or app; use --tool, --package, or --app"
+        );
+    }
 
     #[tokio::test]
     async fn install_rejects_empty_requests() {

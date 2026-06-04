@@ -1,63 +1,35 @@
 ---
-title: Still CLI
-description: A config-first project environment manager for tools, packages, apps, env, services, tasks, and agent setup.
-icon: Blocks
+title: Start Here
+description: A friendly map of Still and what the docs cover today.
 ---
 
-Still makes a project directory describe the environment it needs. Commit `still.toml`, run `still sync`, and the same desired state can be resolved on macOS, Linux, and Windows.
+Still is a package and toolchain manager for projects that need more than a language version file. It is built around a simple idea: the things your project depends on should be named in one place, installed predictably, and easy to inspect.
 
-```bash
-still init
-still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
-still run cargo test
-still task lint
-```
+Today, the CLI can install tools from Homebrew formula data, launch the terminal UI, and parse Still-style tool specs such as `ripgrep` and `ripgrep@14.1.1`. The wider v1 shape is already visible in the config schema: tools, packages, apps, environment files, services, and tasks.
 
-## What Still Manages
+These docs describe both parts with clear labels. Current behavior is written as current behavior. Preview pages describe the intended v1 workflow and the config shape that already exists in the repository.
 
-<Cards>
-  <Card title="Tools" icon="Terminal" href="./configuration#tools">
-    Language runtimes, toolchains, and developer CLIs such as Node, Python, Go, Rust, pnpm, jq, and ripgrep.
-  </Card>
-  <Card title="Packages" icon="Package" href="./configuration#packages">
-    System packages, libraries, and command-line packages, resolved through platform-aware backends.
-  </Card>
-  <Card title="Apps" icon="Monitor" href="./configuration#apps">
-    Desktop or platform applications such as Docker Desktop, Zed, Firefox, and Visual Studio Code.
-  </Card>
-  <Card title="Tasks" icon="ListChecks" href="./tasks-and-services#tasks">
-    Named commands and dependency graphs that run inside the Still-managed environment.
-  </Card>
-  <Card title="Services" icon="Server" href="./tasks-and-services#services">
-    Long-running project dependencies that can be inspected, started, stopped, and checked.
-  </Card>
-  <Card title="Agents" icon="Bot" href="./agents">
-    AI-agent instructions, targets, and skills that can be materialized consistently across machines.
-  </Card>
-</Cards>
+## What Still Is For
 
-## The Core Model
+Still is for teams and solo projects that want a repeatable development setup without splitting responsibility across Homebrew, a version manager, shell scripts, and a README full of setup notes.
 
-Still has two durable files:
+Use Still when you want to:
 
-- `still.toml` is desired state. Users edit it directly or let commands such as `still install` update it.
-- `still.lock.toml` records resolved state next to the selected config, including platform, backend, version, outputs, and executable links.
+- install project tools and system packages from a single command line
+- keep runtime versions near the project that needs them
+- describe services and tasks next to the tools they depend on
+- make setup easier to review, cache, and reproduce
 
-Project config wins over global config for the active project. Global config lives at `~/.config/still/config.toml` and is selected explicitly with `--global`, or used by add-style commands when no project config exists.
+## Current Status
 
-## First Places To Read
+Still is early. The command surface is broader than the implemented behavior, so expect a few commands to print their parsed arguments while the engine catches up. The docs call those areas out as preview instead of pretending they are finished.
+
+The current binary in this repository is named `still_s`. The examples use `still` for the intended installed command name.
+
+## Good First Pages
 
 <Cards>
-  <Card title="Getting Started" icon="Rocket" href="./getting-started">
-    Create a config, install dependencies, run commands, and activate the managed environment.
-  </Card>
-  <Card title="Command Reference" icon="SquareTerminal" href="./commands">
-    Learn what each top-level command does and which flags shape config scope.
-  </Card>
-  <Card title="Configuration Reference" icon="FileCog" href="./configuration">
-    See every supported `still.toml` section with TOML examples and rules.
-  </Card>
-  <Card title="Trust And Safety" icon="ShieldCheck" href="./trust-and-safety">
-    Understand when Still reads config, when it executes project-defined behavior, and how trust markers work.
-  </Card>
+  <Card title="Getting Started" href="/docs/getting-started" description="Build the CLI, run the first command, and create a tiny project config." />
+  <Card title="Configuration" href="/docs/configuration" description="Read the shape of `still.toml`: tools, packages, apps, env, tasks, and services." />
+  <Card title="Commands" href="/docs/commands" description="See what each command is meant to do and which parts work today." />
 </Cards>

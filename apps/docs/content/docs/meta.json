@@ -3,12 +3,9 @@
   "pages": [
     "index",
     "getting-started",
-    "commands",
     "configuration",
-    "tasks-and-services",
-    "agents",
-    "platforms-and-backends",
-    "trust-and-safety",
-    "schema"
+    "commands",
+    "tasks-services",
+    "providers"
   ]
 }

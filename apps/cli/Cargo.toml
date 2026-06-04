@@ -19,21 +19,22 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
+clap = { version = "4.5.53", features = ["derive"] }
 dirs = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
 thiserror = "2.0.17"
 tokio = { version = "1.49.0", default-features = false }
+insta = "1.44.1"
 
 [dependencies]
 anyhow = { workspace = true }
-clap = { version = "4.5.53", features = ["derive"] }
 engine = { path = "crates/engine" }
 still_tui = { package = "still-tui", path = "crates/tui", optional = true }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
-insta = "1.44.1"
+clap = { workspace = true }
+insta = { workspace = true }
 
 [features]
 default = []

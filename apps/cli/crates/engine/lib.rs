@@ -4,6 +4,8 @@
 
 /// Install, uninstall, and other state-changing actions.
 pub mod actions;
+/// CLI parsing, command dispatch, and output formatting.
+pub mod cli;
 /// Config discovery and filesystem locations.
 pub mod config;
 /// Desired-state config mutation helpers.
@@ -18,6 +20,8 @@ pub mod planner;
 pub mod platform;
 /// Package registry integrations and re-exports.
 pub mod registries;
+/// Synchronous runtime facade for frontend callers.
+pub mod runtime;
 /// Typed models for external and Still-owned specs.
 pub mod specs;
 /// Platform abstraction for host-specific behavior.

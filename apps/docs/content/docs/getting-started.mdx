@@ -1,115 +1,64 @@
 ---
 title: Getting Started
-description: Initialize Still, install dependencies, run commands, and understand the default workflow.
-icon: Rocket
+description: Build Still locally and try the first project workflow.
 ---
 
-Still starts from `still.toml`. The file describes the project environment; commands reconcile the machine to that desired state.
+Still is easiest to understand from a small project. This page uses the repository build because the CLI is under active development.
 
-## Initialize A Project
+## Build The CLI
 
-```bash
-still init
-```
-
-`still init` creates a starter `still.toml` in the current project and writes a matching project trust marker. Use `--force` only when replacing an existing config is intentional.
+From the CLI workspace:
 
 ```bash
-still init --force
+cd apps/cli
+cargo build
 ```
 
-Still finds project config by walking upward from the current directory until it finds the nearest `still.toml`.
-
-## Add Dependencies
-
-Use explicit groups so Still knows whether each item is a tool, package, or app.
+Run the help output through the current binary name:
 
 ```bash
-still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
+cargo run --bin still_s -- --help
 ```
 
-Short flags are available:
+When Still is installed as a user-facing command, the examples in these docs use `still`.
+
+## Install A Tool
+
+The `install` command accepts a tool name with an optional version. If no version is provided, Still treats it as `latest`.
 
 ```bash
-still install -t rust@stable@rustup -p ripgrep@latest@homebrew -a firefox@latest@homebrew-cask
+still install ripgrep
+still install jq@latest
 ```
 
-Request syntax:
+Current behavior installs through the Homebrew formula path in the engine. Still downloads and extracts the matching bottle, then reports the install location and binary path when it can find one.
 
-| Syntax | Meaning |
-| --- | --- |
-| `name` | Install `name@latest` with backend selection set to `auto`. |
-| `name@version` | Pin the requested version. |
-| `name@version@backend` | Pin the version and backend. |
-| `name@latest@backend` | Track latest from a selected backend. |
+## Create A Project File
 
-Install writes config only after all requested installs succeed. If one item fails, Still reports the failed item and leaves config unchanged.
-
-## Sync Existing Config
-
-```bash
-still sync
-```
-
-`sync` reads the selected config, resolves active desired state for the current platform, refreshes `still.lock.toml`, installs missing items, and reports drift.
-
-Use the global config explicitly when needed:
-
-```bash
-still sync --global
-```
-
-## Run Inside The Environment
-
-```bash
-still run cargo test
-still run -- node scripts/dev.mjs --port 5173
-```
-
-`run` prepares Still-managed `PATH` and environment variables, then returns the child command's exit code.
-
-## Use Tasks
-
-Tasks live in `[tasks]`.
+A project config lives in `still.toml`. Start small:
 
 ```toml
-[tasks]
-test = "cargo test"
+[tools]
+node = "22"
+python = "3.12"
 
-[tasks.lint]
-description = "Run lint checks"
-run = [
-  "cargo fmt --check",
-  "cargo clippy --all-targets --all-features",
-]
+[packages]
+latest = ["ripgrep", "fd", "jq"]
+
+[env]
+NODE_ENV = "development"
+files = [".env", ".env.local"]
 ```
 
-Run a task:
+This says what the project needs without forcing every contributor to read a setup script first. The config format already supports more sections than the engine executes today, so the next pages mark preview behavior where it matters.
+
+## Open The TUI
+
+Run Still with no subcommand, or use `tui`, to open the terminal interface.
 
 ```bash
-still task lint
+still
+still tui
 ```
 
-List tasks by omitting the name:
-
-```bash
-still task
-```
-
-## Activate A Shell
-
-```bash
-still activate --shell zsh
-```
-
-`activate` prints shell-specific activation code. The generated environment includes Still-managed binary paths and resolved variables from config.
-
-## Check Health
-
-```bash
-still config check
-still doctor
-still list --all
-```
-
-`config check` validates the selected config. `doctor` checks machine, cache, config, lockfile, trust, permission, and platform health. `list --all` includes inactive global/project entries and known installed items.
+The TUI can browse formula data and shows the direction of the interactive workflow. Some actions in the TUI are still wired as placeholders while the engine work continues.
