@@ -1,25 +1,30 @@
 //! Engine install action for resolving, downloading, verifying, extracting, and linking packages.
 
+use crate::config::edit::add_install_items_with_force;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::config_edit::add_install_items_with_force;
 use crate::error::EngineError;
 use crate::error::{EngineContext, Result};
+use crate::infra::archive::ArchiveExtractor;
+use crate::infra::hashing::Hashing;
+use crate::infra::link::SymlinkOps;
+use crate::infra::net::NetUtils;
+use crate::infra::paths::PathOps;
+use crate::install::layout::{
+    native_receipt_path, native_receipt_root, tool_backup_path, tool_install_path,
+    tool_staging_path,
+};
+use crate::install::rollback::{promote_staged_install, rollback_promoted_install};
+use crate::inventory::marker::write_install_marker;
 use crate::lockfile::lockfile_path;
+use crate::platform::System;
 use crate::platform::{PlatformId, current_platform};
-use crate::registries::specs::tool::ToolSpec;
-use crate::specs::backend::{
+use crate::resolve::registries::specs::tool::ToolSpec;
+use crate::resolve::{
     default_backend, infer_item_kind_from_backend,
     normalize_auto_backend as normalize_backend_selection,
 };
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
 use crate::specs::item::{ItemKind, ItemSpec};
-use crate::system::System;
-use crate::utils::archive::ArchiveExtractor;
-use crate::utils::hashing::Hashing;
-use crate::utils::link::SymlinkOps;
-use crate::utils::net::NetUtils;
-use crate::utils::paths::PathOps;
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -505,7 +510,9 @@ async fn install_one(item: &InstallItemRequest) -> Result<InstallResult> {
         .collect::<Vec<_>>();
     write_install_marker(
         &install_path,
-        item,
+        item.kind,
+        &item.spec.name,
+        item.spec.version.as_str(),
         "homebrew",
         &[install_path.clone()],
         &linked_executables,
@@ -585,7 +592,9 @@ async fn install_tool_with_command_staged(
     };
     if let Err(err) = write_install_marker(
         install_path,
-        item,
+        item.kind,
+        &item.spec.name,
+        item.spec.version.as_str(),
         &command.backend,
         &[install_path.to_path_buf()],
         &linked_executables,
@@ -609,50 +618,6 @@ async fn install_tool_with_command_staged(
         linked_executables,
         installed: Vec::new(),
     })
-}
-
-async fn promote_staged_install(
-    staging_path: &Path,
-    install_path: &Path,
-    backup_path: &Path,
-) -> Result<bool> {
-    remove_path_if_exists(backup_path).await?;
-    if let Some(parent) = install_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
-    let had_previous = install_path.exists();
-    if had_previous {
-        tokio::fs::rename(install_path, backup_path)
-            .await
-            .with_context(|| format!("failed to back up {}", install_path.display()))?;
-    }
-
-    if let Err(err) = tokio::fs::rename(staging_path, install_path).await {
-        if had_previous {
-            let _ = tokio::fs::rename(backup_path, install_path).await;
-        }
-        return Err(err)
-            .with_context(|| format!("failed to promote install to {}", install_path.display()));
-    }
-
-    Ok(had_previous)
-}
-
-async fn rollback_promoted_install(
-    install_path: &Path,
-    backup_path: &Path,
-    had_previous: bool,
-) -> Result<()> {
-    remove_path_if_exists(install_path).await?;
-    if had_previous {
-        tokio::fs::rename(backup_path, install_path)
-            .await
-            .with_context(|| format!("failed to restore {}", install_path.display()))?;
-    } else {
-        remove_path_if_exists(backup_path).await?;
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -867,24 +832,6 @@ fn tool_install_command_for_backend(
     }
 }
 
-fn tool_install_path(item: &InstallItemRequest) -> PathBuf {
-    System::tool_dir()
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str())
-}
-
-fn tool_staging_path(item: &InstallItemRequest) -> PathBuf {
-    System::tool_dir()
-        .join(&item.spec.name)
-        .join(format!(".{}.staging", item.spec.version.as_str()))
-}
-
-fn tool_backup_path(item: &InstallItemRequest) -> PathBuf {
-    System::tool_dir()
-        .join(&item.spec.name)
-        .join(format!(".{}.previous", item.spec.version.as_str()))
-}
-
 fn rustup_extra_steps(version: &str, options: &ToolInstallOptions) -> Vec<ToolInstallStep> {
     let mut steps = Vec::new();
     if !options.components.is_empty() {
@@ -971,7 +918,9 @@ async fn install_package(item: &InstallItemRequest) -> Result<InstallResult> {
     let install_path = native_receipt_path(item);
     write_install_marker(
         &install_path,
-        item,
+        item.kind,
+        &item.spec.name,
+        item.spec.version.as_str(),
         &command.backend,
         &[install_path.clone()],
         &[],
@@ -1033,7 +982,9 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
     let install_path = app_install_path(item);
     write_install_marker(
         &install_path,
-        item,
+        item.kind,
+        &item.spec.name,
+        item.spec.version.as_str(),
         &command.backend,
         &[install_path.clone()],
         &[],
@@ -1053,21 +1004,6 @@ async fn install_app(item: &InstallItemRequest) -> Result<InstallResult> {
 
 fn app_install_path(item: &InstallItemRequest) -> PathBuf {
     native_receipt_path(item)
-}
-
-fn native_receipt_path(item: &InstallItemRequest) -> PathBuf {
-    native_receipt_root(item.kind)
-        .join(&item.spec.name)
-        .join(item.spec.version.as_str())
-}
-
-fn native_receipt_root(kind: ItemKind) -> PathBuf {
-    let folder = match kind {
-        ItemKind::Tool => "tools",
-        ItemKind::Package => "packages",
-        ItemKind::App => "apps",
-    };
-    System::root_dir().join("receipts").join(folder)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1152,50 +1088,6 @@ fn install_backend(kind: ItemKind, backend: Option<&str>, platform: PlatformId) 
     });
     normalize_backend_selection(kind, backend, platform)
         .unwrap_or_else(|| default_backend(kind, platform).to_string())
-}
-
-async fn write_install_marker(
-    install_path: &Path,
-    item: &InstallItemRequest,
-    backend: &str,
-    outputs: &[PathBuf],
-    linked_executables: &[PathBuf],
-) -> Result<()> {
-    tokio::fs::create_dir_all(install_path).await?;
-    let marker_path = install_path.join("install.toml");
-    let output_paths = paths_to_strings(outputs);
-    let linked_paths = paths_to_strings(linked_executables);
-    let install_path = install_path.display().to_string();
-    let marker = InstallMarker {
-        kind: item.kind.to_string(),
-        name: item.spec.name.as_str(),
-        version: item.spec.version.as_str(),
-        backend,
-        install_path: &install_path,
-        outputs: &output_paths,
-        linked_executables: &linked_paths,
-    };
-    let content = toml_edit::ser::to_string(&marker)?;
-    tokio::fs::write(marker_path, content).await?;
-    Ok(())
-}
-
-#[derive(Debug, Serialize)]
-struct InstallMarker<'a> {
-    kind: String,
-    name: &'a str,
-    version: &'a str,
-    backend: &'a str,
-    install_path: &'a str,
-    outputs: &'a [String],
-    linked_executables: &'a [String],
-}
-
-fn paths_to_strings(paths: &[PathBuf]) -> Vec<String> {
-    paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect()
 }
 
 /* ----------------------------- small helpers ----------------------------- */
@@ -2220,7 +2112,9 @@ mod tests {
 
         write_install_marker(
             &install_path,
-            &item,
+            item.kind,
+            &item.spec.name,
+            item.spec.version.as_str(),
             "homebrew",
             std::slice::from_ref(&install_path),
             &[temp.path().join("bin/rg")],

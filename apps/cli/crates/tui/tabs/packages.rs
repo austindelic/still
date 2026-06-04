@@ -1,8 +1,8 @@
 //! Package browser backed by cached Still registry metadata.
 
-use engine::registries::specs::brew::{CaskSpec, FormulaSpec};
-use engine::system::System;
-use engine::utils::paths::PathOps;
+use engine::infra::paths::PathOps;
+use engine::platform::System;
+use engine::resolve::registries::specs::brew::{CaskSpec, FormulaSpec};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{

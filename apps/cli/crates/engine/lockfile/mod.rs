@@ -6,15 +6,15 @@ use crate::error::{EngineError, Result};
 use serde::Deserialize;
 
 use crate::actions::sync::SyncItem;
+use crate::infra::hashing::Hashing;
+use crate::infra::paths::PathOps;
+use crate::platform::System;
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::agents::{
     NormalizedSkill, NormalizedSkillSource, managed_skill_dir_name, normalize_agents,
 };
 use crate::specs::item::{BackendId, ItemKind};
 use crate::specs::toml::StillConfig;
-use crate::system::System;
-use crate::utils::hashing::Hashing;
-use crate::utils::paths::PathOps;
 
 /// Project lockfile name written next to `still.toml`.
 pub const LOCKFILE_NAME: &str = "still.lock.toml";

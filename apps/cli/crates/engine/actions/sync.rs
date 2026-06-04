@@ -7,13 +7,13 @@ use crate::error::{EngineContext, Result};
 use crate::actions::install::{InstallItemRequest, InstallRequest, ToolInstallOptions};
 use crate::config::{ConfigScope, ConfigSelection, global_config_path, resolve_config_path};
 use crate::error::EngineError;
+use crate::infra::paths::PathOps;
 use crate::lockfile::{lockfile_path, render_merged_lockfile_for_config};
+use crate::platform::System;
 use crate::platform::{PlatformFilter, PlatformId, current_platform};
-use crate::specs::backend::{default_backend, normalize_auto_backend};
+use crate::resolve::{default_backend, normalize_auto_backend};
 use crate::specs::item::{ItemKind, ItemSpec};
 use crate::specs::toml::{PackageEntry, PackageMap, StillConfig, ToolEntry, parse_still_toml};
-use crate::system::System;
-use crate::utils::paths::PathOps;
 
 /// Request to synchronize installed state with config.
 #[derive(Debug, Clone)]
@@ -708,13 +708,13 @@ mod tests {
             item.kind == ItemKind::Package
                 && item.spec.name == "openssl"
                 && item.spec.backend.as_ref().unwrap().as_str()
-                    == crate::specs::backend::default_backend(ItemKind::Package, current_platform())
+                    == crate::resolve::default_backend(ItemKind::Package, current_platform())
         }));
         assert!(result.items.iter().any(|item| {
             item.kind == ItemKind::App
                 && item.spec.name == "firefox"
                 && item.spec.backend.as_ref().unwrap().as_str()
-                    == crate::specs::backend::default_backend(ItemKind::App, current_platform())
+                    == crate::resolve::default_backend(ItemKind::App, current_platform())
         }));
     }
 

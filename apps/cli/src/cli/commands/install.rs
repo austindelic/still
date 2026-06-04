@@ -1,10 +1,8 @@
 use engine::{
     actions::install::{InstallItemRequest, InstallRequest, InstallResult, ToolInstallOptions},
     error::{EngineError, Result},
-    specs::{
-        backend::infer_item_kind_from_backend,
-        item::{ItemKind, ItemSpec},
-    },
+    resolve::infer_item_kind_from_backend,
+    specs::item::{ItemKind, ItemSpec},
 };
 
 use crate::cli::{

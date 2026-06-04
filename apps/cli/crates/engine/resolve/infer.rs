@@ -1,4 +1,4 @@
-//! Backend defaulting rules shared by planners and presentation actions.
+//! Source defaulting rules shared by planners and presentation actions.
 
 use crate::platform::PlatformId;
 use crate::specs::item::ItemKind;

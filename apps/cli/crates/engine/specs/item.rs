@@ -5,10 +5,10 @@ use std::{fmt, str::FromStr};
 use crate::error::Result;
 
 use crate::error::EngineError;
-use crate::specs::source::{SourceId, SourceIntent};
+use crate::resolve::source::{SourceId, SourceIntent};
 
 /// User-facing role an item plays in a Still project.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ItemKind {
     Tool,
     Package,

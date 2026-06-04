@@ -222,25 +222,27 @@ internals.
 
 ## Target Engine Modules
 
-The engine can grow into these modules as implementation demands it:
+The engine crate is organized around these modules:
 
-- `config`: project/global discovery, TOML parsing, validation, source tracking,
-  and mutation/preservation rules.
-- `desired`: normalized desired-state graph for tools, packages, apps, env,
-  services, tasks, and agents.
-- `platform`: platform identifiers, host selection, platform filters, names,
-  paths, links, app registration, services, shell activation, and permissions.
-- `sources`: source registry, feature-gated source wiring, source capabilities,
-  and source selection.
-- `resolver`: item kind inference, source selection, version resolution,
-  metadata lookup, platform name normalization, and locked artifact selection.
-- `inventory`: installed-state discovery, receipts, cache indexes, drift
-  detection, and source attribution for `list` and `doctor`.
-- `planner`: side-effect-free plans for command actions.
-- `executor`: plan execution through source/platform traits, progress events,
-  rollback hooks where practical, and structured operation results.
+- `actions`: thin public use-case entrypoints that compose the core modules.
+- `api`: frontend-facing request/result/progress DTO re-exports.
+- `config`: project/global discovery, TOML parsing, validation, source aliases,
+  mutation, and store helpers.
+- `desired`: normalized desired state for tools, packages, apps, env, services,
+  tasks, and agents.
+- `resolve`: item kind inference, source intent, compiled source registry,
+  source selection, version resolution, and platform name normalization.
+- `planning`: side-effect-free plans for install, sync, and uninstall.
+- `install`: install orchestration, executor boundaries, layout paths, staging,
+  rollback, and receipt helpers.
+- `inventory`: installed-state discovery and Still install markers.
 - `lockfile`: resolved source, platform, version, artifact identity, checksum,
   outputs, links, service metadata, and agent skill source/version data.
+- `platform`: platform identifiers, host detection, `cfg(target_os)` system
+  adapters, platform filters, paths, links, app registration, services, shell
+  activation, and permissions.
+- `infra`: filesystem, network, process, archive, hashing, link, and path
+  traits/adapters used by engine behavior.
 - `trust`: trust storage, scope checks, and policy for env files, tasks,
   services, project commands, source scripts, and external agent skills.
 

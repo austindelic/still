@@ -9,9 +9,9 @@ use crate::actions::install::{
     backend_versioned_name, unsupported_app_backend, unsupported_package_backend,
 };
 use crate::error::EngineError;
+use crate::infra::link::SymlinkOps;
+use crate::infra::paths::PathOps;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
-use crate::utils::link::SymlinkOps;
-use crate::utils::paths::PathOps;
 
 /// Windows host marker used to select platform-specific engine implementations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::actions::install::{InstallItemRequest, InstallRequest};
 use crate::actions::sync::refresh_active_lockfile;
+use crate::config::edit::add_install_items;
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::config_edit::add_install_items;
 use crate::error::EngineError;
 use crate::lockfile::lockfile_path;
 use crate::specs::agents::{

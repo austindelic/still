@@ -20,7 +20,7 @@ Before non-trivial engine changes, read:
 - Resolve source choices.
 - Plan and run installs, uninstalls, linking, cache writes, archive extraction,
   downloads, lockfile writes, inventory reads, and trust checks.
-- Own filesystem, hashing, networking, path, registry, platform, and source
+- Own filesystem, hashing, networking, path, source registry, platform, and source
   orchestration behavior.
 - Return typed requests, results, diagnostics, progress events, and errors that
   callers can format.
@@ -46,6 +46,8 @@ Before non-trivial engine changes, read:
 - Explicit source selection must not silently fall back to another source.
 - Missing source or `auto` should use ordered, compiled-in, OS-compatible source
   candidates.
+- Source crate optional dependencies and source feature wiring belong in
+  `crates/engine`; the root binary forwards feature flags only.
 - Shared installer machinery belongs in `crates/source-kit`; source-specific
   behavior belongs in `crates/sources/*`.
 

@@ -7,15 +7,15 @@ use crate::error::{EngineContext, Result};
 use serde::Deserialize;
 
 use crate::actions::sync::refresh_active_lockfile;
+use crate::config::edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::config::{ConfigScope, ConfigSelection, resolve_config_path};
-use crate::config_edit::{RemoveItemTarget, remove_item, remove_item_target};
 use crate::error::EngineError;
+use crate::infra::paths::PathOps;
 use crate::lockfile::lockfile_path;
+use crate::platform::System;
 use crate::platform::{PlatformId, current_platform};
 use crate::specs::item::{BackendId, ItemKind};
 use crate::specs::toml::{PackageEntry, PackageMap, parse_still_toml};
-use crate::system::System;
-use crate::utils::paths::PathOps;
 
 /// Request to remove one configured item.
 #[derive(Debug, Clone)]

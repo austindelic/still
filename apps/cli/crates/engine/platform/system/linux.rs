@@ -10,9 +10,9 @@ use crate::actions::install::{
     unsupported_package_backend,
 };
 use crate::error::EngineError;
+use crate::infra::link::SymlinkOps;
+use crate::infra::paths::PathOps;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
-use crate::utils::link::SymlinkOps;
-use crate::utils::paths::PathOps;
 
 /// Linux host marker used to select platform-specific engine implementations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

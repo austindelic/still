@@ -55,18 +55,6 @@ dirs = { workspace = true }
 engine = { path = "crates/engine" }
 indicatif = { workspace = true }
 miette = { workspace = true }
-still_source_aqua = { package = "still-source-aqua", path = "crates/sources/aqua", optional = true }
-still_source_apt = { package = "still-source-apt", path = "crates/sources/apt", optional = true }
-still_source_cargo = { package = "still-source-cargo", path = "crates/sources/cargo", optional = true }
-still_source_dnf = { package = "still-source-dnf", path = "crates/sources/dnf", optional = true }
-still_source_flatpak = { package = "still-source-flatpak", path = "crates/sources/flatpak", optional = true }
-still_source_go = { package = "still-source-go", path = "crates/sources/go", optional = true }
-still_source_homebrew = { package = "still-source-homebrew", path = "crates/sources/homebrew", optional = true }
-still_source_kit = { package = "still-source-kit", path = "crates/source-kit", optional = true }
-still_source_npm = { package = "still-source-npm", path = "crates/sources/npm", optional = true }
-still_source_pacman = { package = "still-source-pacman", path = "crates/sources/pacman", optional = true }
-still_source_pipx = { package = "still-source-pipx", path = "crates/sources/pipx", optional = true }
-still_source_winget = { package = "still-source-winget", path = "crates/sources/winget", optional = true }
 still_tui = { package = "still-tui", path = "crates/tui", optional = true }
 tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread"] }
 
@@ -76,18 +64,18 @@ insta = { workspace = true }
 
 [features]
 default = []
-source-aqua = ["dep:still_source_aqua"]
-source-apt = ["dep:still_source_apt"]
-source-cargo = ["dep:still_source_cargo"]
-source-dnf = ["dep:still_source_dnf"]
-source-flatpak = ["dep:still_source_flatpak"]
-source-go = ["dep:still_source_go"]
-source-homebrew = ["dep:still_source_homebrew"]
-source-kit = ["dep:still_source_kit"]
-source-npm = ["dep:still_source_npm"]
-source-pacman = ["dep:still_source_pacman"]
-source-pipx = ["dep:still_source_pipx"]
-source-winget = ["dep:still_source_winget"]
+source-aqua = ["engine/source-aqua"]
+source-apt = ["engine/source-apt"]
+source-cargo = ["engine/source-cargo"]
+source-dnf = ["engine/source-dnf"]
+source-flatpak = ["engine/source-flatpak"]
+source-go = ["engine/source-go"]
+source-homebrew = ["engine/source-homebrew"]
+source-kit = ["engine/source-kit"]
+source-npm = ["engine/source-npm"]
+source-pacman = ["engine/source-pacman"]
+source-pipx = ["engine/source-pipx"]
+source-winget = ["engine/source-winget"]
 sources = [
   "source-aqua",
   "source-apt",

@@ -6,7 +6,7 @@ use crate::error::{EngineContext, Result};
 use serde::Deserialize;
 
 use crate::error::EngineError;
-use crate::utils::hashing::Hashing;
+use crate::infra::hashing::Hashing;
 
 /// Trust marker file written under the project-local `.still` directory.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

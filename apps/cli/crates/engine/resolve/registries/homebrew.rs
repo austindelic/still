@@ -4,9 +4,9 @@ use std::{fs, path::Path};
 
 use crate::{
     error::{EngineError, EngineResult},
+    infra::paths::PathOps,
+    platform::System,
     specs::brew::{CaskSpec, FormulaSpec},
-    system::System,
-    utils::paths::PathOps,
 };
 
 /// Source kind for cached Homebrew package metadata.

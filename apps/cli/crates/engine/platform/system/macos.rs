@@ -9,9 +9,9 @@ use crate::actions::install::{
     AppInstallCommand, InstallOps, PackageInstallCommand, backend_versioned_name,
     reject_pinned_app_version, unsupported_app_backend, unsupported_package_backend,
 };
+use crate::infra::link::SymlinkOps;
+use crate::infra::paths::PathOps;
 use crate::specs::brew::{BottleFileSpec, BottleSpec};
-use crate::utils::link::SymlinkOps;
-use crate::utils::paths::PathOps;
 
 /// macOS host marker used to select platform-specific engine implementations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
