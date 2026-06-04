@@ -1,3 +1,4 @@
+import { fixupPluginRules } from "@eslint/compat";
 import js from "@eslint/js";
 import { globalIgnores } from "eslint/config";
 import eslintConfigPrettier from "eslint-config-prettier";
@@ -7,6 +8,8 @@ import pluginReact from "eslint-plugin-react";
 import globals from "globals";
 import pluginNext from "@next/eslint-plugin-next";
 import { config as baseConfig } from "./base.js";
+
+const reactPlugin = fixupPluginRules(pluginReact);
 
 /**
  * A custom ESLint configuration for libraries that use Next.js.
@@ -26,12 +29,17 @@ export const nextJsConfig = [
     "next-env.d.ts",
   ]),
   {
-    ...pluginReact.configs.flat.recommended,
+    plugins: {
+      react: reactPlugin,
+    },
     languageOptions: {
       ...pluginReact.configs.flat.recommended.languageOptions,
       globals: {
         ...globals.serviceworker,
       },
+    },
+    rules: {
+      ...pluginReact.configs.flat.recommended.rules,
     },
   },
   {
