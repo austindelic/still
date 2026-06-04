@@ -1,0 +1,81 @@
+---
+title: Configuration
+description: The shape of `still.toml`, with current and preview sections called out.
+---
+
+`still.toml` is the project file. It names the tools, packages, apps, services, tasks, and environment values a project expects.
+
+The schema lives in `apps/cli/examples/still.schema.json`, and the longer example lives in `apps/cli/examples/still.toml`.
+
+## Tools
+
+Tools are language runtimes or command-line tools that belong to the project environment.
+
+```toml
+[tools]
+node = "22"
+python = "3.12"
+go = "latest"
+
+[tools.rust]
+version = "stable"
+backend = "rustup"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+```
+
+Short form is enough when Still can infer the backend. Expanded form gives the backend and any tool-specific options.
+
+Status: preview. The parser and schema describe the shape, while full environment activation is v1 work.
+
+## Packages And Apps
+
+Packages are system-level command-line dependencies. Apps are desktop-style applications.
+
+```toml
+[packages]
+latest = ["pandoc", "ripgrep", "fd", "jq"]
+postgresql = { version = "16", backend = "auto" }
+
+[apps]
+latest = ["docker-desktop", "zed", "firefox"]
+```
+
+You can also give platform-specific names when ecosystems disagree.
+
+```toml
+[packages.fd.names]
+macos = "fd"
+linux = "fd-find"
+windows = "fd"
+```
+
+Status: package install is the most developed path today. Apps and cross-platform selection are preview.
+
+## Environment
+
+Environment values can be written directly or loaded from files.
+
+```toml
+[env]
+RUST_LOG = "debug"
+NODE_ENV = "development"
+files = [".env", ".env.local"]
+```
+
+Status: preview. The schema is present; shell activation is still part of the v1 command work.
+
+## Platform Filters
+
+Packages and apps can limit where they apply.
+
+```toml
+[packages.watchman]
+version = "latest"
+platforms = ["macos", "linux"]
+ignore = "windows"
+```
+
+Use these fields when a dependency is useful on one platform and noisy or unavailable on another.
+
+Status: preview.

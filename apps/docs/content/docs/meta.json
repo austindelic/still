@@ -1,0 +1,11 @@
+{
+  "title": "Still",
+  "pages": [
+    "index",
+    "getting-started",
+    "configuration",
+    "commands",
+    "tasks-services",
+    "providers"
+  ]
+}

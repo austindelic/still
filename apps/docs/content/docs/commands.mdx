@@ -1,0 +1,62 @@
+---
+title: Commands
+description: The Still command surface, with implementation status for each command.
+---
+
+The CLI binary in this repository is `still_s`. These examples use `still`, the intended installed command name.
+
+## Current Commands
+
+`install` installs a package or tool spec. A version is optional.
+
+```bash
+still install ripgrep
+still install ripgrep@latest
+```
+
+`tui` opens the terminal interface. Running `still` with no subcommand also launches the TUI.
+
+```bash
+still tui
+```
+
+## Preview Commands
+
+These commands are present in the CLI parser and describe the intended v1 workflow. Some currently print parsed arguments while engine behavior is still being built.
+
+```bash
+still uninstall ripgrep
+still use --tool node
+still run cargo test
+still doctor
+still init
+still sync
+still activate
+still env
+still translate
+still convert
+```
+
+The goal is for `init` to create a project config, `sync` to bring the machine in line with that config, `activate` to prepare the shell, and `run` to execute commands inside the managed environment.
+
+## Tool Specs
+
+`install` and `uninstall` accept a tool spec:
+
+```text
+name
+name@latest
+name@1.2.3
+```
+
+Names must start with a letter and can contain letters, numbers, underscores, and hyphens. Versions are either `latest` or valid semantic versions.
+
+Examples:
+
+```bash
+still install bun@1.3.5
+still install bandwhich
+still install jq@latest
+```
+
+If you leave off the version, Still uses `latest`.
