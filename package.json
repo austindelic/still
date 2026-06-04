@@ -6,9 +6,11 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "test": "cargo test --manifest-path apps/cli/Cargo.toml",
     "check": "turbo run check"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "prettier": "^3.7.4",
     "turbo": "^2.7.2",
     "typescript": "5.9.2"
