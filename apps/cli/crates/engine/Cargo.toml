@@ -8,7 +8,7 @@ rust-version.workspace = true
 path = "lib.rs"
 
 [dependencies]
-tokio = { workspace = true, features = ["fs", "rt"] }
+tokio = { workspace = true, features = ["fs"] }
 flate2 = "1.1.5"
 tar = "0.4.44"
 serde = { workspace = true }

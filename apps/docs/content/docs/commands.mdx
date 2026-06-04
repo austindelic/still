@@ -1,0 +1,129 @@
+---
+title: Commands
+description: The Still command catalog, scopes, flags, and expected command behavior.
+icon: SquareTerminal
+---
+
+The CLI contract is config-first: commands either create, inspect, reconcile, or execute against desired state from `still.toml`.
+
+## Command Catalog
+
+| Command | Purpose |
+| --- | --- |
+| `still init` | Create a starter `still.toml`, infer project defaults, and trust the newly created config. |
+| `still trust` | Mark project-defined executable behavior as trusted after review. |
+| `still install` | Install requested tools, packages, or apps immediately and add successful requests to config. |
+| `still sync` | Resolve config, refresh the lockfile, install missing items, and report drift. |
+| `still list` | Show active tools, packages, and apps and where each version came from. |
+| `still list --all` | Include inactive global/project entries and known installed items. |
+| `still uninstall` | Remove an item from desired state, remove Still-managed artifacts and links, and refresh the lockfile. |
+| `still run` | Run a child command with Still-managed `PATH` and environment. |
+| `still task` | Run or list tasks defined in config. |
+| `still services` | Inspect, start, stop, or check configured services. |
+| `still agents` | Inspect, sync, or validate agent instructions and skills. |
+| `still config check` | Validate selected config through the typed TOML parser and engine validators. |
+| `still doctor` | Diagnose machine, cache, config, permissions, lockfile, trust, and platform health. |
+| `still env` | Print resolved environment variables and env file information. |
+| `still activate` | Print shell-specific activation code. |
+
+## Config Scope
+
+Most desired-state commands accept `--global` or `-g` when global config should be used instead of project config.
+
+```bash
+still install --global --tool bun
+still list --global
+still config --global check
+```
+
+Rules:
+
+- Project config is the nearest `still.toml` found by walking upward.
+- Global config lives at `~/.config/still/config.toml`.
+- Project config overrides global config for active project state.
+- `list --all` still shows global-only entries.
+- `install` and `uninstall` refresh the lockfile next to the selected config.
+
+## Install
+
+```bash
+still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
+```
+
+Group flags classify following values. Use `--tool` / `-t`, `--package` / `-p`, and `--app` / `-a`.
+
+```bash
+still install -t rust@stable@rustup -p ripgrep@1@homebrew -a firefox@latest@homebrew-cask
+```
+
+Unclassified positional installs are accepted only when Still can infer the type from an obvious type-specific backend. Ambiguous requests fail with guidance to use an explicit group flag.
+
+Use `--force` when an existing config entry needs to change version or backend.
+
+```bash
+still install --force --tool node@22
+```
+
+## Uninstall
+
+```bash
+still uninstall --tool rust
+still uninstall --package llvm
+still uninstall --app firefox
+```
+
+An unclassified positional item asks Still to infer the configured kind from desired state.
+
+```bash
+still uninstall ripgrep
+```
+
+Supplying a version makes the target exact:
+
+```bash
+still uninstall --tool rust@stable@rustup
+```
+
+## Run
+
+```bash
+still run cargo test
+still run -- bash -lc "echo $RUST_LOG"
+```
+
+`run` preserves argument ordering and avoids shell expansion unless the child command itself is a shell.
+
+## Services
+
+```bash
+still services
+still services status
+still services status docker
+still services start docker
+still services stop docker
+still services check docker
+```
+
+Omitting the service name applies the operation to configured services.
+
+## Agents
+
+```bash
+still agents
+still agents list
+still agents check
+still agents sync
+still agents sync --accept-auto-deps
+```
+
+`agents check` reports missing skill dependencies and pending auto dependencies without writing. `agents sync` materializes managed skills; auto dependencies are written only when `--accept-auto-deps` is present.
+
+## Activation And Diagnostics
+
+```bash
+still activate --shell zsh
+still env
+still doctor
+```
+
+`activate` prints code for the target shell. `env` prints resolved values. `doctor` reports actionable health checks and usually points at the command that fixes the issue.

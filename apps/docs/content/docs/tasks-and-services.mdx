@@ -1,0 +1,113 @@
+---
+title: Tasks And Services
+description: Define repeatable commands, task graphs, and long-running project dependencies.
+icon: ListChecks
+---
+
+Tasks and services are executable project behavior, so they are trust-sensitive. Review `still.toml`, then run `still trust` before executing them in a project.
+
+## Tasks
+
+A string task is shorthand for `{ run = "<command>" }`.
+
+```toml
+[tasks]
+test = "cargo test"
+fmt = "cargo fmt"
+dev = "cargo run"
+```
+
+Expanded tasks must include `run`.
+
+```toml
+[tasks.lint]
+description = "Run lint checks"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --all-features",
+]
+```
+
+`run` can be a string or a list of strings. List-form tasks stop on the first failing command and return that status.
+
+## Task Graphs
+
+Use `depends` for tasks that must run before the current task. Use `requires` for services that must be configured before the task can run.
+
+```toml
+[tasks.ci]
+description = "Run full CI"
+depends = ["lint", "test"]
+run = "echo CI passed"
+
+[tasks.dev-server]
+description = "Run development server"
+requires = ["docker"]
+run = "cargo run"
+```
+
+Dependency tasks run at most once per invocation, even when multiple graph paths require the same task.
+
+```bash
+still task ci
+```
+
+With no name, Still lists available tasks:
+
+```bash
+still task
+```
+
+## Services
+
+Services are long-running dependencies needed while the project is active. They can be started explicitly or referenced by tasks.
+
+A string service is shorthand for a start command.
+
+```toml
+[services]
+docker-compose = "docker compose up"
+```
+
+A service can reference a task:
+
+```toml
+[services]
+dev-server = { task = "dev-server" }
+```
+
+Expanded services can define `preset`, `start`, `stop`, and `check`.
+
+```toml
+[services.docker]
+start = { task = "docker:start" }
+stop = { task = "docker:stop" }
+check = { task = "docker:check" }
+```
+
+Service actions can reference a task or run a command directly.
+
+```toml
+[services.postgres]
+start = { command = "pg_ctl start" }
+stop = { command = "pg_ctl stop" }
+check = { command = "pg_isready" }
+```
+
+## Service Commands
+
+```bash
+still services
+still services status docker
+still services start docker
+still services stop docker
+still services check docker
+```
+
+Rules:
+
+- A service must define at least `preset`, `task`, `start`, or `check`.
+- Built-in presets are intended for common services so users do not need to write every command.
+- Services are explicit in v0.1; Still does not auto-watch or restart stale services by default.
+- `sync` prepares tools, packages, apps, and lockfile state only. It does not start services.
+- Still does not store service process state in v0.1. `check` commands are the source of runtime health when requested.

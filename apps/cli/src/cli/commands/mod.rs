@@ -5,8 +5,8 @@ pub mod install;
 
 use crate::cli::args::{AgentsCommand, Cli, Command, ConfigCommand, ServicesCommand};
 use crate::cli::output::Output;
+use crate::cli::runtime::RuntimeOps;
 use clap::CommandFactory;
-use engine::runtime::RuntimeOps;
 
 /// Dispatches one parsed subcommand to its CLI handler.
 ///
@@ -519,7 +519,7 @@ mod tests {
     use super::*;
     use crate::cli::args::{ConfigArgs, ConfigCommand};
     use crate::cli::output::BufferedOutput;
-    use engine::runtime;
+    use crate::cli::runtime;
 
     struct FakeRuntime {
         config_check_result: Option<engine::error::Result<CheckConfigResult>>,

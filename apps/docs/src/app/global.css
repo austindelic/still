@@ -1,3 +1,146 @@
 @import "tailwindcss";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+
+:root {
+  --color-fd-background: #fbf1c7;
+  --color-fd-foreground: #282828;
+  --color-fd-muted: #f2e5bc;
+  --color-fd-muted-foreground: #665c54;
+  --color-fd-popover: #f9f5d7;
+  --color-fd-popover-foreground: #282828;
+  --color-fd-card: #f9f5d7;
+  --color-fd-card-foreground: #282828;
+  --color-fd-border: color-mix(in oklab, #7c6f64 42%, transparent);
+  --color-fd-primary: #79740e;
+  --color-fd-primary-foreground: #fbf1c7;
+  --color-fd-secondary: #ebdbb2;
+  --color-fd-secondary-foreground: #3c3836;
+  --color-fd-accent: color-mix(in oklab, #fabd2f 24%, transparent);
+  --color-fd-accent-foreground: #3c3836;
+  --color-fd-ring: #d79921;
+  --color-fd-overlay: rgb(40 40 40 / 0.28);
+  --color-fd-info: #458588;
+  --color-fd-warning: #d79921;
+  --color-fd-error: #cc241d;
+  --color-fd-success: #98971a;
+  --color-fd-idea: #b57614;
+}
+
+.dark {
+  --color-fd-background: #1d2021;
+  --color-fd-foreground: #fbf1c7;
+  --color-fd-muted: #282828;
+  --color-fd-muted-foreground: #a89984;
+  --color-fd-popover: #282828;
+  --color-fd-popover-foreground: #fbf1c7;
+  --color-fd-card: #282828;
+  --color-fd-card-foreground: #fbf1c7;
+  --color-fd-border: color-mix(in oklab, #665c54 58%, transparent);
+  --color-fd-primary: #fabd2f;
+  --color-fd-primary-foreground: #1d2021;
+  --color-fd-secondary: #32302f;
+  --color-fd-secondary-foreground: #ebdbb2;
+  --color-fd-accent: color-mix(in oklab, #fabd2f 20%, transparent);
+  --color-fd-accent-foreground: #fbf1c7;
+  --color-fd-ring: #fabd2f;
+  --color-fd-overlay: rgb(0 0 0 / 0.35);
+  --color-fd-info: #83a598;
+  --color-fd-warning: #fabd2f;
+  --color-fd-error: #fb4934;
+  --color-fd-success: #b8bb26;
+  --color-fd-idea: #fe8019;
+}
+
+body {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  background: var(--color-fd-background);
+  color: var(--color-fd-foreground);
+}
+
+::selection {
+  background: #fabd2f;
+  color: #1d2021;
+}
+
+.gb-grain {
+  position: relative;
+}
+
+.gb-grain::before {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  content: "";
+  opacity: 0.06;
+  background-image:
+    linear-gradient(90deg, rgba(251, 241, 199, 0.32) 1px, transparent 1px),
+    linear-gradient(rgba(251, 241, 199, 0.24) 1px, transparent 1px);
+  background-size: 4px 4px;
+  mix-blend-mode: overlay;
+}
+
+.gb-lines::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.16;
+  background-image: repeating-linear-gradient(
+    112deg,
+    transparent 0 34px,
+    rgba(131, 165, 152, 0.22) 35px,
+    transparent 37px
+  );
+}
+
+:where(a) {
+  text-underline-offset: 0.18em;
+}
+
+:where(code):not(pre code) {
+  border: 1px solid var(--color-fd-border);
+  background: var(--color-fd-muted);
+  color: var(--color-fd-primary);
+  padding: 0.1rem 0.32rem;
+}
+
+:where(pre) {
+  border: 1px solid var(--color-fd-border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, #282828 96%, transparent),
+    #1d2021
+  );
+  box-shadow: 0 24px 70px rgb(40 40 40 / 0.14);
+}
+
+.dark :where(pre) {
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.3);
+}
+
+:where(.shiki) {
+  background: transparent;
+}
+
+:where(table) {
+  overflow: hidden;
+  border: 1px solid var(--color-fd-border);
+}
+
+:where(th) {
+  background: var(--color-fd-muted);
+  color: var(--color-fd-foreground);
+}
+
+:where(td, th) {
+  border-color: var(--color-fd-border);
+}
+
+:where(blockquote) {
+  border-color: var(--color-fd-primary);
+  background: color-mix(in oklab, var(--color-fd-primary) 8%, transparent);
+}

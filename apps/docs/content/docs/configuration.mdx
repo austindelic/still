@@ -1,0 +1,174 @@
+---
+title: Configuration
+description: Complete still.toml reference for tools, env, packages, apps, services, tasks, and agents.
+icon: FileCog
+---
+
+`still.toml` is desired state. It is portable by default, with platform-specific differences expressed through filters, names, and backend selection.
+
+```toml
+[tools]
+node = "22"
+python = "3.12"
+go = "latest"
+
+[packages]
+latest = ["pandoc", "ripgrep", "jq", "ffmpeg"]
+
+[apps]
+latest = ["docker-desktop", "zed", "firefox"]
+```
+
+## Top-Level Sections
+
+| Section | Meaning |
+| --- | --- |
+| `[tools]` | Language runtimes, toolchains, and developer CLIs. |
+| `[env]` | Environment variables and env files used by run, task, services, and activation. |
+| `[packages]` | System packages, libraries, and command-line packages. |
+| `[apps]` | Desktop or platform applications. |
+| `[services]` | Long-running dependencies required while the project is active. |
+| `[tasks]` | Named commands and task graphs. |
+| `[agents]` | Agent targets, shared instructions, and skills. |
+
+## Tools
+
+A string value is shorthand for `{ version = "<value>" }`.
+
+```toml
+[tools]
+node = "22"
+python = "3.12"
+go = "latest"
+```
+
+Use expanded syntax for backend choice, Rust components, or toolchain targets.
+
+```toml
+[tools.rust]
+version = "stable"
+backend = "rustup"
+backends = { macos = "rustup", linux = "mise", windows = "rustup" }
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+```
+
+Rules:
+
+- Expanded tools must include `version`.
+- `backend` selects a provider family such as `rustup`, `npm`, `asdf`, `aqua`, or `auto`.
+- `backends` overrides `backend` for specific platforms.
+- `components` and `targets` are toolchain-specific extras.
+
+## Environment
+
+Scalar keys under `[env]` are variables. `files` lists env files loaded in order.
+
+```toml
+[env]
+RUST_LOG = "debug"
+NODE_ENV = "development"
+files = [".env", ".env.local"]
+```
+
+Rules:
+
+- Later values override earlier values.
+- Env file entries are required; missing files are errors.
+- Values are loaded literally after simple quote stripping.
+- Still does not perform shell expansion inside env values.
+- Loading env files is trust-sensitive because it imports project-defined process state.
+
+## Packages
+
+Use `latest` for portable latest-tracking package names.
+
+```toml
+[packages]
+latest = ["pandoc", "ripgrep", "fd", "jq", "ffmpeg"]
+postgresql = { version = "16", backend = "auto" }
+```
+
+Use expanded tables for versions, backends, platform names, and platform filters.
+
+```toml
+[packages.llvm]
+version = "18"
+backend = "auto"
+backends = { macos = "homebrew", linux = "apt", windows = "winget" }
+
+[packages.fd.names]
+macos = "fd"
+linux = "fd-find"
+windows = "fd"
+
+[packages.watchman]
+version = "latest"
+platforms = ["macos", "linux"]
+ignore = "windows"
+```
+
+Package fields:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Requested version, including `latest`. |
+| `backend` | Fallback backend for every platform. |
+| `backends` | Platform-specific backend map. |
+| `names` | Platform-specific package name map. |
+| `platforms` | Allow-list of supported platforms. |
+| `ignore` | One platform to exclude. |
+| `only` | One platform to include. |
+
+## Apps
+
+Apps use the same metadata shape as packages, but are modeled separately because install, linking, launcher, and uninstall behavior differs.
+
+```toml
+[apps]
+latest = ["docker-desktop", "zed", "firefox"]
+
+[apps.visual-studio-code]
+version = "latest"
+backend = "auto"
+```
+
+Default app backend direction:
+
+| Platform | Default app backend |
+| --- | --- |
+| macOS | `homebrew-cask` |
+| Linux | `flatpak` |
+| Windows | `winget` |
+
+Apps participate in install, sync, list, and uninstall. Activation is limited to shell and `PATH` setup; it does not launch apps.
+
+## Platform Filters
+
+Still normalizes `platforms`, `only`, and `ignore` into one filter before planning.
+
+```toml
+[packages.watchman]
+version = "latest"
+platforms = ["macos", "linux"]
+ignore = "windows"
+```
+
+Rules:
+
+- `platforms` is an allow-list.
+- `only` replaces the allow-list when present.
+- `ignore` is applied as a deny-list after the allow-list.
+- Valid platform identifiers are `macos`, `linux`, and `windows`.
+
+## Config Writes
+
+Commands that mutate desired state write to config explicitly and predictably.
+
+- Latest tools write as `name = "latest"` under `[tools]`.
+- Pinned or backend-specific tools write as `[tools.name]`.
+- Latest packages and apps from explicit multi-item flags can append to `[packages].latest` and `[apps].latest`.
+- Pinned or backend-specific packages and apps write as keyed entries.
+- Repeated entries are a no-op unless the requested version or backend changes.
+- Changed existing entries require `--force`.
+- Duplicate entries are not added.

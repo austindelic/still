@@ -1,0 +1,115 @@
+---
+title: Getting Started
+description: Initialize Still, install dependencies, run commands, and understand the default workflow.
+icon: Rocket
+---
+
+Still starts from `still.toml`. The file describes the project environment; commands reconcile the machine to that desired state.
+
+## Initialize A Project
+
+```bash
+still init
+```
+
+`still init` creates a starter `still.toml` in the current project and writes a matching project trust marker. Use `--force` only when replacing an existing config is intentional.
+
+```bash
+still init --force
+```
+
+Still finds project config by walking upward from the current directory until it finds the nearest `still.toml`.
+
+## Add Dependencies
+
+Use explicit groups so Still knows whether each item is a tool, package, or app.
+
+```bash
+still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
+```
+
+Short flags are available:
+
+```bash
+still install -t rust@stable@rustup -p ripgrep@latest@homebrew -a firefox@latest@homebrew-cask
+```
+
+Request syntax:
+
+| Syntax | Meaning |
+| --- | --- |
+| `name` | Install `name@latest` with backend selection set to `auto`. |
+| `name@version` | Pin the requested version. |
+| `name@version@backend` | Pin the version and backend. |
+| `name@latest@backend` | Track latest from a selected backend. |
+
+Install writes config only after all requested installs succeed. If one item fails, Still reports the failed item and leaves config unchanged.
+
+## Sync Existing Config
+
+```bash
+still sync
+```
+
+`sync` reads the selected config, resolves active desired state for the current platform, refreshes `still.lock.toml`, installs missing items, and reports drift.
+
+Use the global config explicitly when needed:
+
+```bash
+still sync --global
+```
+
+## Run Inside The Environment
+
+```bash
+still run cargo test
+still run -- node scripts/dev.mjs --port 5173
+```
+
+`run` prepares Still-managed `PATH` and environment variables, then returns the child command's exit code.
+
+## Use Tasks
+
+Tasks live in `[tasks]`.
+
+```toml
+[tasks]
+test = "cargo test"
+
+[tasks.lint]
+description = "Run lint checks"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets --all-features",
+]
+```
+
+Run a task:
+
+```bash
+still task lint
+```
+
+List tasks by omitting the name:
+
+```bash
+still task
+```
+
+## Activate A Shell
+
+```bash
+still activate --shell zsh
+```
+
+`activate` prints shell-specific activation code. The generated environment includes Still-managed binary paths and resolved variables from config.
+
+## Check Health
+
+```bash
+still config check
+still doctor
+still list --all
+```
+
+`config check` validates the selected config. `doctor` checks machine, cache, config, lockfile, trust, permission, and platform health. `list --all` includes inactive global/project entries and known installed items.

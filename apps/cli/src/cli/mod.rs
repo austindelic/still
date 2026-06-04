@@ -6,13 +6,15 @@ pub mod args;
 pub mod commands;
 /// Output abstractions used by real commands and tests.
 pub mod output;
+/// CLI-owned runtime adapter for host engine operations.
+pub mod runtime;
 use clap::Parser;
-use engine::runtime::RuntimeOps;
 
 use self::{
     args::Cli,
     commands::run_cli,
     output::{Output, StdOutput},
+    runtime::RuntimeOps,
 };
 
 /// Parses process arguments, dispatches the selected command, and exits on failure.
@@ -24,7 +26,7 @@ use self::{
 /// and output capture.
 pub fn entry() {
     let cli = Cli::parse();
-    let mut runtime = engine::runtime::get_runtime();
+    let mut runtime = runtime::get_runtime();
     let mut output = StdOutput;
     let code = run_parsed(cli, &mut runtime, &mut output);
 
@@ -130,7 +132,6 @@ mod tests {
         trust::TrustResult,
         uninstall::{UninstallResult, UninstallTarget},
     };
-    use engine::runtime;
 
     #[derive(Debug, Default)]
     struct FakeRuntime;

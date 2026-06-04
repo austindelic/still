@@ -2,9 +2,9 @@
 
 use crate::cli::args::InstallArgs;
 use crate::cli::output::Output;
+use crate::cli::runtime::{InstallRuntime, RecordedInstallRequest};
 use engine::actions::install::{InstallItemRequest, InstallRequest, InstallResult};
 use engine::registries::specs::tool::ToolSpec;
-use engine::runtime::{InstallRuntime, RecordedInstallRequest};
 use engine::specs::backend::infer_item_kind_from_backend;
 use engine::specs::item::{ItemKind, ItemSpec};
 

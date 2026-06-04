@@ -1,0 +1,61 @@
+---
+title: Trust And Safety
+description: What Still reads by default, what requires trust, and how executable project behavior is gated.
+icon: ShieldCheck
+---
+
+Still reads config by default, but project-defined executable behavior requires trust.
+
+## What Trust Gates
+
+Trust gates anything that can execute or import project-defined behavior:
+
+- tasks
+- services
+- agents and external skills
+- env files
+- project-defined commands that can execute arbitrary shell code
+
+Installing public packages from configured backends is not the same as running project-defined shell code. Platform package managers may run their own package metadata hooks; that behavior belongs to the selected backend.
+
+## Trust Marker
+
+```bash
+still trust
+```
+
+Trust is stored in a project-local `.still/trust.toml` marker scoped to the config path and content fingerprint.
+
+`still init` writes a Still-managed trust marker for the newly created config, because the user just created that file through Still.
+
+When config changes, the trust marker can become stale. Review the current `still.toml`, then run `still trust` again before running trust-sensitive behavior.
+
+## Safe Defaults
+
+Still's v0.1 safety rules:
+
+- It does not define or execute project-authored package post-install scripts.
+- CLI and TUI entry points route trust-sensitive behavior through engine actions.
+- The TUI does not add a separate trust review flow in v0.1.
+- If a TUI surface triggers a trust-sensitive engine action, the engine returns the same untrusted-config error the CLI would format.
+
+## Review Flow
+
+Use this sequence when entering an unfamiliar project:
+
+```bash
+still config check
+still doctor
+still list
+still trust
+```
+
+Then run project-defined behavior:
+
+```bash
+still task test
+still services check
+still agents check
+```
+
+If `doctor` reports a stale or missing trust marker, it will point at `still trust`.

@@ -1,13 +1,63 @@
 ---
-title: Hello World
-description: Your first document
+title: Still CLI
+description: A config-first project environment manager for tools, packages, apps, env, services, tasks, and agent setup.
+icon: Blocks
 ---
 
-Welcome to the docs! You can start writing documents in `/content/docs`.
+Still makes a project directory describe the environment it needs. Commit `still.toml`, run `still sync`, and the same desired state can be resolved on macOS, Linux, and Windows.
 
-## What is Next?
+```bash
+still init
+still install --tool jq ripgrep fd --package openssl llvm --app zed firefox
+still run cargo test
+still task lint
+```
+
+## What Still Manages
 
 <Cards>
-  <Card title="Learn more about Next.js" href="https://nextjs.org/docs" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.dev" />
+  <Card title="Tools" icon="Terminal" href="./configuration#tools">
+    Language runtimes, toolchains, and developer CLIs such as Node, Python, Go, Rust, pnpm, jq, and ripgrep.
+  </Card>
+  <Card title="Packages" icon="Package" href="./configuration#packages">
+    System packages, libraries, and command-line packages, resolved through platform-aware backends.
+  </Card>
+  <Card title="Apps" icon="Monitor" href="./configuration#apps">
+    Desktop or platform applications such as Docker Desktop, Zed, Firefox, and Visual Studio Code.
+  </Card>
+  <Card title="Tasks" icon="ListChecks" href="./tasks-and-services#tasks">
+    Named commands and dependency graphs that run inside the Still-managed environment.
+  </Card>
+  <Card title="Services" icon="Server" href="./tasks-and-services#services">
+    Long-running project dependencies that can be inspected, started, stopped, and checked.
+  </Card>
+  <Card title="Agents" icon="Bot" href="./agents">
+    AI-agent instructions, targets, and skills that can be materialized consistently across machines.
+  </Card>
+</Cards>
+
+## The Core Model
+
+Still has two durable files:
+
+- `still.toml` is desired state. Users edit it directly or let commands such as `still install` update it.
+- `still.lock.toml` records resolved state next to the selected config, including platform, backend, version, outputs, and executable links.
+
+Project config wins over global config for the active project. Global config lives at `~/.config/still/config.toml` and is selected explicitly with `--global`, or used by add-style commands when no project config exists.
+
+## First Places To Read
+
+<Cards>
+  <Card title="Getting Started" icon="Rocket" href="./getting-started">
+    Create a config, install dependencies, run commands, and activate the managed environment.
+  </Card>
+  <Card title="Command Reference" icon="SquareTerminal" href="./commands">
+    Learn what each top-level command does and which flags shape config scope.
+  </Card>
+  <Card title="Configuration Reference" icon="FileCog" href="./configuration">
+    See every supported `still.toml` section with TOML examples and rules.
+  </Card>
+  <Card title="Trust And Safety" icon="ShieldCheck" href="./trust-and-safety">
+    Understand when Still reads config, when it executes project-defined behavior, and how trust markers work.
+  </Card>
 </Cards>

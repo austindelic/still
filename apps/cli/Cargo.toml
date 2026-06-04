@@ -30,6 +30,7 @@ anyhow = { workspace = true }
 clap = { version = "4.5.53", features = ["derive"] }
 engine = { path = "crates/engine" }
 still_tui = { package = "still-tui", path = "crates/tui", optional = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 insta = "1.44.1"

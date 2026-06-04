@@ -1,0 +1,111 @@
+---
+title: Schema Reference
+description: How to use the Still JSON Schema and the example config while the engine parser remains authoritative.
+icon: Braces
+---
+
+The concept schema lives at `apps/cli/examples/still.schema.json`. The matching example config lives at `apps/cli/examples/still.toml`.
+
+Use the schema for editor assistance and for understanding the accepted config shape. The authoritative validation path is still:
+
+```bash
+still config check
+```
+
+## Schema URL
+
+The schema declares this identifier:
+
+```text
+https://still.dev/schemas/still.schema.json
+```
+
+You can add it to a config file for editor tooling:
+
+```toml
+#:schema https://still.dev/schemas/still.schema.json
+```
+
+If your editor does not support TOML schema comments, configure the file association in the editor settings instead.
+
+## Valid Top-Level Keys
+
+The schema allows these top-level sections and rejects unknown top-level keys:
+
+```toml
+[tools]
+[env]
+[packages]
+[apps]
+[services]
+[tasks]
+[agents]
+```
+
+## Common Field Shapes
+
+| Shape | Used by |
+| --- | --- |
+| string version shorthand | `[tools]` entries |
+| `latest = ["name"]` array | `[packages]` and `[apps]` |
+| platform lists | `platforms = ["macos", "linux", "windows"]` |
+| platform maps | `names` and `backends` |
+| string or expanded task | `[tasks]` entries |
+| string, task ref, or expanded service | `[services]` entries |
+| array or table skill list | `agents.skills` |
+
+## Minimal Config
+
+```toml
+[tools]
+node = "22"
+
+[tasks]
+test = "npm test"
+```
+
+## Full Example
+
+```toml
+[tools]
+node = "22"
+python = "3.12"
+go = "latest"
+
+[tools.rust]
+version = "stable"
+backend = "rustup"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+
+[env]
+RUST_LOG = "debug"
+NODE_ENV = "development"
+files = [".env", ".env.local"]
+
+[packages]
+latest = ["pandoc", "ripgrep", "jq", "ffmpeg"]
+postgresql = { version = "16", backend = "auto" }
+
+[apps]
+latest = ["docker-desktop", "zed", "firefox"]
+
+[tasks]
+test = "cargo test"
+fmt = "cargo fmt"
+dev = "cargo run"
+
+[agents]
+targets = ["claude", "codex"]
+instructions = "AGENTS.md"
+skills = ["rust-review", "repo-auditor"]
+```
+
+## Validation Notes
+
+- Platform values are restricted to `macos`, `linux`, and `windows`.
+- Agent targets are restricted to `claude` and `codex`.
+- Expanded tools require `version`.
+- Expanded tasks require `run`.
+- Expanded services require at least one of `preset`, `task`, `start`, or `check`.
+- Inline skill objects cannot specify both `source` and `url`.

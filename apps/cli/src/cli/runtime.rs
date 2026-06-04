@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::path::PathBuf;
 
-use crate::actions::{
+use engine::actions::{
     activate::{ActivateRequest, ActivateResult},
     agents::{AgentsOperation, AgentsRequest, AgentsResult},
     config::{CheckConfigRequest, CheckConfigResult},
@@ -19,14 +19,14 @@ use crate::actions::{
     trust::{TrustRequest, TrustResult},
     uninstall::{UninstallRequest, UninstallResult, UninstallTarget},
 };
-use crate::error::{EngineError, Result};
+use engine::error::{EngineError, Result};
 
 /// Runtime implementation for the target host platform.
-pub type Runtime = crate::system::System;
+pub type Runtime = engine::system::System;
 
 /// Constructs the runtime selected for this build target.
 pub fn get_runtime() -> Runtime {
-    crate::system::init_system()
+    engine::system::init_system()
 }
 
 /// Install request plus desired-state write scope.
@@ -152,7 +152,7 @@ impl<T> RuntimeOps for T where
 impl InstallRuntime for Runtime {
     fn install(&mut self, request: RecordedInstallRequest) -> Result<InstallResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::install::run_and_record(
+        block_on(engine::actions::install::run_and_record(
             InstallAndRecordRequest {
                 start_dir: context.start_dir,
                 home_dir: context.home_dir,
@@ -167,7 +167,7 @@ impl InstallRuntime for Runtime {
 impl ConfigRuntime for Runtime {
     fn config_check(&mut self, global: bool) -> Result<CheckConfigResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::config::check(CheckConfigRequest {
+        block_on(engine::actions::config::check(CheckConfigRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -177,7 +177,7 @@ impl ConfigRuntime for Runtime {
 
 impl InitRuntime for Runtime {
     fn init(&mut self, force: bool) -> Result<InitResult> {
-        block_on(crate::actions::init::run(InitRequest {
+        block_on(engine::actions::init::run(InitRequest {
             start_dir: current_dir()?,
             force,
         }))
@@ -187,7 +187,7 @@ impl InitRuntime for Runtime {
 impl EnvRuntime for Runtime {
     fn env(&mut self, global: bool) -> Result<EnvResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::env::inspect(EnvRequest {
+        block_on(engine::actions::env::inspect(EnvRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -198,7 +198,7 @@ impl EnvRuntime for Runtime {
 impl ListRuntime for Runtime {
     fn list(&mut self, all: bool, global: bool) -> Result<ListResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::list::inspect(ListRequest {
+        block_on(engine::actions::list::inspect(ListRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -210,7 +210,7 @@ impl ListRuntime for Runtime {
 impl AgentsRuntime for Runtime {
     fn agents(&mut self, operation: AgentsOperation, global: bool) -> Result<AgentsResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::agents::run(AgentsRequest {
+        block_on(engine::actions::agents::run(AgentsRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -222,7 +222,7 @@ impl AgentsRuntime for Runtime {
 impl RunRuntime for Runtime {
     fn run_command(&mut self, command: Vec<String>, global: bool) -> Result<RunResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::run::run(RunRequest {
+        block_on(engine::actions::run::run(RunRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -234,7 +234,7 @@ impl RunRuntime for Runtime {
 impl TaskRuntime for Runtime {
     fn task(&mut self, name: Option<String>, global: bool) -> Result<TaskResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::task::run(TaskRequest {
+        block_on(engine::actions::task::run(TaskRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -246,7 +246,7 @@ impl TaskRuntime for Runtime {
 impl ActivateRuntime for Runtime {
     fn activate(&mut self, shell: Option<String>, global: bool) -> Result<ActivateResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::activate::run(ActivateRequest {
+        block_on(engine::actions::activate::run(ActivateRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -258,7 +258,7 @@ impl ActivateRuntime for Runtime {
 impl DoctorRuntime for Runtime {
     fn doctor(&mut self) -> Result<DoctorResult> {
         let context = HostContext::resolve()?;
-        crate::actions::doctor::inspect(DoctorRequest {
+        engine::actions::doctor::inspect(DoctorRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
         })
@@ -268,7 +268,7 @@ impl DoctorRuntime for Runtime {
 impl SyncRuntime for Runtime {
     fn sync(&mut self, global: bool) -> Result<SyncResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::sync::run(SyncRequest {
+        block_on(engine::actions::sync::run(SyncRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -284,7 +284,7 @@ impl ServicesRuntime for Runtime {
         global: bool,
     ) -> Result<ServicesResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::services::run(ServicesRequest {
+        block_on(engine::actions::services::run(ServicesRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -297,7 +297,7 @@ impl ServicesRuntime for Runtime {
 impl TrustRuntime for Runtime {
     fn trust(&mut self) -> Result<TrustResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::trust::run(TrustRequest {
+        block_on(engine::actions::trust::run(TrustRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
         }))
@@ -307,7 +307,7 @@ impl TrustRuntime for Runtime {
 impl UninstallRuntime for Runtime {
     fn uninstall(&mut self, target: UninstallTarget, global: bool) -> Result<UninstallResult> {
         let context = HostContext::resolve()?;
-        block_on(crate::actions::uninstall::run(UninstallRequest {
+        block_on(engine::actions::uninstall::run(UninstallRequest {
             start_dir: context.start_dir,
             home_dir: context.home_dir,
             global,
@@ -336,11 +336,14 @@ fn current_dir() -> Result<PathBuf> {
 }
 
 fn home_dir() -> Result<PathBuf> {
-    dirs::home_dir().ok_or_else(|| EngineError::message("failed to find home directory"))
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| EngineError::message("failed to find home directory"))
 }
 
 fn block_on<T>(future: impl Future<Output = Result<T>>) -> Result<T> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|err| EngineError::message(format!("failed to create tokio runtime: {err}")))?;

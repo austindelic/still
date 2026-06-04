@@ -2217,6 +2217,7 @@ dependencies = [
  "engine",
  "insta",
  "still-tui",
+ "tokio",
 ]
 
 [[package]]
