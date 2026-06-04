@@ -6,6 +6,6 @@
     "configuration",
     "commands",
     "tasks-services",
-    "providers"
+    "sources"
   ]
 }

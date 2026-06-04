@@ -1,45 +1,44 @@
-# docs
+# Still Docs
 
-This is a Next.js application generated with
-[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
+`apps/docs` is the Next/Fumadocs documentation app for Still. It publishes the
+user-facing guide to the CLI, `still.toml`, commands, source selection, tasks,
+services, and trust behavior.
 
-Run development server:
+## Layout
+
+- `content/docs`: MDX documentation pages and docs navigation metadata.
+- `src/app/(home)`: docs app home routes.
+- `src/app/docs`: Fumadocs docs layout and route handling.
+- `src/app/llms-full.txt/route.ts`: generated LLM-friendly docs text endpoint.
+- `src/lib/source.ts`: Fumadocs content loader.
+- `src/lib/layout.shared.tsx`: shared Fumadocs layout configuration.
+
+## Commands
+
+Run from the repo root:
 
 ```bash
-npm run dev
-# or
-pnpm dev
-# or
-yarn dev
+bun run --filter docs dev
+bun run --filter docs check
+bun run --filter docs types:check
+bun run --filter docs build
 ```
 
-Open http://localhost:3000 with your browser to see the result.
+Run from `apps/docs` when working inside the package:
 
-## Explore
+```bash
+bun run dev
+bun run check
+bun run types:check
+bun run build
+```
 
-In the project, you can see:
+## Writing Guidance
 
-- `lib/source.ts`: Code for content source adapter, [`loader()`](https://fumadocs.dev/docs/headless/source-api) provides the interface to access your content.
-- `lib/layout.shared.tsx`: Shared options for layouts, optional but preferred to keep.
-
-| Route                     | Description                                            |
-| ------------------------- | ------------------------------------------------------ |
-| `app/(home)`              | The route group for your landing page and other pages. |
-| `app/docs`                | The documentation layout and pages.                    |
-| `app/api/search/route.ts` | The Route Handler for search.                          |
-
-### Fumadocs MDX
-
-A `source.config.ts` config file has been included, you can customise different options like frontmatter schema.
-
-Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
-
-## Learn More
-
-To learn more about Next.js and Fumadocs, take a look at the following
-resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
-  features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Fumadocs](https://fumadocs.dev) - learn about Fumadocs
+- Keep docs terminology aligned with `apps/cli/SPEC.md`: item kinds are tools,
+  packages, and apps; install sources are sources.
+- Keep current behavior and intended pre-1.0 direction clearly separated.
+- Prefer command examples that work with the current `still` binary name and
+  source syntax.
+- Update `content/docs/meta.json` whenever docs pages are renamed, added, or
+  removed.

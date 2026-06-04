@@ -401,8 +401,8 @@ apps = ["flatpak:org.mozilla.firefox"]
 - `activate`: print shell-specific activation code or instructions.
 - `trust`: mark project-defined executable behavior as trusted.
 
-Commands such as `translate`, `convert`, `web`, and `post-install` are not v0.1
-priorities unless they get a concrete product role.
+Experimental commands outside this list are not v0.1 priorities unless they get
+a concrete product role and documented behavior.
 
 ## Future-Proof Implementation Shape
 

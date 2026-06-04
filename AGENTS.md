@@ -24,12 +24,12 @@ Run JavaScript and TypeScript workspace commands from the repository root:
 
 Package-specific commands:
 
-- `bun --filter web run check`: Type-check the SvelteKit app.
-- `bun --filter web run lint`: Lint the SvelteKit app.
-- `bun --filter web run build`: Build the SvelteKit app.
-- `bun --filter docs run check`: Run Biome checks for docs.
-- `bun --filter docs run types:check`: Generate docs types and run TypeScript checks.
-- `bun --filter docs run build`: Build the docs app.
+- `bun run --filter web check`: Type-check the SvelteKit app.
+- `bun run --filter web lint`: Lint the SvelteKit app.
+- `bun run --filter web build`: Build the SvelteKit app.
+- `bun run --filter docs check`: Run Biome checks for docs.
+- `bun run --filter docs types:check`: Generate docs types and run TypeScript checks.
+- `bun run --filter docs build`: Build the docs app.
 
 Run Rust commands from `apps/cli`:
 
@@ -48,7 +48,7 @@ Run Rust commands from `apps/cli`:
 - Avoid changing lockfiles unless dependency changes require it.
 - Prefer existing workspace scripts and package-local commands over ad hoc commands.
 - Public product goals belong in README files. Agent-only implementation guidance belongs in AGENTS files.
-- For CLI backend/provider work, follow `apps/cli/AGENTS.md` and `apps/cli/crates/engine/AGENTS.md`.
+- For CLI source/resolver work, follow `apps/cli/AGENTS.md` and `apps/cli/crates/engine/AGENTS.md`.
 - Before adding, rewriting, or auditing code comments, read and follow `.agents/skills/code-comments/SKILL.md`. Use compact, caller-oriented docs and avoid comments that merely repeat what the code already says.
 
 ## Validation

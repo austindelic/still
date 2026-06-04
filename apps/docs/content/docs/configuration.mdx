@@ -3,13 +3,15 @@ title: Configuration
 description: The shape of `still.toml`, with current and preview sections called out.
 ---
 
-`still.toml` is the project file. It names the tools, packages, apps, services, tasks, and environment values a project expects.
+`still.toml` is desired state for a project. It names the tools, packages, apps,
+services, tasks, env values, and agent setup a project expects.
 
-The schema lives in `apps/cli/examples/still.schema.json`, and the longer example lives in `apps/cli/examples/still.toml`.
+The schema lives in `apps/cli/examples/still.schema.json`, and the longer
+example lives in `apps/cli/examples/still.toml`.
 
 ## Tools
 
-Tools are language runtimes or command-line tools that belong to the project environment.
+Tools are language runtimes, toolchains, and command-line developer tools.
 
 ```toml
 [tools]
@@ -19,29 +21,30 @@ go = "latest"
 
 [tools.rust]
 version = "stable"
-backend = "rustup"
+source = "rustup"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
 ```
 
-Short form is enough when Still can infer the backend. Expanded form gives the backend and any tool-specific options.
-
-Status: preview. The parser and schema describe the shape, while full environment activation is v1 work.
+Short form is enough for simple version pins. Expanded form adds the source and
+tool-specific options.
 
 ## Packages And Apps
 
-Packages are system-level command-line dependencies. Apps are desktop-style applications.
+Packages are system-level command-line dependencies. Apps are desktop or
+platform applications.
 
 ```toml
 [packages]
 latest = ["pandoc", "ripgrep", "fd", "jq"]
-postgresql = { version = "16", backend = "auto" }
+postgresql = { version = "16", source = "auto" }
 
 [apps]
 latest = ["docker-desktop", "zed", "firefox"]
+visual-studio-code = { source = "auto" }
 ```
 
-You can also give platform-specific names when ecosystems disagree.
+You can give platform-specific names when ecosystems disagree.
 
 ```toml
 [packages.fd.names]
@@ -50,7 +53,14 @@ linux = "fd-find"
 windows = "fd"
 ```
 
-Status: package install is the most developed path today. Apps and cross-platform selection are preview.
+You can also choose different sources per platform:
+
+```toml
+[packages.llvm]
+version = "18"
+source = "auto"
+sources = { macos = "homebrew", linux = "apt", windows = "winget" }
+```
 
 ## Environment
 
@@ -63,11 +73,12 @@ NODE_ENV = "development"
 files = [".env", ".env.local"]
 ```
 
-Status: preview. The schema is present; shell activation is still part of the v1 command work.
+Loading env files is trust-sensitive because env files can alter command
+behavior.
 
 ## Platform Filters
 
-Packages and apps can limit where they apply.
+Tools, packages, and apps can limit where they apply.
 
 ```toml
 [packages.watchman]
@@ -76,6 +87,15 @@ platforms = ["macos", "linux"]
 ignore = "windows"
 ```
 
-Use these fields when a dependency is useful on one platform and noisy or unavailable on another.
+Use these fields when a dependency is useful on one platform and noisy or
+unavailable on another.
 
-Status: preview.
+## Generated Files
+
+Still edits user-authored `still.toml` with comment/order preservation where
+practical. Still-owned generated files use typed TOML:
+
+- `still.lock.toml`
+- `.still/trust.toml`
+- install receipt markers
+- generated agent metadata
