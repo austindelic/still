@@ -1,4 +1,11 @@
 # Still
+             .    o8o  oooo  oooo
+           .o8    `"'  `888  `888
+ .oooo.o .o888oo oooo   888   888
+d88(  "8   888   `888   888   888
+`"Y88b.    888    888   888   888
+o.  )88b   888 .  888   888   888
+8""888P'   "888" o888o o888o o888o
 
 **Still is a config-first project environment manager for the whole machine
 state your project actually depends on.**
